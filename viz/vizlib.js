@@ -502,7 +502,10 @@
 
   // Ground: a base plane (plots and gardens), a faint grid in the formal register, landuse, then roads with a surface
   // (asphalt, concrete joints, setts, earth tracks) and markings. Surface detail is drawn only when it can be seen.
-  function drawGround(ctx, view, scene, th, reg) {
+  // The ground is painted in steps: a generator that yields between landuse polygons and roads, so a layer repaint can be spread over frames
+  // (see worldLayer). drawGround runs it to the end.
+  function drawGround(ctx, view, scene, th, reg) { for (const _ of drawGroundSteps(ctx, view, scene, th, reg)); }
+  function* drawGroundSteps(ctx, view, scene, th, reg) {
     const lod = view.scale >= 4, B = sceneBounds(scene), P = (x, y) => proj(view, x, y, 0);
     poly(ctx, [[B[0], B[1]], [B[2], B[1]], [B[2], B[3]], [B[0], B[3]]].map(p => P(p[0], p[1])), th.ground, null, 0);
     if (th.grid && view.scale >= 0.8) {
@@ -510,9 +513,12 @@
       for (let x = Math.ceil(B[0] / g) * g; x <= B[2]; x += g) { const a = P(x, B[1]), b = P(x, B[3]); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
       for (let y = Math.ceil(B[1] / g) * g; y <= B[3]; y += g) { const a = P(B[0], y), b = P(B[2], y); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
     }
+    yield;
+    let lu = 0;
     for (const l of scene.landuse) {
       const fill = l.kind === 'park' ? th.grass : (l.kind === 'garden' ? mixHex(th.grass, th.ground, 0.3) : (l.kind === 'water' ? th.water : th.plaza));
       poly(ctx, l.footprint.map(p => P(p[0], p[1])), fill, l.kind === 'garden' ? null : reg.ink, reg.lw * 0.5);
+      if ((++lu & 7) === 0) yield;
     }
     const cycleLane = th.reg === 'formal' ? A_().CARBON.blue[30] : mixHex(th.grass, '#4aa890', 0.5);
     for (const r of scene.roads) {
@@ -544,6 +550,7 @@
         if (cls.tram) for (const o of [-2.2, 2.2]) line(ax + nx * o, ay + ny * o, bx + nx * o, by + ny * o, th.rail, Math.max(1, view.scale * 0.2));
         if (cls.cycle && !isTrack && hr >= 3) for (const o of [-hr + 1.2, hr - 1.2]) line(ax + nx * o, ay + ny * o, bx + nx * o, by + ny * o, cycleLane, Math.max(1, view.scale * 0.5));
       }
+      yield;
     }
     // square paving: a light grid over each square
     ctx.save(); ctx.globalAlpha = 0.7; ctx.strokeStyle = th.kerb; ctx.lineWidth = 1;
@@ -708,10 +715,12 @@
     const heightOfEntity = e => e.params ? A_().buildingHeight(e.kind, e.params.N) : e.levels * (LIB.buildings[e.kind] || LIB.buildings.terrace).storeyH;
     // The ground and the building shadows do not change between frames. They are drawn once into a cached layer that is bigger than the
     // screen and anchored to the world, so panning only moves a window over it (see worldLayer).
-    const drawStatic = (c, v) => {
+    const drawStaticSteps = function* (c, v) {
       c.fillStyle = pal.bg; c.fillRect(0, 0, v.w, v.h); c.lineJoin = 'round';
-      drawGround(c, v, sim.scene, pal, reg);
+      yield* drawGroundSteps(c, v, sim.scene, pal, reg);
+      let nb = 0;
       if (layers.buildings) for (const e of sim.buildings) {
+        if ((++nb & 31) === 0) yield;
         const b = e.src, H = heightOfEntity(e), q = proj(v, b.footprint[0][0], b.footprint[0][1], 0);
         if (q[0] < -v.w * 0.5 - H * v.scale || q[0] > v.w * 1.5 + H * v.scale || q[1] < -v.h * 0.5 - H * v.scale || q[1] > v.h * 1.5 + H * v.scale) continue;
         if (detail && v.scale >= 0.6) {                // soft contact shadow: a longer, fainter cast shadow, then three stepped rings around the footprint
@@ -724,9 +733,10 @@
         }
       }
     };
+    const drawStatic = (c, v) => { for (const _ of drawStaticSteps(c, v)); };
     const F = A.sprites.factory, gkey = [view.w, view.h, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings, detail, A.sprites.ink, A.sprites.posterize].join('|');
     const settled = zs.stillView >= 3, zooming = zs.still < 2;
-    if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg);
+    if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg, drawStaticSteps);
     else drawStatic(ctx, view);
     // What can be seen at a view: buildings and trees (and the fountain) that reach it, and the agents. Anything whose screen bounds
     // miss the canvas is skipped (viewport culling).
@@ -757,14 +767,13 @@
       }
       return out;
     };
-    const drawItems = (target, list, v) => {
-      for (const it of list) {
-        if (it.kind === 'b') drawBuildingEntity(target, v, reg, pal, shadow, sim, it.o);
-        else if (it.kind === 'fountain') drawFountain(target, v, pal, reg, it.o[0], it.o[1]);
-        else if (it.kind === 't') drawTreeEntity(target, v, sim, it.o, pal, reg, shadow);
-        else drawAgent(target, v, reg, shadow, sim, it.o, it.pose, layers);
-      }
+    const drawItem = (target, it, v) => {
+      if (it.kind === 'b') drawBuildingEntity(target, v, reg, pal, shadow, sim, it.o);
+      else if (it.kind === 'fountain') drawFountain(target, v, pal, reg, it.o[0], it.o[1]);
+      else if (it.kind === 't') drawTreeEntity(target, v, sim, it.o, pal, reg, shadow);
+      else drawAgent(target, v, reg, shadow, sim, it.o, it.pose, layers);
     };
+    const drawItems = (target, list, v) => { for (const it of list) drawItem(target, it, v); };
     const byDepth = (p, q) => p.d - q.d;
     // Zoomed far out nothing in the buildings and trees changes from frame to frame, so they are drawn once into a world-anchored layer
     // and blitted; only vehicles (dots at this zoom) are drawn on top. The layer is redrawn when the scale, the theme or any building's
@@ -773,10 +782,15 @@
     const far = view.scale < 1.0 && F && sim.opts.cacheGround !== false && !sim.bindings.length && !sim.buildingStyle;
     if (far) {
       let h = 0; for (const e of sim.buildings) h = (h * 31 + (e.state ? e.state.charCodeAt(0) : 0) * 2 + (e.investor ? 1 : 0)) | 0;
-      worldLayer(ctx, sim, '_far', view, gkey + '|' + h + '|' + layers.trees + '|' + (A.sprites.exact ? 1 : 0), settled, zooming, (c, v) => { c.lineJoin = 'round'; drawItems(c, collectStatic(v, []).sort(byDepth), v); });
-      const agents = collectAgents([]).sort(byDepth);
-      drawItems(ctx, agents, view);
-      return;
+      // painted in slices (a yield every 16 items); until it is ready the buildings are drawn directly below. The sprite exact flag is not part of the
+      // key: it flipped when the view settled and repainted the whole layer a second time for nothing.
+      const farSteps = function* (c, v) { c.lineJoin = 'round'; let n = 0; for (const it of collectStatic(v, []).sort(byDepth)) { drawItem(c, it, v); if ((++n & 15) === 0) yield; } };
+      const drew = worldLayer(ctx, sim, '_far', view, gkey + '|' + h + '|' + layers.trees, settled, zooming, (c, v) => { for (const _ of farSteps(c, v)); }, null, farSteps, true);
+      if (drew) {
+        const agents = collectAgents([]).sort(byDepth);
+        drawItems(ctx, agents, view);
+        return;
+      }
     }
     // items sorted back to front
     let items = collectAgents(collectStatic(view, [])).sort(byDepth);
@@ -795,19 +809,50 @@
   // skey describes everything but the scale. paint(ctx, v) draws the layer for the enlarged view v. bg, if given, is filled first when
   // the scaled layer does not cover the screen.
   const LAYER_MARGIN = 0.4;
-  function worldLayer(ctx, sim, slot, view, skey, settled, zooming, paint, bg) {
+  // The old layer drawn scaled to the current view (a zoom, or a repaint still in progress). Only the part that lands on the screen is resampled.
+  function blitScaled(ctx, view, L, q, bg) {
+    const r = view.scale / L.scale;
+    if (bg) { ctx.fillStyle = bg; ctx.fillRect(0, 0, view.w, view.h); }
+    // u is a layer position in css pixels, x a screen position
+    const cw = L.cv.width / q, ch = L.cv.height / q;
+    let u0 = (0 - view.ox) / r + L.mw + L.ox, u1 = (view.w - view.ox) / r + L.mw + L.ox, v0 = (0 - view.oy) / r + L.mh + L.oy, v1 = (view.h - view.oy) / r + L.mh + L.oy;
+    u0 = Math.max(0, u0); v0 = Math.max(0, v0); u1 = Math.min(cw, u1); v1 = Math.min(ch, v1);
+    if (u1 > u0 && v1 > v0) ctx.drawImage(L.cv, u0 * q, v0 * q, (u1 - u0) * q, (v1 - v0) * q, view.ox + (u0 - L.mw - L.ox) * r, view.oy + (v0 - L.mh - L.oy) * r, (u1 - u0) * r, (v1 - v0) * r);
+  }
+  const LAYER_STAND_IN = [0.15, 8];                  // the old layer, scaled, may stand in for a new one this far either way: no blurrier than the zoom just before it
+  const LAYER_MS = 6;                                // wall time a frame may spend painting a layer in slices
+  const layerClock = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  // Returns true when it drew the layer. With steps and softStart, a layer that does not exist yet is started in slices and false is returned, so the
+  // caller draws the frame another way until it is ready.
+  function worldLayer(ctx, sim, slot, view, skey, settled, zooming, paint, bg, steps, softStart) {
     const A = A_(), q = A.sprites.dpr || 1, sc = view.scale.toFixed(4);
     let L = sim[slot], sx = 0, sy = 0;
     if (L && L.skey === skey && L.sc !== sc && zooming) {
       const r = view.scale / L.scale;
-      if (r > 0.5 && r < 2) {
-        if (bg) { ctx.fillStyle = bg; ctx.fillRect(0, 0, view.w, view.h); }
-        // only the part of the layer that lands on the screen is resampled: u is a layer position in css pixels, x a screen position
-        const cw = L.cv.width / q, ch = L.cv.height / q;
-        let u0 = (0 - view.ox) / r + L.mw + L.ox, u1 = (view.w - view.ox) / r + L.mw + L.ox, v0 = (0 - view.oy) / r + L.mh + L.oy, v1 = (view.h - view.oy) / r + L.mh + L.oy;
-        u0 = Math.max(0, u0); v0 = Math.max(0, v0); u1 = Math.min(cw, u1); v1 = Math.min(ch, v1);
-        if (u1 > u0 && v1 > v0) ctx.drawImage(L.cv, u0 * q, v0 * q, (u1 - u0) * q, (v1 - v0) * q, view.ox + (u0 - L.mw - L.ox) * r, view.oy + (v0 - L.mh - L.oy) * r, (u1 - u0) * r, (v1 - v0) * r);
-        return;
+      if (r > LAYER_STAND_IN[0] && r < LAYER_STAND_IN[1]) { blitScaled(ctx, view, L, q, bg); return true; }
+    }
+    // The layer is out of date and the zoom has stopped (the scale or the key has changed), or it does not exist and softStart is set: the new one is
+    // painted a slice per frame into a second canvas while the old one, scaled, keeps the picture on screen, and is swapped in when it is whole.
+    // (Painting it in one go cost 35 to 50 ms for the ground, and 275 ms for the far layer, in a browser.) The old layer stands in only within
+    // LAYER_STAND_IN. Otherwise, and for a pan past the margin, it is painted at once as before.
+    const outOfDate = L && ((L.skey === skey && L.sc !== sc) || (L.skey !== skey && L.sc === sc));
+    if (steps && sim.opts.sliceLayers !== false && (outOfDate || (!L && softStart))) {
+      const r = L ? view.scale / L.scale : 1;
+      if (!L || (r > LAYER_STAND_IN[0] && r < LAYER_STAND_IN[1])) {
+        let p = sim[slot + 'P'];
+        if (!p || p.sc !== sc || p.skey !== skey) {
+          const mw = Math.ceil(view.w * LAYER_MARGIN), mh = Math.ceil(view.h * LAYER_MARGIN);
+          const cv = A.sprites.factory(Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d'); c.scale(q, q);
+          p = sim[slot + 'P'] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh, gen: steps(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh }), done: false };
+        }
+        const budget = sim.opts.layerMs === undefined ? LAYER_MS : sim.opts.layerMs, t0 = layerClock();
+        do { if (p.gen.next().done) { p.done = true; break; } } while (layerClock() - t0 < budget);
+        if (p.done) {
+          if (A.sprites.posterize) A.quantise(p.cv, A.sprites.posterize);
+          L = sim[slot] = { skey, sc, scale: p.scale, cv: p.cv, ox: p.ox, oy: p.oy, mw: p.mw, mh: p.mh }; sim[slot + 'P'] = null;
+          sim.layerRepaints = (sim.layerRepaints || 0) + 1;
+        } else if (L) { blitScaled(ctx, view, L, q, bg); return true; }
+        else return false;
       }
     }
     if (L && L.skey === skey && L.sc === sc) {
@@ -826,6 +871,7 @@
       sim.layerRepaints = (sim.layerRepaints || 0) + 1;
     }
     ctx.drawImage(L.cv, sx, sy, Math.ceil(view.w * q), Math.ceil(view.h * q), 0, 0, view.w, view.h);
+    return true;
   }
 
   // A building: an asset sprite when its footprint fits a slot, otherwise the generic extrusion.

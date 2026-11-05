@@ -42,8 +42,8 @@ test('once the scale has been still for the settle time a real frame is drawn an
 test('a zoom beyond the stretch limits draws for real and becomes the new base', () => {
   const { z } = mk(); frame(z, view(1), 0);
   assert.strictEqual(frame(z, view(1.5), 16), false);
-  assert.strictEqual(frame(z, view(4.4), 32), true, 'more than 4 times: drawn');
-  assert.strictEqual(frame(z, view(5), 48), false, 'stretching from the new base');
+  assert.strictEqual(frame(z, view(8.8), 32), true, 'more than 8 times: drawn');
+  assert.strictEqual(frame(z, view(10), 48), false, 'stretching from the new base');
   assert.strictEqual(frame(z, view(1.2), 64), true, 'below 0.3 times of the base: drawn');
 });
 test('a change of size, or reset, draws for real', () => {

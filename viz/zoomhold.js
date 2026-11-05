@@ -3,7 +3,7 @@
  * While the wheel (or a key, a slider or a pinch) is changing the scale, the canvas that is already drawn is moved and scaled with a CSS transform,
  * which the browser applies on the GPU with no JavaScript and no raster work, whatever the scene size. Nothing is redrawn until the scale has been
  * still for settleMs (a wheel sends events a few frames apart, so a pause of a frame or two is not the end of a zoom), and then one real frame is drawn
- * and the transform is cleared. A zoom that stretches the picture beyond 0.3 to 4 times (minRatio, maxRatio) is drawn for real and becomes the new base.
+ * and the transform is cleared. A zoom that stretches the picture beyond 0.3 to 8 times (minRatio, maxRatio) is drawn for real and becomes the new base.
  * People and vehicles hold still for the length of a zoom.
  *
  *   const hold = ZoomHold.create(canvas, { settleMs: 120 });
@@ -16,7 +16,7 @@
 (function (root) {
   'use strict';
   function create(el, opts) {
-    opts = Object.assign({ settleMs: 120, minRatio: 0.3, maxRatio: 4 }, opts || {});
+    opts = Object.assign({ settleMs: 120, minRatio: 0.3, maxRatio: 8 }, opts || {});
     let drawn = null, prevScale = NaN, lastChange = -Infinity;
     const clear = () => { el.style.transform = 'none'; };
     return {
