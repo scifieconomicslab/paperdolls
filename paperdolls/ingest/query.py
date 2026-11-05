@@ -1,5 +1,4 @@
-"""Overpass QL for an extract the ingest can read. The sandbox this was built in cannot reach Overpass, so the query was
-written from the Overpass QL documentation and has NOT been run against the live service: run it and report any error."""
+"""Overpass QL for an extract the ingest can read. The bounding-box form has been run against the live service once (2026-11-05) and worked; the relation form has not, so run it and report any error."""
 
 LEISURE = "park|garden|playground|pitch|recreation_ground|nature_reserve|common|dog_park"
 LANDUSE = "grass|meadow|forest|orchard|cemetery|recreation_ground|village_green|allotments|reservoir|basin|plaza|flowerbed"

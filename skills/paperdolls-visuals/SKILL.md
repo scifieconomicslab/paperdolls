@@ -64,7 +64,7 @@ Report the file size and say which parts are invented. Another model file must f
 4. If the estimated asset share is low (many street grids, curved streets), tell the user plainly. The rest are drawn as plain extrusions and counted.
 5. `paperdolls viewer render.yaml` writes one HTML file. Open it with the user. Drag or A and D pan, the wheel or W and S zoom, and Fit shows the whole scene.
 
-The ingest has only been run on a synthetic extract. The Overpass query and fetch client have not been run against the live service. Say so, and ask the user to read the report before trusting the scene.
+The ingest has had one live run: a bounding box in Jette, Brussels, which gave 2,162 buildings of which only 28% fit an asset. Relation queries and other cities have not been run live. Say so, and ask the user to read the report before trusting the scene.
 
 OpenStreetMap data is ODbL. Carry "© OpenStreetMap contributors" with any picture, and check the share-alike terms before publishing a scene file, which is a derived database. This is not legal advice.
 

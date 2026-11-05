@@ -1,6 +1,6 @@
 """Fetch an extract from an Overpass endpoint. Standard library only.
 
-NOT TESTED against the live Overpass service: the sandbox this was built in has no access to it. The client was tested against a
+Run once against the live Overpass service (a bounding-box query, 2026-11-05) and it worked. It was otherwise tested against a
 local stand-in server (request format, headers, error handling). If the live service answers in a way this does not expect,
 the raw response is kept so the failure can be read."""
 import json

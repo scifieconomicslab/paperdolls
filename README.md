@@ -96,7 +96,7 @@ Nothing is defaulted quietly. Storeys taken from a building type, an archetype t
 - The 36 palettes (three looks in each of twelve regions) are proposals chosen by eye.
 - Facade rules, fleets, tree mixes and drive sides are proposals too.
 - Layout, people and vehicles are invented.
-- The OpenStreetMap ingest has run only on a synthetic extract. The Overpass query and fetch client have not been run against the live service.
+- The OpenStreetMap ingest has had one live run (a bounding box in Jette, Brussels: 2,162 buildings, 28% of them fit an asset). Relation queries and other cities have not been run live.
 
 The full list of open problems, including the Great Retrofit model's, is in [docs/known-issues.md](docs/known-issues.md).
 
