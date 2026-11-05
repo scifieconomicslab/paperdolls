@@ -151,18 +151,34 @@ What made this fast, in order of effect:
 2. **Unique tone per building defeated the cache.** Tones now come in five steps (this one cost 6 s per frame on 12,500 buildings).
 3. **Static layers.** Ground, road surfaces and building shadows are drawn once per view and theme; below 1 px per metre buildings and trees are a cached layer too, people are skipped and vehicles are dots. A road spatial index keeps footprint fitting fast.
 
-### Is occlusion culling worth it? Measured: no, not yet
+### Occlusion culling: built, correct, and not faster (opt-in)
 
-The idea: most of a building is hidden behind another, so do not draw what the viewer cannot see. `viz/occlusion_probe.js` tests it. It paints every item as a flat unique colour in painter order and counts the pixels each item keeps, then times the real renderer drawing everything against drawing only the items that keep a pixel. That second time is the best any culling could achieve, because it assumes the visibility test costs nothing.
+Most of a building is hidden behind another, so skip what the viewer cannot see. `sim.opts.occlusion = true` turns this on. It is off by default, because on every scene measured it costs more time than it saves.
 
-| scene | px/m | items in view | fully hidden | upper bound on time saved |
-|---|---|---|---|---|
-| placeholder (dense rows, towers) | 1.7 to 8 | 1,048 to 41 | 10% to 0% (3% of buildings) | 1% to 10% |
-| every building made 4 to 8 storeys (worst case) | 1.7 to 5 | 620 to 58 | 19% to 16% | 2% to 10% |
+How it works. Items are already sorted back to front. The culling pass walks that list front to back with a coverage grid (one byte per 4 by 4 block of device pixels). An item is skipped when every pixel its sprite and its ground shadow can touch lies in blocks already covered by fully opaque pixels of nearer buildings. A surviving building then records a few opaque rectangles taken from its cached sprite (`AssetLib.spritePlacement` gives the mask and where the blit lands). The test only trusts alpha 255, widens the touched area by a pixel, and rounds covered blocks inward, so a skipped item could not have changed a pixel.
 
-Why so little: the camera is at about 40 degrees, so a building hides only a strip about 1.2 times its height behind it. Fully hidden items are mostly people and trees, which are small and cheap; very few buildings are fully hidden. The pixels drawn are about 1.8 to 2.2 times the pixels that end up visible, but that is mostly partial overlap (an item half covered), which skipping whole items cannot remove. A real visibility test costs time too, so the net gain would be smaller than the bound. Do not build it for scenes like these.
+Where it does nothing. It needs sprites cached at the view's exact scale (the same condition as `AssetLib.sprites.exact`), so it is off while the view moves. It skips any item whose sprite or colours may be stale this frame (a state change, a data binding, a custom building style), people below 1.6 px per metre, vehicles below 0.9, and riders. It runs only with at least 300 items in view (`sim.opts.occlusionMin`).
 
-Revisit if a real place changes the picture: run `node viz/occlusion_probe.js scene.json` on the actual scene (set `TALL=1` for the worst case). A fully hidden share above about 30% of the drawn time, in the views people actually use, would justify an occlusion mask. Dense tower districts could do that; low-rise Jette almost certainly will not.
+`viz/test_assets.js` checks that the frame is identical pixel for pixel with and without it, on a scene made of 4 to 8 storey buildings, at two zooms, and that hidden items are skipped.
+
+`node viz/occlusion_bench.js [scene.json]` times it (median of 21 identical frames, the variants interleaved, 1200 by 700 canvas, node-canvas):
+
+| scene | px/m | items in view | skipped | occlusion off | occlusion on |
+|---|---|---|---|---|---|
+| placeholder, 1,023 buildings | 1.2 | 1,723 | 16 | 13.7 ms | 16.0 ms |
+| | 1.7 | 1,217 | 55 | 10.3 ms | 12.5 ms |
+| | 3 | 515 | 72 | 5.1 ms | 6.7 ms |
+| placeholder, every building 4 to 8 storeys | 1.2 | 1,723 | 16 | 16.8 ms | 19.1 ms |
+| | 1.7 | 1,228 | 57 | 12.3 ms | 14.6 ms |
+| | 3 | 524 | 71 | 5.4 ms | 7.2 ms |
+| synthetic, 12,500 buildings | 1.2 | 1,470 | 63 | 13.0 ms | 15.0 ms |
+| | 1.7 | 772 | 62 | 12.3 ms | 13.9 ms |
+
+At 5 px per metre and closer, fewer than 300 items are in view and it does not run.
+
+Why it does not pay. A cached sprite is one `drawImage`, about 10 microseconds. Skipping 60 items saves well under a millisecond, and the coverage test and bookkeeping cost more than that. The earlier measurement (`viz/occlusion_probe.js`) predicted this: the camera is at about 40 degrees, so a building hides only a strip behind it, and the items that are fully hidden are mostly trees and people. A first version that recorded every opaque run per row, not rectangles, was 70 to 235% slower; the coarse grid brought that down to 13 to 34%, and the remaining cost is the test itself plus looking up each item's sprite.
+
+Where it could pay: a scene where drawing an item is much more expensive than a blit (large vector extrusions that are not sprites, or a software canvas that is slow at blits), or where most of the screen is covered by tall buildings. Run `node viz/occlusion_bench.js scene.json` on the real scene before turning it on.
 
 ### Large scenes
 

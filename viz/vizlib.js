@@ -559,9 +559,88 @@
     return (cx / b.footprint.length + cy / b.footprint.length);
   }
 
+  // ---------- occlusion culling ----------
+  // Items are drawn back to front, so an item is wasted work when later items cover every pixel it would change. This walks the sorted
+  // list front to back with a one byte per pixel coverage grid. An item is skipped when every pixel its sprite (and ground shadow)
+  // can touch is already covered by fully opaque pixels of nearer buildings. Survivors that are buildings then add their own opaque
+  // pixels. The test is conservative (alpha 255 only, the touched area widened by a pixel), so the picture is the same pixel for pixel.
+  // It needs sprites cached at the view's exact scale, so it does nothing until the view has held still, and it skips any item whose
+  // sprite or colours may be stale this frame (a state change, a binding, a custom style). Opt in with sim.opts.occlusion = true.
+  // The coverage grid has one byte per CELL x CELL block of device pixels. A cell is set only when opaque pixels cover all of it.
+  const CELL = 4;
+  function rectCovered(g, GW, GH, x0, y0, x1, y1) {
+    const cx0 = Math.max(0, Math.floor(x0 / CELL)), cy0 = Math.max(0, Math.floor(y0 / CELL)), cx1 = Math.min(GW - 1, Math.floor(x1 / CELL)), cy1 = Math.min(GH - 1, Math.floor(y1 / CELL));
+    for (let y = cy0; y <= cy1; y++) for (let i = y * GW + cx0, e = y * GW + cx1; i <= e; i++) if (!g[i]) return false;
+    return true;
+  }
+  function rowCovered(g, GW, GH, m, X, Y, r) {
+    const gy = Y + r, lo = m.t0[r]; if (lo < 0 || gy < 0) return true;
+    const cy = Math.floor(gy / CELL); if (cy >= GH) return true;
+    const xa = Math.max(0, Math.floor((X + lo) / CELL)), xb = Math.min(GW - 1, Math.floor((X + m.t1[r]) / CELL));
+    for (let i = cy * GW + xa, e = cy * GW + xb; i <= e; i++) if (!g[i]) return false;
+    return true;
+  }
+  function maskCovered(g, GW, GH, m, X, Y) {
+    if (m.ry1 < 0) return true;                                        // nothing is drawn at all
+    if (!rowCovered(g, GW, GH, m, X, Y, (m.ry0 + m.ry1) >> 1)) return false;   // a visible item usually fails on its middle row
+    for (let r = m.ry0; r <= m.ry1; r++) if (!rowCovered(g, GW, GH, m, X, Y, r)) return false;
+    return true;
+  }
+  function markSolid(g, GW, GH, m, X, Y) {
+    const r = m.rects;
+    for (let k = 0; k < r.length; k += 4) {
+      const cx0 = Math.max(0, Math.ceil((X + r[k]) / CELL)), cx1 = Math.min(GW, Math.floor((X + r[k + 2]) / CELL));
+      const cy0 = Math.max(0, Math.ceil((Y + r[k + 1]) / CELL)), cy1 = Math.min(GH, Math.floor((Y + r[k + 3]) / CELL));
+      if (cx1 <= cx0) continue;
+      for (let cy = cy0; cy < cy1; cy++) g.fill(1, cy * GW + cx0, cy * GW + cx1);
+    }
+  }
+  function cullHidden(items, sim, view, layers, pal) {
+    const A = A_(), q = A.sprites.dpr || 1, W = Math.ceil(Math.ceil(view.w * q) / CELL), H = Math.ceil(Math.ceil(view.h * q) / CELL);
+    const areg = A.REG[pal.reg] || A.REG.colorfigures, sareg = A.REG[sim.opts.register] || A.REG.colorfigures;
+    let g = sim._occ; if (!g || g.length !== W * H) g = sim._occ = new Uint8Array(W * H); else g.fill(0);
+    const plain = !sim.buildingStyle && !sim.bindings.length;             // with a style or a binding, colours and overlays may be stale
+    const keep = new Array(items.length); let culled = 0, tested = 0;
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i]; let place = null, shadow = null;
+      if (it.kind === 'b') {
+        const e = it.o;
+        if (plain && e._asset && e._fast && e._th === pal && e._st === e.state && e._inv === e.investor && e._cols) {
+          const p = proj(view, e.fit.cx, e.fit.cy, 0); place = A.spritePlacement(e._asset, e._cols, areg, p[0], p[1], view.scale);
+        }
+      } else if (it.kind === 't') {
+        const e = it.o;
+        if (plain && e._asset && e._cols && e._ck === pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + e.kind + '|' + null) {
+          const p = proj(view, e.x, e.y, 0); place = A.spritePlacement(e._asset, e._cols, areg, p[0], p[1], view.scale);
+          if (place) { const bb = e._asset.bbox, w = (bb.maxX - bb.minX) * view.scale, rx = Math.max(2, w * 0.36), ry = Math.max(1, w * 0.13); shadow = [(p[0] - rx - 1) * q, (p[1] - ry - 1) * q, (p[0] + rx + 1) * q, (p[1] + ry + 1) * q]; }
+        }
+      } else if (it.kind === 'a') {
+        const a = it.o;
+        if (plain && !a.rider && (a.group === 'people' ? view.scale >= 1.6 : view.scale >= 0.9)) {
+          const h = A.snapHeading(it.pose.heading), p = proj(view, it.pose.x, it.pose.y, 0), sc = view.scale * (a.group === 'people' ? A.STYLE.person : A.STYLE.vehicle);
+          const asset = a.group === 'vehicles' ? A.getAsset('vehicles', a.kind, h) : A.getAsset('people', a.kind, h, A.flagsOf(a.outfits));
+          const cols = agentColours(sim, a, sareg);
+          place = A.spritePlacement(asset, cols, sareg, p[0], p[1], sc);
+          if (place) { const bb = asset.bbox, w = (bb.maxX - bb.minX) * sc, rx = Math.max(2, w * 0.42), ry = Math.max(1, w * 0.15); shadow = [(p[0] - rx - 1) * q, (p[1] - ry - 1) * q, (p[0] + rx + 1) * q, (p[1] + ry + 1) * q]; }
+        }
+      }
+      if (place) {
+        tested++;
+        if (maskCovered(g, W, H, place.mask, place.x, place.y) && (!shadow || rectCovered(g, W, H, shadow[0], shadow[1], shadow[2], shadow[3]))) { culled++; continue; }
+        if (it.kind === 'b') markSolid(g, W, H, place.mask, place.x, place.y);
+      }
+      keep[i] = true;
+    }
+    sim.occlusionStats = { tested, culled, items: items.length };
+    if (!culled) return items;
+    const out = []; for (let i = 0; i < items.length; i++) if (keep[i]) out.push(items[i]);
+    return out;
+  }
+
   // At most SPRITE_BUILDS_PER_FRAME sprites are rebuilt at the exact scale in one frame, so a settled view sharpens over a few frames
   // instead of stalling on one.
   const SPRITE_BUILDS_PER_FRAME = 150;
+  const OCCLUSION_MIN_ITEMS = 300;
   function renderFrame(ctx, sim, view, layers) {
     const A = A_(); A.sprites.builds = 0; A.sprites.maxBuilds = SPRITE_BUILDS_PER_FRAME;
     try { return renderFrameInner(ctx, sim, view, layers); } finally { A.sprites.maxBuilds = Infinity; }
@@ -594,7 +673,7 @@
       ctx.drawImage(sim._ground.cv, 0, 0, view.w, view.h);
     } else drawStatic(ctx);
     // items sorted back to front
-    const items = [];
+    let items = [];
     // viewport culling: skip anything whose screen bounds miss the canvas (cheap, and it is most of the scene)
     const pad = view.scale * 12;
     const onScreen = (x, y, z) => { const p = proj(view, x, y, z || 0); return p[0] > -pad && p[0] < view.w + pad && p[1] > -pad && p[1] < view.h + pad; };
@@ -618,6 +697,10 @@
       items.push({ d: pose.x + pose.y, kind: 'a', o: a, pose });
     }
     items.sort((p, q) => p.d - q.d);
+    // occlusion culling: off unless sim.opts.occlusion is true. It draws the same picture, but on every scene measured it costs more time
+    // than the draws it saves (see viz/README.md), so it is opt-in.
+    if (sim.opts.occlusion === true && A.sprites.exact && F && items.length >= (sim.opts.occlusionMin || OCCLUSION_MIN_ITEMS)) items = cullHidden(items, sim, view, layers, pal);
+    else sim.occlusionStats = null;
     const drawItems = (target, list) => {
       for (const it of list) {
         if (it.kind === 'b') drawBuildingEntity(target, view, reg, pal, shadow, sim, it.o);

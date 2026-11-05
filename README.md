@@ -23,7 +23,7 @@ The viewer is a SimCity-style isometric rendering engine written in plain JavaSc
 - **Far-zoom layer.** Below 1 px per metre, buildings and trees come from a cached layer, people are skipped and vehicles become dots. Ground, road surfaces and shadows are cached per view and theme.
 - **Spatial road index.** Fitting a building footprint to an asset stays fast on a city of tens of thousands of buildings.
 - **Painter's-algorithm drawing,** back to front.
-- **Occlusion culling was measured and not built.** On the placeholder only 0 to 10% of items are fully hidden, and the best possible saving is 1 to 10% of draw time. The measurement and the rule for revisiting it are in [viz/README.md](viz/README.md). Dense tower districts could change the answer.
+- **Occlusion culling is built and optional.** `sim.opts.occlusion = true` skips items that nearer buildings fully cover, and the picture is identical pixel for pixel. It is off by default because it was slower on every scene measured (13 to 34% more frame time), since a cached sprite blit costs less than the test. The numbers and when it could pay are in [viz/README.md](viz/README.md).
 
 [viz/README.md](viz/README.md) has the asset model, the theme system and the measurements.
 ## Install

@@ -23,7 +23,7 @@ def frontmatter(path):
 def test_manifest():
     m = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
     assert NAME.match(m["name"]) and m["name"] == "lab-render"
-    assert m["version"] == __version__ == "0.6.0"
+    assert m["version"] == __version__ == "0.6.1"
     assert m["license"] == "CC-BY-4.0" and m["description"] and m["author"]["name"]
     assert "UNLICENSED" not in json.dumps(m)
 

@@ -318,6 +318,54 @@
     else ctx.drawImage(sp.cv, dx, dy, Math.round(sp.cv.width * k * q) / q, Math.round(sp.cv.height * k * q) / q);
   }
 
+  // ---------- occlusion support ----------
+  // What an already cached sprite shows, so a renderer can tell whether it would be fully hidden. Only the exact-scale sprite is used
+  // (sprites.exact), because it is blitted 1:1 on whole device pixels and the mask then matches the blit pixel for pixel.
+  //   touch: per row, the first and last pixel with any alpha, widened by one pixel each way. Everything the blit can change.
+  //   rects: a few rectangles that are fully opaque (alpha 255), flat [x0, y0, x1, y1). Only opaque pixels can hide something, and a
+  //          handful of rectangles is far cheaper to record in a coverage grid than every opaque run.
+  function buildSpriteMask(sp) {
+    const w = sp.cv.width, h = sp.cv.height, d = sp.cv.getContext('2d').getImageData(0, 0, w, h).data;
+    const a0 = new Int32Array(h).fill(-1), a1 = new Int32Array(h).fill(-1), r0 = new Int32Array(h).fill(-1), r1 = new Int32Array(h).fill(-1);
+    for (let y = 0; y < h; y++) {
+      let lo = -1, hi = -1, start = -1, best = 0;
+      for (let x = 0, i = (y * w) * 4 + 3; x <= w; x++, i += 4) {
+        const a = x < w ? d[i] : 0;
+        if (a) { if (lo < 0) lo = x; hi = x; }
+        if (a === 255) { if (start < 0) start = x; } else if (start >= 0) { if (x - start > best) { best = x - start; r0[y] = start; r1[y] = x; } start = -1; }
+      }
+      a0[y] = lo; a1[y] = hi;
+    }
+    const t0 = new Int32Array(h).fill(-1), t1 = new Int32Array(h).fill(-1);
+    let ry0 = h, ry1 = -1;
+    for (let y = 0; y < h; y++) {
+      let lo = 1e9, hi = -1;
+      for (let k = Math.max(0, y - 1); k <= Math.min(h - 1, y + 1); k++) if (a0[k] >= 0) { lo = Math.min(lo, a0[k]); hi = Math.max(hi, a1[k]); }
+      if (hi >= 0) { t0[y] = lo - 1; t1[y] = hi + 1; ry0 = Math.min(ry0, y); ry1 = Math.max(ry1, y); }
+    }
+    // Rectangles from each row's longest opaque run: grow a rectangle downward while the shared span stays at least 70% as wide.
+    const rects = [];
+    for (let y = 0; y < h;) {
+      if (r0[y] < 0) { y++; continue; }
+      let a = r0[y], b = r1[y], e = y + 1;
+      while (e < h && r0[e] >= 0) { const na = Math.max(a, r0[e]), nb = Math.min(b, r1[e]); if (nb - na < 0.7 * (b - a)) break; a = na; b = nb; e++; }
+      if (b - a >= 8 && e - y >= 8) rects.push(a, y, b, e);
+      y = e;
+    }
+    return { w, h, t0, t1, ry0, ry1, rects: Int32Array.from(rects) };
+  }
+  // Where drawSprite would put this sprite, in device pixels, plus its mask. Returns null when occlusion cannot be trusted for it:
+  // the sprite is not cached yet, or the view is not at the exact scale.
+  function spritePlacement(asset, colours, reg, px, py, scale) {
+    if (!sprites.factory || !sprites.exact) return null;
+    const q = sprites.dpr || 1; if (scale * q < 1) return null;
+    const sb = Math.max(1, scale * q), ck = colours._sk;
+    if (ck === undefined) return null;                                   // never drawn yet
+    const sp = sprites.cache.get(asset.id + '|' + asset.heading + '|' + reg.id + '|' + sb + '|' + ck);
+    if (!sp) return null;
+    return { mask: sp.mask || (sp.mask = buildSpriteMask(sp)), x: Math.round(px * q - sp.ox), y: Math.round(py * q - sp.oy) };
+  }
+
   // ---------- vehicles ----------
   const DEFS = { vehicles: {}, people: {} };
   function addVehicle(id, label, network, parts, extra) { DEFS.vehicles[id] = Object.assign({ id: 'v:' + id, kind: id, group: 'vehicles', label, network, parts, rider: null }, extra || {}); }
@@ -708,7 +756,7 @@
     }
   };
 
-  root.AssetLib = { DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, sprites, buildAsset,
+  root.AssetLib = { DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, spritePlacement, sprites, buildAsset,
                     makeOutfit, vehicleTint, pickFleet, pickPerson, vehicleColours, personColours, flagsOf, scales, mix, shade, hash, hashStr, isData, faceOf,
                     registerGroup, baseColours, pickWeighted,
                     CARBON, theme, asTheme, resolveLook, snapTo, toGray };

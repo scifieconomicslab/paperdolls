@@ -196,6 +196,28 @@ test('a frame renders with the sprite cache, culling and bindings, and is not bl
 });
 
 
+test('occlusion culling draws the same picture pixel for pixel, skips hidden items, and is off by default', () => {
+  let createCanvas; try { createCanvas = require(process.env.NODE_CANVAS || 'canvas').createCanvas; } catch (e) { console.log('SKIP occlusion (node canvas not installed)'); return; }
+  A.sprites.factory = (w, h) => createCanvas(w, h);
+  const scene = V.makePlaceholderScene(7); let seed = 12345;
+  scene.buildings.forEach(b => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; b.levels = 4 + (seed % 5); if (['shed', 'villa', 'terrace'].includes(b.archetype)) b.archetype = 'block'; });
+  const W = 1200, H = 700, B = V.sceneBounds(scene), cx = (B[0] + B[2]) / 2, cy = (B[1] + B[3]) / 2, theme = A.theme(fam, undefined, 'colorfigures');
+  const mk = occ => { const s = V.createSim(scene, { seed: 5, theme, region: fam.id, occlusion: occ }); for (let i = 0; i < 40; i++) V.stepSim(s, 0.1); return s; };
+  assert.strictEqual(V.createSim(scene, { seed: 5, theme, region: fam.id }).opts.occlusion, undefined, 'occlusion must be opt-in');
+  let culled = 0;
+  for (const k of [1.7, 3]) {
+    const view = { w: W, h: H, scale: k, ox: W / 2 - (cx - cy) * k * 0.8660254, oy: H / 2 - (cx + cy) * k * 0.5 };
+    const on = mk(true), off = mk(false), con = createCanvas(W, H).getContext('2d'), coff = createCanvas(W, H).getContext('2d');
+    for (let i = 0; i < 40; i++) { V.renderFrame(con, on, view, {}); V.renderFrame(coff, off, view, {}); }   // settle: sprites at the exact scale
+    const a = con.getImageData(0, 0, W, H).data, b = coff.getImageData(0, 0, W, H).data;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) assert.fail('pixel ' + (i >> 2) + ' differs at ' + k + ' px/m');
+    assert(on.occlusionStats && on.occlusionStats.tested > 100, 'nothing was tested at ' + k + ' px/m');
+    assert.strictEqual(off.occlusionStats == null, true, 'the default sim must not run the test');
+    culled += on.occlusionStats.culled;
+  }
+  assert(culled > 20, 'no hidden item was skipped: ' + culled);
+});
+
 // ================= buildings =================
 const BPAL = { wall: fam.wall, wall2: fam.wall2, roof: fam.roof, ground: fam.ground, accent: fam.accent, shadow: fam.shadow };
 function bparams(region, kind, W, D, N, seed) { return A.buildingParams(region, kind, N, { W, D }, seed); }

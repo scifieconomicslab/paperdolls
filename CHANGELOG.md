@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 (occlusion culling)
+
+- **Occlusion culling**, opt-in with `sim.opts.occlusion = true`. A front-to-back pass with a coverage grid skips items that nearer buildings fully cover. It draws the same picture pixel for pixel (tested on a 4 to 8 storey scene at two zooms). It is off by default: on the placeholder, a tall variant and a 12,500-building scene it added 13 to 34% to the frame time, because the test costs more than the blits it saves.
+- `AssetLib.spritePlacement` returns where a cached sprite lands and a mask of what it covers.
+- `viz/occlusion_bench.js` checks equality and times the culled and unculled renderer. `viz/occlusion_probe.js` still measures how much a scene hides.
+- Tests: 48 JavaScript checks (one new).
+
 ## 0.6.0 (packaged as a plugin)
 
 - **Licence**: the plugin is CC BY 4.0. The vendored Great Retrofit model is MIT and carries its own `LICENSE`.
