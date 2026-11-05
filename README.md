@@ -19,12 +19,12 @@ The two are not linked. The model has building ids and no coordinates, so a repl
 
 ## The rendering engine
 
-The viewer is a SimCity-style isometric rendering engine written in plain JavaScript on a 2D canvas, with no dependencies. It draws buildings, trees, vehicles and people from parametric asset definitions, and it is built to stay interactive on scenes with more than 10,000 entities. A synthetic scene of 12,500 buildings and about 4,800 agents renders at about 25 to 35 ms per frame in a software canvas (node-canvas), so a browser will differ.
+The viewer is a SimCity-style isometric rendering engine written in plain JavaScript on a 2D canvas, with no dependencies. It draws buildings, trees, vehicles and people from parametric asset definitions, and it is built to stay interactive on scenes with more than 10,000 entities. On a synthetic scene of 12,276 buildings and 4,093 agents, a settled frame takes 4.6 to 17.5 ms and a panning frame 4.8 to 19.2 ms across 0.7, 1.7 and 4 px per metre (node-canvas on one 8-core desktop CPU, 1200 by 700; `node viz/scale_bench.js` reproduces it). The first frame is slow: 4.9 s when opened fully zoomed out, 0.37 s at 1.7 px per metre, because the far layer and the sprites are built then. A browser will differ.
 
 - **Back-face culling.** Each asset is built once for each of the four isometric headings, with only the faces that point at the camera. Hidden walls are never created, so they are never drawn.
 - **Viewport culling.** Anything whose screen bounds miss the canvas is skipped.
 - **Sprite cache.** Assets are drawn once into sprites. When the view has held still, sprites are rebuilt at the exact scale and blitted 1:1 on whole pixels, at most 150 rebuilds per frame, so a settled view sharpens over a few frames and never stalls.
-- **World-anchored layer caches.** The ground, and at far zoom the buildings, are cached in canvases larger than the screen and anchored to the world. A pan frame is one blit, and a zoom draws the old layer scaled until it settles. Pan frames on a 12,500-building scene went from 46 to 157 ms down to 5 to 14 ms in node-canvas.
+- **World-anchored layer caches.** The ground, and at far zoom the buildings, are cached in canvases larger than the screen and anchored to the world. A pan frame is one blit, and a zoom draws the old layer scaled until it settles. Pan frames on a 12,500-building scene went from 46 to 157 ms down to 5 to 14 ms in node-canvas (a later measurement, above, gives 4.8 to 19.2 ms).
 - **Far-zoom layer.** Below 1 px per metre, buildings and trees come from a cached layer, people are skipped and vehicles become dots. Ground, road surfaces and shadows are cached per view and theme.
 - **Spatial road index.** Fitting a building footprint to an asset stays fast on a city of tens of thousands of buildings.
 - **Painter's-algorithm drawing,** back to front.
