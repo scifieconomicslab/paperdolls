@@ -83,6 +83,8 @@ def validate(data):
     weeks = rep.get("weeks", [])
     if not weeks or any((not isinstance(w, int)) or w < 0 or w >= int(params["run_time"]) for w in weeks):
         raise SpecError(f"replay.weeks must be integers within 0..{int(params['run_time'])-1}")
+    if rep.get("mapping") is not None:
+        _validate_mapping(rep["mapping"])
     leg = rep.get("legend")
     if leg is not None:
         if not isinstance(leg, dict) or not leg or set(leg) - set(STATE_KEYS) - {"investor"} or any(not isinstance(v, str) or not v.strip() for v in leg.values()):
@@ -116,6 +118,60 @@ def legend_for(data):
     if (data.get("model") or {}).get("path"):
         return [(f"State {i + 1}", k) for i, k in enumerate(STATE_KEYS)]
     return RETROFIT_LEGEND
+
+
+CHANNELS = {"wall", "overlay"}
+OVERLAYS = {"scaffold", "solar", "band", "marker"}
+_HEX = __import__("re").compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def mapping_for(data):
+    """replay.mapping: which model variables to show, and how. An empty list means the four state codes, drawn as before."""
+    return list((data.get("replay") or {}).get("mapping") or [])
+
+
+def mapping_variables(data):
+    """The variables the exporter has to record, in mapping order, once each."""
+    seen = []
+    for m in mapping_for(data):
+        if m["variable"] not in seen:
+            seen.append(m["variable"])
+    return seen
+
+
+def _validate_mapping(mapping):
+    if not isinstance(mapping, list):
+        raise SpecError("replay.mapping must be a list")
+    for i, m in enumerate(mapping):
+        at = f"replay.mapping[{i}]"
+        if not isinstance(m, dict):
+            raise SpecError(f"{at} must be a mapping")
+        if not isinstance(m.get("variable"), str) or not m["variable"].strip():
+            raise SpecError(f"{at}.variable must be a name such as building.wealth or owner.income")
+        if m.get("channel") not in CHANNELS:
+            raise SpecError(f"{at}.channel must be one of {sorted(CHANNELS)}")
+        sc = m.get("scale")
+        if not isinstance(sc, dict) or sc.get("type") not in ("categorical", "sequential"):
+            raise SpecError(f"{at}.scale.type must be categorical or sequential")
+        if sc["type"] == "sequential":
+            if m["channel"] != "wall":
+                raise SpecError(f"{at}: a sequential scale colours walls; an overlay needs a categorical scale")
+            dom, cols = sc.get("domain"), sc.get("colours")
+            if not (isinstance(dom, list) and len(dom) == 2 and all(isinstance(v, (int, float)) for v in dom) and dom[0] < dom[1]):
+                raise SpecError(f"{at}.scale.domain must be [low, high] with low below high")
+            if not (isinstance(cols, list) and len(cols) >= 2 and all(isinstance(c, str) and _HEX.match(c) for c in cols)):
+                raise SpecError(f"{at}.scale.colours must be at least two #rrggbb colours")
+        else:
+            vals = sc.get("values")
+            if not isinstance(vals, dict) or not vals:
+                raise SpecError(f"{at}.scale.values must map each value to its colour or overlay and a label")
+            for k, v in vals.items():
+                if not isinstance(v, dict) or not isinstance(v.get("label"), str):
+                    raise SpecError(f"{at}.scale.values[{k}] needs a label")
+                if m["channel"] == "wall" and not (isinstance(v.get("colour"), str) and _HEX.match(v["colour"])):
+                    raise SpecError(f"{at}.scale.values[{k}] needs a #rrggbb colour")
+                if m["channel"] == "overlay" and v.get("overlay") is not None and v["overlay"] not in OVERLAYS:
+                    raise SpecError(f"{at}.scale.values[{k}].overlay must be null or one of {sorted(OVERLAYS)}")
 
 
 def retrofit_extras(data):

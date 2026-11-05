@@ -48,7 +48,7 @@ def cmd_validate(a):
 def cmd_export(a):
     sp = _replay_spec(a)
     out = Path(a.out or Path(a.spec).with_name("trajectory.npz"))
-    export.run_and_export(_params(sp), out, _model_path(sp, a.spec))
+    export.run_and_export(_params(sp), out, _model_path(sp, a.spec), variables=specmod.mapping_variables(sp))
     print(f"wrote {out}")
 
 def cmd_check(a):

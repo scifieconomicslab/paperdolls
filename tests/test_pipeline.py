@@ -100,3 +100,55 @@ def test_week_bounds_match_recorded_weeks():
     d["replay"]["weeks"] = [d["model"]["params"]["run_time"]]
     with pytest.raises(spec.SpecError):
         spec.validate(d)
+
+
+# ---- the variable mapping contract (a model says which of its variables to show, and how) ----
+TOY = Path(__file__).resolve().parent / "toy_model.py"
+
+
+def _toy_spec(mapping=None):
+    rep = {"weeks": [0, 5]}
+    if mapping is not None:
+        rep["mapping"] = mapping
+    return {"goal": "model_replay", "name": "toy", "model": {"path": str(TOY), "params": {"n": 12, "run_time": 6}},
+            "look": {"region": "nw", "register": "colorfigures"}, "replay": rep}
+
+
+WEALTH = {"variable": "building.wealth", "channel": "wall",
+          "scale": {"type": "sequential", "domain": [0, 10], "colours": ["#f4e9c8", "#c8452f"], "label": "Wealth"}}
+SICK = {"variable": "building.state", "channel": "overlay",
+        "scale": {"type": "categorical", "values": {"in_progress": {"overlay": "scaffold", "label": "Infectious"}, "to_do": {"overlay": None, "label": "Susceptible"}}}}
+
+
+@pytest.mark.parametrize("bad, text", [
+    ({**WEALTH, "channel": "height"}, "channel"),
+    ({**WEALTH, "scale": {**WEALTH["scale"], "type": "log"}}, "scale"),
+    ({**WEALTH, "variable": ""}, "variable"),
+    ({**WEALTH, "channel": "overlay"}, "sequential"),
+    ({**WEALTH, "scale": {**WEALTH["scale"], "domain": [5, 5]}}, "domain"),
+    ({**WEALTH, "scale": {**WEALTH["scale"], "colours": ["#fff"]}}, "colours"),
+    ({**SICK, "scale": {"type": "categorical", "values": {"x": {"overlay": "rocket", "label": "X"}}}}, "overlay"),
+    ({**SICK, "scale": {"type": "categorical", "values": {}}}, "values"),
+])
+def test_mapping_rejects_bad_entries_with_a_readable_error(bad, text):
+    with pytest.raises(spec.SpecError, match=text):
+        spec.validate(spec.normalise(_toy_spec([bad])))
+
+
+def test_mapping_accepts_good_entries_and_names_its_variables():
+    d = spec.normalise(_toy_spec([WEALTH, SICK]))
+    assert spec.validate(d)
+    assert spec.mapping_variables(d) == ["building.wealth", "building.state"]
+    assert spec.mapping_for(_toy_spec()) == []                       # no mapping: the four states, as before
+
+
+def test_export_records_declared_variables_with_nan_where_a_model_does_not_set_them(tmp_path):
+    out = tmp_path / "t.npz"
+    export.run_and_export({"n": 12, "run_time": 6}, out, TOY, variables=["building.wealth", "owner.income", "building.nope"])
+    t = export.load(out)
+    w = t["vars"]["building.wealth"]
+    assert len(w) == 6 and all(len(a) == 12 for a in w)
+    assert w[0][2] == 2.0 and np.isnan(w[0][3])                        # even ids carry wealth; odd ids do not: NaN, not zero
+    inc = t["vars"]["owner.income"]
+    assert inc[0][1] == 1001.0 and np.isnan(inc[0][0])                 # building 0 has no owner
+    assert np.isnan(t["vars"]["building.nope"][3]).all()
