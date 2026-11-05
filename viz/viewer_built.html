@@ -2104,7 +2104,7 @@
   // At most SPRITE_BUILDS_PER_FRAME sprites are rebuilt at the exact scale in one frame, so a settled view sharpens over a few frames
   // instead of stalling on one.
   const SPRITE_BUILDS_PER_FRAME = 150;
-  const PREWARM_PER_FRAME = 24;                      // while the view is still and fully sharp: sprites pre-rendered for the neighbouring zoom levels, per frame
+  const PREWARM_PER_FRAME = 12;                      // while the view is still and fully sharp: sprites pre-rendered for the neighbouring zoom levels, per frame
   const ZOOM_BUILDS_PER_FRAME = 16;                  // while the zoom is changing: about 6 ms of sprite building, then scaled sprites are used
   const OCCLUSION_MIN_ITEMS = 300;
   // Opt-in finish (colorfigures only): sim.opts.pixel = n (2 or more) draws the scene at 1/n resolution and upscales it with nearest-neighbour, so
