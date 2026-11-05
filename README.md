@@ -69,11 +69,11 @@ The building assets need walls on the isometric axes, and real streets sit at ar
 
 Nothing is defaulted quietly. Storeys taken from a building type, an archetype taken from a tag, a width taken from a lane count, trees scattered into a park: each is counted in `scene_report.md` for you to confirm.
 
-## What is proposed and what is not
+## Known issues:
 
-- The 36 palettes (three looks in each of twelve regions) are proposals chosen by eye, not sampled from photographs. Replace them before policy use.
+- The 36 palettes (three looks in each of twelve regions) are proposals chosen by eye.
 - Facade rules, fleets, tree mixes and drive sides are proposals too.
-- Layout, people and vehicles are invented, and every output says so.
+- Layout, people and vehicles are invented.
 - The OpenStreetMap ingest has run only on a synthetic extract. The Overpass query and fetch client have not been run against the live service.
 
 The full list of open problems, including the Great Retrofit model's, is in [docs/known-issues.md](docs/known-issues.md).
