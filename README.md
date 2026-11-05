@@ -2,6 +2,10 @@
 
 A Claude plugin from the Sci-Fi Economics Lab. It draws agent-based economic simulations and real places as isometric pictures, in a hand-inked style (colorfigures) or a grey technical style (formal), for policy audiences.
 
+![The viewer on a synthetic placeholder area, South Asian tropical region, Whitewash and clay tile look, colorfigures register](docs/images/viewer.webp)
+
+*The viewer on the synthetic placeholder area (not a real place), with the South Asian tropical region and the Whitewash and clay tile look. 987 of 1,023 buildings are drawn from assets and 36 as generic extrusions. People and vehicles are decorative, and the building colours are made-up states.*
+
 It makes two kinds of project:
 
 - **Model replay.** Runs the Great Retrofit v2 model (or another model file that follows [the interface](docs/model-interface.md)), records each building's retrofit state and investor ownership week by week, and draws chosen weeks as frames in one offline HTML page.
@@ -9,6 +13,19 @@ It makes two kinds of project:
 
 The two are not linked. The model has building ids and no coordinates, so a replay cannot yet sit on a real map.
 
+## The rendering engine
+
+The viewer is a SimCity-style isometric rendering engine written in plain JavaScript on a 2D canvas, with no dependencies. It draws buildings, trees, vehicles and people from parametric asset definitions, and it is built to stay interactive on scenes with more than 10,000 entities. A synthetic scene of 12,500 buildings and about 4,800 agents renders at about 25 to 35 ms per frame in a software canvas (node-canvas), so a browser will differ.
+
+- **Back-face culling.** Each asset is built once for each of the four isometric headings, with only the faces that point at the camera. Hidden walls are never created, so they are never drawn.
+- **Viewport culling.** Anything whose screen bounds miss the canvas is skipped.
+- **Sprite cache.** Assets are drawn once into sprites. When the view has held still, sprites are rebuilt at the exact scale and blitted 1:1 on whole pixels, at most 150 rebuilds per frame, so a settled view sharpens over a few frames and never stalls.
+- **Far-zoom layer.** Below 1 px per metre, buildings and trees come from a cached layer, people are skipped and vehicles become dots. Ground, road surfaces and shadows are cached per view and theme.
+- **Spatial road index.** Fitting a building footprint to an asset stays fast on a city of tens of thousands of buildings.
+- **Painter's-algorithm drawing,** back to front.
+- **Occlusion culling was measured and not built.** On the placeholder only 0 to 10% of items are fully hidden, and the best possible saving is 1 to 10% of draw time. The measurement and the rule for revisiting it are in [viz/README.md](viz/README.md). Dense tower districts could change the answer.
+
+[viz/README.md](viz/README.md) has the asset model, the theme system and the measurements.
 ## Install
 
 In Claude Code:
@@ -101,6 +118,16 @@ python -m pytest tests -q
 ```
 
 Without `npm install` the canvas and viewer tests skip. If `bin/lab-render` gives "Permission denied", run `chmod +x bin/lab-render`.
+
+## Credits and where the ideas came from
+
+| Source | What we took | Notes |
+|---|---|---|
+| Colorfigures, by April Zhu (MIT), built on her ISO-GLOW, which builds on Tolga Cohce's iso-figure, per its LICENSE | The visual idea: flat light, mid and dark tones set by face orientation, a heavy ink outline, warm hand-inked colours | The `colorfigures` register. |
+| IBM Carbon Design System | The `formal` register: grey tokens and IBM's data-visualisation colours | Colour values and the design idea only. Some tokens were checked against Carbon's documentation. Others (the cool and warm greys, cyan 50, teal 50 and a few more) were written from memory and still need checking. The list is in [viz/README.md](viz/README.md). |
+| Standard game-development and graphics techniques | Isometric projection, painter's-algorithm drawing, sprite caching, the monotone-chain convex hull, the minimum-area rectangle, CIELAB conversion, a local map projection, and the small mulberry32 random number generator | Textbook methods, implemented here. |
+| The Great Retrofit v2 model | The simulation that the replay draws | MIT-licensed, vendored in `vendor/greatretrofit_v2/`. |
+| OpenStreetMap | Map data for place scenes | ODbL. Carry "© OpenStreetMap contributors" with any picture or scene file. |
 
 ## Licence
 
