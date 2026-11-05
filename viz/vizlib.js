@@ -367,6 +367,7 @@
       const kind = (b.archetype && b.archetype !== 'auto' && A.ARCH[b.archetype]) ? b.archetype : A.pickArchetype(opts.region, b.levels, A.hash(seed + 5));
       const e = { src: b, id: b.id, group: 'buildings', kind, seed, fit, params: fit.ok ? A.buildingParams(opts.region, kind, b.levels, fit, seed) : null,
                   get state() { return b.state; }, get investor() { return b.investor; }, get levels() { return b.levels; } };
+      if (e.params && opts.detail) e.params.fs = Object.assign({}, e.params.fs, { rich: true });   // opt-in detail: roof clutter and varied glazing
       if (e.params) stats.assets++; else { stats.extruded++; stats.reasons[fit.reason] = (stats.reasons[fit.reason] || 0) + 1; }
       return e;
     });
@@ -654,7 +655,10 @@
     A.sprites.exact = zs.still >= 2;
     // the whole view (scale and offset) unchanged for a few frames: cached layers are then repainted exactly if they are off by a fraction of a pixel
     if (zs.ox === view.ox && zs.oy === view.oy && zs.vscale === view.scale) zs.stillView = (zs.stillView || 0) + 1; else { zs.ox = view.ox; zs.oy = view.oy; zs.vscale = view.scale; zs.stillView = 0; }
+    const detail = sim.opts.detail === true && pal.reg !== 'formal';
+    A.sprites.detail = detail;
     const shadow = mixHex(pal.shadow, pal.bg, 0.72);
+    const sRgb = hexRgb(pal.shadow);
     const heightOfEntity = e => e.params ? A_().buildingHeight(e.kind, e.params.N) : e.levels * (LIB.buildings[e.kind] || LIB.buildings.terrace).storeyH;
     // The ground and the building shadows do not change between frames. They are drawn once into a cached layer that is bigger than the
     // screen and anchored to the world, so panning only moves a window over it (see worldLayer).
@@ -664,10 +668,17 @@
       if (layers.buildings) for (const e of sim.buildings) {
         const b = e.src, H = heightOfEntity(e), q = proj(v, b.footprint[0][0], b.footprint[0][1], 0);
         if (q[0] < -v.w * 0.5 - H * v.scale || q[0] > v.w * 1.5 + H * v.scale || q[1] < -v.h * 0.5 - H * v.scale || q[1] > v.h * 1.5 + H * v.scale) continue;
+        if (detail && v.scale >= 0.6) {                // soft contact shadow: a longer, fainter cast shadow, then three stepped rings around the footprint
+          poly(c, b.footprint.map(p => proj(v, p[0] - H * 0.55, p[1] + H * 0.19, 0)), 'rgba(' + sRgb.join(',') + ',0.16)', null, 0);
+        }
         poly(c, b.footprint.map(p => proj(v, p[0] - H * 0.35, p[1] + H * 0.12, 0)), shadow, null, 0);
+        if (detail && v.scale >= 0.6) {
+          let cx = 0, cy = 0; for (const p of b.footprint) { cx += p[0]; cy += p[1]; } cx /= b.footprint.length; cy /= b.footprint.length;
+          for (const g of [3.0, 1.8, 0.8]) poly(c, b.footprint.map(p => { const dx = p[0] - cx, dy = p[1] - cy, L = Math.hypot(dx, dy) || 1; return proj(v, p[0] + dx / L * g, p[1] + dy / L * g, 0); }), 'rgba(' + sRgb.join(',') + ',0.10)', null, 0);
+        }
       }
     };
-    const F = A.sprites.factory, gkey = [view.w, view.h, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings].join('|');
+    const F = A.sprites.factory, gkey = [view.w, view.h, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings, detail].join('|');
     const settled = zs.stillView >= 3, zooming = zs.still < 2;
     if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg);
     else drawStatic(ctx, view);

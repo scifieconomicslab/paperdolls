@@ -73,7 +73,7 @@
     function windowAt(side, u, bay, s) {
       const sh = storeyH(a, s), b0 = base(a, s);
       const ww = bay * clamp(a.win * winK, 0.28, 0.72), z0 = b0 + sh * 0.3, z1 = b0 + sh * 0.84;
-      parts.push(panel(side, rect(u - ww / 2, u + ww / 2, z0, z1), 'glass'));
+      parts.push(panel(side, rect(u - ww / 2, u + ww / 2, z0, z1), fs.rich && rnd() < 0.28 ? 'glassdark' : 'glass'));
       parts.push(panel(side, rect(u - 0.025, u + 0.025, z0, z1), 'trim', { ink: false, bias: 0.35 }));
       parts.push(panel(side, rect(u - ww / 2 - 0.08, u + ww / 2 + 0.08, z0 - 0.09, z0), 'trim', { ink: false, bias: 0.35 }));
       if (fs.shutters && ww / bay <= 0.52) for (const sg of [-1, 1]) { const c = u + sg * (ww / 2 + ww * 0.26); parts.push(panel(side, rect(c - ww * 0.22, c + ww * 0.22, z0 - 0.05, z1 + 0.05), 'shutter')); }
@@ -184,6 +184,16 @@
       parts.push({ t: 'box', b: [hw - t, -hd + t, H, hw, hd - t, H + ph], role: 'data', layer: 1 });
       parts.push({ t: 'box', b: [-hw, -hd + t, H, -hw + t, hd - t, H + ph], role: 'data', layer: 1 });
       if (a.style !== 'house') { const pw = Math.min(2.6, W * 0.3), pd = Math.min(2.6, D * 0.3), ph2 = a.style === 'tower' ? 3.2 : 2.3; parts.push({ t: 'box', b: [hw * 0.3 - pw / 2, -pd / 2, H, hw * 0.3 + pw / 2, pd / 2, H + ph2], role: 'chimney', layer: 2 }); }
+      if (fs.rich) {                                    // roof clutter: air-conditioning, vents and a tank on slots that keep clear of the stair head
+        const slots = [[-0.55, -0.4], [-0.55, 0.4], [0.0, -0.45], [0.0, 0.45], [0.7, -0.4], [0.7, 0.4], [-0.15, 0]];
+        const nProps = clamp(Math.round(W * D / 90), 1, 5);
+        for (let i = 0; i < nProps && slots.length; i++) {
+          const [sx, sy] = slots.splice(Math.floor(rnd() * slots.length), 1)[0], cx = sx * hw, cy = sy * hd, k = rnd();
+          if (k < 0.45) parts.push({ t: 'box', b: [cx - 0.9, cy - 0.6, H + ph * 0.5, cx + 0.9, cy + 0.6, H + ph + 0.9], role: 'chimney', layer: 2 });
+          else if (k < 0.75) parts.push({ t: 'box', b: [cx - 0.35, cy - 0.35, H + ph * 0.5, cx + 0.35, cy + 0.35, H + ph + 0.7], role: 'trim', layer: 2 });
+          else parts.push({ t: 'box', b: [cx - 1.0, cy - 1.0, H + ph * 0.5, cx + 1.0, cy + 1.0, H + ph + 2.1], role: 'trim', layer: 2 });
+        }
+      }
       top = H + ph;
     } else if (roofKind === 'pitch' || roofKind === 'pitchlow') {
       rh = clamp(D * (roofKind === 'pitchlow' ? 0.1 : 0.28), 1.0, 6.5); const oh = 0.35;
@@ -384,7 +394,7 @@
     return Object.assign(c, {
       data: o.data || wall, roof, roofflat: pal.roofflat || mix(pal.ground, '#6e6e6e', 0.55), trim: mix(wall, '#ffffff', 0.5), door: reg.id === 'formal' ? shade(wall, 0.55) : shade(wall, 0.42),
       shutter: o.shutter || acc, awning: o.awning || acc, chimney: shade(wall, 0.8), solar: reg.id === 'formal' ? A.CARBON.blue[80] : '#2e3c5c', scaffold: reg.id === 'formal' ? A.CARBON.gray[60] : '#9a8a64',
-      band: reg.states.queued, marker: reg.states.investor, frame: reg.id === 'formal' ? A.CARBON.gray[70] : '#4b4b50'
+      glassdark: shade(c.glass || reg.glass, 0.68), band: reg.states.queued, marker: reg.states.investor, frame: reg.id === 'formal' ? A.CARBON.gray[70] : '#4b4b50'
     });
   }
 

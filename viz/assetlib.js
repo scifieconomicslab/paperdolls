@@ -271,21 +271,49 @@
   }
 
   // lwMul thins the ink line (scenes pass less than 1 when zoomed out, so tiny polygons are not swamped by their outline)
-  function paint(ctx, asset, colours, reg, px, py, scale, lwMul) {
+  // detail (opt-in, buildings, baked once per sprite): a light bevel along roof edges, and a soft ambient-occlusion band along the foot of each wall
+  const BEVEL_ROLES = { roofflat: 1, roof: 1, data: 1, chimney: 1, trim: 1 };
+  function paint(ctx, asset, colours, reg, px, py, scale, lwMul, detail) {
     ctx.lineJoin = 'round'; const lk = lwMul === undefined ? 1 : lwMul;
+    const trace = pr => { ctx.beginPath(); pr.pts.forEach((q, i) => { const x = px + q[0] * scale, y = py + q[1] * scale; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.closePath(); };
     for (const pr of asset.prims) {
       const fill = primFill(pr, colours, reg);
-      ctx.beginPath();
-      pr.pts.forEach((q, i) => { const x = px + q[0] * scale, y = py + q[1] * scale; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
-      ctx.closePath();
+      trace(pr);
       if (fill) { ctx.fillStyle = fill; ctx.fill(); }
       if (pr.ink !== false) { ctx.strokeStyle = reg.ink; ctx.lineWidth = reg.lw * (pr.lw || 1) * lk; ctx.stroke(); }
+      if (detail && fill && pr.w[2] > 0.5 && BEVEL_ROLES[pr.role] && reg.id !== 'formal') {
+        ctx.save(); trace(pr); ctx.clip(); ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = reg.lw * lk * 2 + 1.6; ctx.stroke(); ctx.restore();
+      }
     }
+    if (detail && reg.id !== 'formal') {
+      for (const pr of asset.prims) {
+        if (pr.role !== 'data' || pr.w[2] >= 0.5 || pr.pts.length < 4) continue;
+        const n = pr.pts.length; let bi = 0, best = -Infinity, y0 = Infinity, y1 = -Infinity;
+        for (let i = 0; i < n; i++) { const a = pr.pts[i], b = pr.pts[(i + 1) % n], my = (a[1] + b[1]) / 2; if (my > best) { best = my; bi = i; } y0 = Math.min(y0, a[1]); y1 = Math.max(y1, a[1]); }
+        if ((y1 - y0) * scale < 12) continue;
+        const a = pr.pts[bi], b = pr.pts[(bi + 1) % n];
+        ctx.save(); trace(pr); ctx.clip(); ctx.beginPath(); ctx.moveTo(px + a[0] * scale, py + a[1] * scale); ctx.lineTo(px + b[0] * scale, py + b[1] * scale);
+        ctx.strokeStyle = 'rgba(36,28,56,0.075)';
+        for (const w of [0.6, 1.2, 2.0]) { ctx.lineWidth = w * scale; ctx.stroke(); }
+        ctx.restore();
+      }
+    }
+  }
+  // fine grain: a small seeded noise tile of faint dark and light pixels, laid over the painted pixels of a sprite only (source-atop)
+  let grainTile = null;
+  function grainPattern(c) {
+    if (grainTile === null) {
+      const N = 48, cv = sprites.factory(N, N), g = cv.getContext('2d'); let t = 0x9e3779b9;
+      const r = () => { t = (t + 0x6D2B79F5) | 0; let x = Math.imul(t ^ (t >>> 15), 1 | t); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const v = r(); if (v < 0.3) { g.fillStyle = 'rgba(0,0,0,0.075)'; g.fillRect(x, y, 1, 1); } else if (v > 0.82) { g.fillStyle = 'rgba(255,255,255,0.07)'; g.fillRect(x, y, 1, 1); } }
+      grainTile = c.createPattern(cv, 'repeat');
+    }
+    return grainTile;
   }
 
   // Sprite cache: an asset at a given scale and colouring is painted once into an offscreen canvas, then blitted.
   // Set AssetLib.sprites.factory = (w, h) => canvas (browser: document.createElement; node: createCanvas).
-  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity };
+  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false };
   function drawSprite(ctx, asset, colours, reg, px, py, scale) {
     const lk = Math.max(0.3, Math.min(1, scale / 10));      // adaptive ink: full width from 10 px per metre up
     if (!sprites.factory) { paint(ctx, asset, colours, reg, px, py, scale, lk); return; }
@@ -296,7 +324,8 @@
     // the colour part of the key is built once per colour set (a hidden property, so copies of a colour set do not inherit it)
     let ck = colours._sk;
     if (ck === undefined) { ck = Object.keys(colours).sort().map(k => colours[k] || '-').join(''); Object.defineProperty(colours, '_sk', { value: ck, enumerable: false, writable: true, configurable: true }); }
-    const key = asset.id + '|' + asset.heading + '|' + reg.id + '|' + sb + '|' + ck;
+    const detail = sprites.detail && asset.group === 'buildings' && sb >= 2.5;                 // baked detail only where it can be seen
+    const key = asset.id + '|' + asset.heading + '|' + reg.id + '|' + sb + '|' + ck + (detail ? '|d' : '');
     let sp = sprites.cache.get(key);
     if (!sp && sprites.exact && sprites.builds >= sprites.maxBuilds) {      // over this frame's budget: show the bucketed sprite and sharpen on a later frame
       sprites.exact = false; drawSprite(ctx, asset, colours, reg, px, py, scale); sprites.exact = true; return;
@@ -308,7 +337,8 @@
       if (sprites.cache.size > sprites.limit || sprites.pixels + w * h > sprites.maxPixels) { sprites.cache.clear(); sprites.pixels = 0; }
       sprites.pixels += w * h;
       const cv = sprites.factory(w, h), c = cv.getContext('2d');
-      paint(c, asset, colours, reg, m - bb.minX * sb, m - bb.minY * sb, sb, Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1));
+      paint(c, asset, colours, reg, m - bb.minX * sb, m - bb.minY * sb, sb, Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1), detail);
+      if (detail) { c.save(); c.globalCompositeOperation = 'source-atop'; c.fillStyle = grainPattern(c); c.fillRect(0, 0, w, h); c.restore(); }
       sp = { cv, ox: m - bb.minX * sb, oy: m - bb.minY * sb };
       sprites.cache.set(key, sp);
     }

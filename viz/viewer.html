@@ -41,6 +41,7 @@
   <label><input type="checkbox" id="lBuild" checked> buildings</label>
   <label><input type="checkbox" id="lVeh" checked> vehicles</label>
   <label><input type="checkbox" id="lPeople" checked> people</label>
+  <label><input type="checkbox" id="lDetail"> detail</label>
   <button id="play" class="on">Pause</button>
   <button id="reseed">New seed</button>
 </div>
@@ -133,7 +134,7 @@
   function rebuild() {
     const drive = document.getElementById('drive').value;
     sim = V.createSim(scene, { seed: state.seed, trafficScale: +document.getElementById('traffic').value,
-                               peopleScale: +document.getElementById('people').value, theme: themeNow(), region: state.region, drive: drive === 'auto' ? null : drive });
+                               peopleScale: +document.getElementById('people').value, theme: themeNow(), region: state.region, drive: drive === 'auto' ? null : drive, detail: document.getElementById('lDetail').checked });
     applyHooks();
     const st2 = sim.stats, why = Object.keys(st2.reasons).map(k => k + ': ' + st2.reasons[k]).join('; ');
     const kinds = {}; sim.trees.forEach(t => kinds[t.kind] = (kinds[t.kind] || 0) + 1);
@@ -183,6 +184,7 @@
   function setBtn() { document.getElementById('rC').classList.toggle('on', state.reg === 'colorfigures'); document.getElementById('rF').classList.toggle('on', state.reg === 'formal'); }
   document.getElementById('traffic').oninput = rebuild;
   document.getElementById('people').oninput = rebuild;
+  document.getElementById('lDetail').onchange = rebuild;
   document.getElementById('play').onclick = e => { state.playing = !state.playing; e.target.textContent = state.playing ? 'Pause' : 'Play'; e.target.classList.toggle('on', state.playing); };
   document.getElementById('reseed').onclick = () => { state.seed = (Math.random() * 1e6) | 0; rebuild(); };
   window.addEventListener('resize', resize);

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Opt-in detail pass, `sim.opts.detail = true`.** Aims at a richer, more hand-finished look without per-frame cost. Everything is baked when a sprite or cached layer is built, so settled and pan frames are blits as before. Buildings get a fine grain and a light bevel on roof edges, and a soft ambient-occlusion band along the foot of each wall (sprites, only from 2.5 px per metre up). Flat roofs get air-conditioning units, vents and a tank, and about a quarter of windows are darker glass. The cached ground gets a longer, fainter cast shadow and three stepped contact rings round each footprint. It is colorfigures only; the formal register is unchanged. `node viz/detail_bench.js` writes a picture of each and times them. On the placeholder scene in node-canvas the first frame went from 288 to 336 ms, and settled (3.9 ms) and pan (5.2 to 5.1 ms) frames did not change. Off by default, since it changes the look.
+
 ## 0.7.0 (renamed to paperdolls)
 
 - **The project and the plugin are now called paperdolls.** It was lab-render. The command is `paperdolls`, the Python package is `paperdolls`, the commands are `/paperdolls:start`, `place`, `preview`, `build` and `doctor`, the skill is `paperdolls-visuals`, the default output folder is `paperdolls-out`, and the test environment variable is `PAPERDOLLS_NODE_MODULES`. The repository is `scifieconomicslab/paperdolls`.

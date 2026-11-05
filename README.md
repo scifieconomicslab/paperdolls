@@ -1,5 +1,9 @@
 # paperdolls
 
+![A screencast of the viewer: panning and zooming a city scene, with the detail pass switched on](docs/images/detail-demo.webp)
+
+*Screencast of the viewer on the synthetic placeholder area, with the opt-in detail pass on.*
+
 A Claude plugin from the Sci-Fi Economics Lab. It draws agent-based economic simulations and real places as isometric pictures, in a hand-inked style (colorfigures) or a grey technical style (formal), for policy audiences.
 
 ![The viewer on a synthetic placeholder area, South Asian tropical region, Whitewash and clay tile look, colorfigures register](docs/images/viewer.webp)

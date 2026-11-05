@@ -41,6 +41,7 @@
   <label><input type="checkbox" id="lBuild" checked> buildings</label>
   <label><input type="checkbox" id="lVeh" checked> vehicles</label>
   <label><input type="checkbox" id="lPeople" checked> people</label>
+  <label><input type="checkbox" id="lDetail"> detail</label>
   <button id="play" class="on">Pause</button>
   <button id="reseed">New seed</button>
 </div>
@@ -332,21 +333,49 @@
   }
 
   // lwMul thins the ink line (scenes pass less than 1 when zoomed out, so tiny polygons are not swamped by their outline)
-  function paint(ctx, asset, colours, reg, px, py, scale, lwMul) {
+  // detail (opt-in, buildings, baked once per sprite): a light bevel along roof edges, and a soft ambient-occlusion band along the foot of each wall
+  const BEVEL_ROLES = { roofflat: 1, roof: 1, data: 1, chimney: 1, trim: 1 };
+  function paint(ctx, asset, colours, reg, px, py, scale, lwMul, detail) {
     ctx.lineJoin = 'round'; const lk = lwMul === undefined ? 1 : lwMul;
+    const trace = pr => { ctx.beginPath(); pr.pts.forEach((q, i) => { const x = px + q[0] * scale, y = py + q[1] * scale; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.closePath(); };
     for (const pr of asset.prims) {
       const fill = primFill(pr, colours, reg);
-      ctx.beginPath();
-      pr.pts.forEach((q, i) => { const x = px + q[0] * scale, y = py + q[1] * scale; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
-      ctx.closePath();
+      trace(pr);
       if (fill) { ctx.fillStyle = fill; ctx.fill(); }
       if (pr.ink !== false) { ctx.strokeStyle = reg.ink; ctx.lineWidth = reg.lw * (pr.lw || 1) * lk; ctx.stroke(); }
+      if (detail && fill && pr.w[2] > 0.5 && BEVEL_ROLES[pr.role] && reg.id !== 'formal') {
+        ctx.save(); trace(pr); ctx.clip(); ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = reg.lw * lk * 2 + 1.6; ctx.stroke(); ctx.restore();
+      }
     }
+    if (detail && reg.id !== 'formal') {
+      for (const pr of asset.prims) {
+        if (pr.role !== 'data' || pr.w[2] >= 0.5 || pr.pts.length < 4) continue;
+        const n = pr.pts.length; let bi = 0, best = -Infinity, y0 = Infinity, y1 = -Infinity;
+        for (let i = 0; i < n; i++) { const a = pr.pts[i], b = pr.pts[(i + 1) % n], my = (a[1] + b[1]) / 2; if (my > best) { best = my; bi = i; } y0 = Math.min(y0, a[1]); y1 = Math.max(y1, a[1]); }
+        if ((y1 - y0) * scale < 12) continue;
+        const a = pr.pts[bi], b = pr.pts[(bi + 1) % n];
+        ctx.save(); trace(pr); ctx.clip(); ctx.beginPath(); ctx.moveTo(px + a[0] * scale, py + a[1] * scale); ctx.lineTo(px + b[0] * scale, py + b[1] * scale);
+        ctx.strokeStyle = 'rgba(36,28,56,0.075)';
+        for (const w of [0.6, 1.2, 2.0]) { ctx.lineWidth = w * scale; ctx.stroke(); }
+        ctx.restore();
+      }
+    }
+  }
+  // fine grain: a small seeded noise tile of faint dark and light pixels, laid over the painted pixels of a sprite only (source-atop)
+  let grainTile = null;
+  function grainPattern(c) {
+    if (grainTile === null) {
+      const N = 48, cv = sprites.factory(N, N), g = cv.getContext('2d'); let t = 0x9e3779b9;
+      const r = () => { t = (t + 0x6D2B79F5) | 0; let x = Math.imul(t ^ (t >>> 15), 1 | t); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const v = r(); if (v < 0.3) { g.fillStyle = 'rgba(0,0,0,0.075)'; g.fillRect(x, y, 1, 1); } else if (v > 0.82) { g.fillStyle = 'rgba(255,255,255,0.07)'; g.fillRect(x, y, 1, 1); } }
+      grainTile = c.createPattern(cv, 'repeat');
+    }
+    return grainTile;
   }
 
   // Sprite cache: an asset at a given scale and colouring is painted once into an offscreen canvas, then blitted.
   // Set AssetLib.sprites.factory = (w, h) => canvas (browser: document.createElement; node: createCanvas).
-  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity };
+  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false };
   function drawSprite(ctx, asset, colours, reg, px, py, scale) {
     const lk = Math.max(0.3, Math.min(1, scale / 10));      // adaptive ink: full width from 10 px per metre up
     if (!sprites.factory) { paint(ctx, asset, colours, reg, px, py, scale, lk); return; }
@@ -357,7 +386,8 @@
     // the colour part of the key is built once per colour set (a hidden property, so copies of a colour set do not inherit it)
     let ck = colours._sk;
     if (ck === undefined) { ck = Object.keys(colours).sort().map(k => colours[k] || '-').join(''); Object.defineProperty(colours, '_sk', { value: ck, enumerable: false, writable: true, configurable: true }); }
-    const key = asset.id + '|' + asset.heading + '|' + reg.id + '|' + sb + '|' + ck;
+    const detail = sprites.detail && asset.group === 'buildings' && sb >= 2.5;                 // baked detail only where it can be seen
+    const key = asset.id + '|' + asset.heading + '|' + reg.id + '|' + sb + '|' + ck + (detail ? '|d' : '');
     let sp = sprites.cache.get(key);
     if (!sp && sprites.exact && sprites.builds >= sprites.maxBuilds) {      // over this frame's budget: show the bucketed sprite and sharpen on a later frame
       sprites.exact = false; drawSprite(ctx, asset, colours, reg, px, py, scale); sprites.exact = true; return;
@@ -369,7 +399,8 @@
       if (sprites.cache.size > sprites.limit || sprites.pixels + w * h > sprites.maxPixels) { sprites.cache.clear(); sprites.pixels = 0; }
       sprites.pixels += w * h;
       const cv = sprites.factory(w, h), c = cv.getContext('2d');
-      paint(c, asset, colours, reg, m - bb.minX * sb, m - bb.minY * sb, sb, Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1));
+      paint(c, asset, colours, reg, m - bb.minX * sb, m - bb.minY * sb, sb, Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1), detail);
+      if (detail) { c.save(); c.globalCompositeOperation = 'source-atop'; c.fillStyle = grainPattern(c); c.fillRect(0, 0, w, h); c.restore(); }
       sp = { cv, ox: m - bb.minX * sb, oy: m - bb.minY * sb };
       sprites.cache.set(key, sp);
     }
@@ -900,7 +931,7 @@
     function windowAt(side, u, bay, s) {
       const sh = storeyH(a, s), b0 = base(a, s);
       const ww = bay * clamp(a.win * winK, 0.28, 0.72), z0 = b0 + sh * 0.3, z1 = b0 + sh * 0.84;
-      parts.push(panel(side, rect(u - ww / 2, u + ww / 2, z0, z1), 'glass'));
+      parts.push(panel(side, rect(u - ww / 2, u + ww / 2, z0, z1), fs.rich && rnd() < 0.28 ? 'glassdark' : 'glass'));
       parts.push(panel(side, rect(u - 0.025, u + 0.025, z0, z1), 'trim', { ink: false, bias: 0.35 }));
       parts.push(panel(side, rect(u - ww / 2 - 0.08, u + ww / 2 + 0.08, z0 - 0.09, z0), 'trim', { ink: false, bias: 0.35 }));
       if (fs.shutters && ww / bay <= 0.52) for (const sg of [-1, 1]) { const c = u + sg * (ww / 2 + ww * 0.26); parts.push(panel(side, rect(c - ww * 0.22, c + ww * 0.22, z0 - 0.05, z1 + 0.05), 'shutter')); }
@@ -1011,6 +1042,16 @@
       parts.push({ t: 'box', b: [hw - t, -hd + t, H, hw, hd - t, H + ph], role: 'data', layer: 1 });
       parts.push({ t: 'box', b: [-hw, -hd + t, H, -hw + t, hd - t, H + ph], role: 'data', layer: 1 });
       if (a.style !== 'house') { const pw = Math.min(2.6, W * 0.3), pd = Math.min(2.6, D * 0.3), ph2 = a.style === 'tower' ? 3.2 : 2.3; parts.push({ t: 'box', b: [hw * 0.3 - pw / 2, -pd / 2, H, hw * 0.3 + pw / 2, pd / 2, H + ph2], role: 'chimney', layer: 2 }); }
+      if (fs.rich) {                                    // roof clutter: air-conditioning, vents and a tank on slots that keep clear of the stair head
+        const slots = [[-0.55, -0.4], [-0.55, 0.4], [0.0, -0.45], [0.0, 0.45], [0.7, -0.4], [0.7, 0.4], [-0.15, 0]];
+        const nProps = clamp(Math.round(W * D / 90), 1, 5);
+        for (let i = 0; i < nProps && slots.length; i++) {
+          const [sx, sy] = slots.splice(Math.floor(rnd() * slots.length), 1)[0], cx = sx * hw, cy = sy * hd, k = rnd();
+          if (k < 0.45) parts.push({ t: 'box', b: [cx - 0.9, cy - 0.6, H + ph * 0.5, cx + 0.9, cy + 0.6, H + ph + 0.9], role: 'chimney', layer: 2 });
+          else if (k < 0.75) parts.push({ t: 'box', b: [cx - 0.35, cy - 0.35, H + ph * 0.5, cx + 0.35, cy + 0.35, H + ph + 0.7], role: 'trim', layer: 2 });
+          else parts.push({ t: 'box', b: [cx - 1.0, cy - 1.0, H + ph * 0.5, cx + 1.0, cy + 1.0, H + ph + 2.1], role: 'trim', layer: 2 });
+        }
+      }
       top = H + ph;
     } else if (roofKind === 'pitch' || roofKind === 'pitchlow') {
       rh = clamp(D * (roofKind === 'pitchlow' ? 0.1 : 0.28), 1.0, 6.5); const oh = 0.35;
@@ -1211,7 +1252,7 @@
     return Object.assign(c, {
       data: o.data || wall, roof, roofflat: pal.roofflat || mix(pal.ground, '#6e6e6e', 0.55), trim: mix(wall, '#ffffff', 0.5), door: reg.id === 'formal' ? shade(wall, 0.55) : shade(wall, 0.42),
       shutter: o.shutter || acc, awning: o.awning || acc, chimney: shade(wall, 0.8), solar: reg.id === 'formal' ? A.CARBON.blue[80] : '#2e3c5c', scaffold: reg.id === 'formal' ? A.CARBON.gray[60] : '#9a8a64',
-      band: reg.states.queued, marker: reg.states.investor, frame: reg.id === 'formal' ? A.CARBON.gray[70] : '#4b4b50'
+      glassdark: shade(c.glass || reg.glass, 0.68), band: reg.states.queued, marker: reg.states.investor, frame: reg.id === 'formal' ? A.CARBON.gray[70] : '#4b4b50'
     });
   }
 
@@ -1721,6 +1762,7 @@
       const kind = (b.archetype && b.archetype !== 'auto' && A.ARCH[b.archetype]) ? b.archetype : A.pickArchetype(opts.region, b.levels, A.hash(seed + 5));
       const e = { src: b, id: b.id, group: 'buildings', kind, seed, fit, params: fit.ok ? A.buildingParams(opts.region, kind, b.levels, fit, seed) : null,
                   get state() { return b.state; }, get investor() { return b.investor; }, get levels() { return b.levels; } };
+      if (e.params && opts.detail) e.params.fs = Object.assign({}, e.params.fs, { rich: true });   // opt-in detail: roof clutter and varied glazing
       if (e.params) stats.assets++; else { stats.extruded++; stats.reasons[fit.reason] = (stats.reasons[fit.reason] || 0) + 1; }
       return e;
     });
@@ -2008,7 +2050,10 @@
     A.sprites.exact = zs.still >= 2;
     // the whole view (scale and offset) unchanged for a few frames: cached layers are then repainted exactly if they are off by a fraction of a pixel
     if (zs.ox === view.ox && zs.oy === view.oy && zs.vscale === view.scale) zs.stillView = (zs.stillView || 0) + 1; else { zs.ox = view.ox; zs.oy = view.oy; zs.vscale = view.scale; zs.stillView = 0; }
+    const detail = sim.opts.detail === true && pal.reg !== 'formal';
+    A.sprites.detail = detail;
     const shadow = mixHex(pal.shadow, pal.bg, 0.72);
+    const sRgb = hexRgb(pal.shadow);
     const heightOfEntity = e => e.params ? A_().buildingHeight(e.kind, e.params.N) : e.levels * (LIB.buildings[e.kind] || LIB.buildings.terrace).storeyH;
     // The ground and the building shadows do not change between frames. They are drawn once into a cached layer that is bigger than the
     // screen and anchored to the world, so panning only moves a window over it (see worldLayer).
@@ -2018,10 +2063,17 @@
       if (layers.buildings) for (const e of sim.buildings) {
         const b = e.src, H = heightOfEntity(e), q = proj(v, b.footprint[0][0], b.footprint[0][1], 0);
         if (q[0] < -v.w * 0.5 - H * v.scale || q[0] > v.w * 1.5 + H * v.scale || q[1] < -v.h * 0.5 - H * v.scale || q[1] > v.h * 1.5 + H * v.scale) continue;
+        if (detail && v.scale >= 0.6) {                // soft contact shadow: a longer, fainter cast shadow, then three stepped rings around the footprint
+          poly(c, b.footprint.map(p => proj(v, p[0] - H * 0.55, p[1] + H * 0.19, 0)), 'rgba(' + sRgb.join(',') + ',0.16)', null, 0);
+        }
         poly(c, b.footprint.map(p => proj(v, p[0] - H * 0.35, p[1] + H * 0.12, 0)), shadow, null, 0);
+        if (detail && v.scale >= 0.6) {
+          let cx = 0, cy = 0; for (const p of b.footprint) { cx += p[0]; cy += p[1]; } cx /= b.footprint.length; cy /= b.footprint.length;
+          for (const g of [3.0, 1.8, 0.8]) poly(c, b.footprint.map(p => { const dx = p[0] - cx, dy = p[1] - cy, L = Math.hypot(dx, dy) || 1; return proj(v, p[0] + dx / L * g, p[1] + dy / L * g, 0); }), 'rgba(' + sRgb.join(',') + ',0.10)', null, 0);
+        }
       }
     };
-    const F = A.sprites.factory, gkey = [view.w, view.h, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings].join('|');
+    const F = A.sprites.factory, gkey = [view.w, view.h, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings, detail].join('|');
     const settled = zs.stillView >= 3, zooming = zs.still < 2;
     if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg);
     else drawStatic(ctx, view);
@@ -2480,7 +2532,7 @@
   function rebuild() {
     const drive = document.getElementById('drive').value;
     sim = V.createSim(scene, { seed: state.seed, trafficScale: +document.getElementById('traffic').value,
-                               peopleScale: +document.getElementById('people').value, theme: themeNow(), region: state.region, drive: drive === 'auto' ? null : drive });
+                               peopleScale: +document.getElementById('people').value, theme: themeNow(), region: state.region, drive: drive === 'auto' ? null : drive, detail: document.getElementById('lDetail').checked });
     applyHooks();
     const st2 = sim.stats, why = Object.keys(st2.reasons).map(k => k + ': ' + st2.reasons[k]).join('; ');
     const kinds = {}; sim.trees.forEach(t => kinds[t.kind] = (kinds[t.kind] || 0) + 1);
@@ -2530,6 +2582,7 @@
   function setBtn() { document.getElementById('rC').classList.toggle('on', state.reg === 'colorfigures'); document.getElementById('rF').classList.toggle('on', state.reg === 'formal'); }
   document.getElementById('traffic').oninput = rebuild;
   document.getElementById('people').oninput = rebuild;
+  document.getElementById('lDetail').onchange = rebuild;
   document.getElementById('play').onclick = e => { state.playing = !state.playing; e.target.textContent = state.playing ? 'Pause' : 'Play'; e.target.classList.toggle('on', state.playing); };
   document.getElementById('reseed').onclick = () => { state.seed = (Math.random() * 1e6) | 0; rebuild(); };
   window.addEventListener('resize', resize);
