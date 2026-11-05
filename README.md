@@ -10,6 +10,8 @@ A Claude plugin from the Sci-Fi Economics Lab. It draws agent-based economic sim
 
 *The viewer on the synthetic placeholder area (not a real place), with the South Asian tropical region and the Whitewash and clay tile look. 987 of 1,023 buildings are drawn from assets and 36 as generic extrusions. People and vehicles are decorative, and the building colours are made-up states.*
 
+Its replay page plays a model through time in the same engine: a week scrubber and play button, and a legend made from the model's own declared variables ([docs/replay-mapping.md](docs/replay-mapping.md)).
+
 It makes two kinds of project:
 
 - **Model replay.** Runs the Great Retrofit v2 model (or another model file that follows [the interface](docs/model-interface.md)), records each building's retrofit state and investor ownership week by week, and draws chosen weeks as frames in one offline HTML page.
