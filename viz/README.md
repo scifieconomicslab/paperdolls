@@ -225,7 +225,7 @@ The "before" zoom numbers at 0.7 and 3 px/m are from an intermediate version of 
 
 ### Finishing options (opt-in, colorfigures only)
 
-All are set on `sim.opts`, read by `VizLib.renderFrame`, and baked into sprites or cached layers, so they cost build time and not per-frame time. `node viz/detail_bench.js [outdir]` writes a picture of each variant and times them.
+All are set on `sim.opts`, read by `VizLib.renderFrame`, and baked into sprites or cached layers, so they cost build time and not per-frame time. `node viz/detail_bench.js [outdir]` writes a picture of each variant and times them. `node viz/record_tour.js outdir [fps] [seconds] [width] [height]` renders a scripted zoom tour to PNG frames (every view drawn settled, no budgets) for encoding into a video with ffmpeg; the `SHOTS` environment variable (JSON list of `[seconds, x, y, pixels per metre]`) changes the route.
 
 | option | what it does |
 |---|---|
