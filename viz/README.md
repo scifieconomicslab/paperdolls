@@ -152,6 +152,26 @@ What made this fast, in order of effect:
 2. **Unique tone per building defeated the cache.** Tones now come in five steps (this one cost 6 s per frame on 12,500 buildings).
 3. **World-anchored layers.** The ground (roads, landuse, building shadows) and, below 1 px per metre, the buildings and trees are drawn into cached canvases 1.8 times the view in each direction, anchored to the world rather than the screen (`worldLayer` in `vizlib.js`). Panning blits a window of the layer, so a pan frame costs one `drawImage` until the view moves more than 40% of its size, when the layer is repainted once. While the zoom is changing the old layer is drawn scaled, a little soft, and repainted exactly once the zoom stops. After a pan ends with a fractional shift the layer is repainted once, so a still picture is exact. Below 1 px per metre people are skipped and vehicles are dots. A road spatial index keeps footprint fitting fast.
 
+#### Zooming: hold the sharp frame, pre-render the neighbours
+
+A zoom used to stall: while the scale changed, sprites were cached in quarter-pixel buckets, and every new bucket rebuilt every visible sprite in one frame (150 to 500 ms, about 0.35 ms a sprite; the cache also grew to over 10,000 sprites). Measured with `node viz/zoom_bench.js` (a zoom from 1 to 4 px/m in 60 frames, node-canvas, 1200 by 700):
+
+| scene | | frames over 33 ms | slowest frame | median frame |
+|---|---|---|---|---|
+| placeholder, 1,023 buildings | before | 26 of 60 | 464 ms | 32 ms |
+| | after | 5 of 60 | 61 ms | 19 ms |
+| tiled, 12,276 buildings (0.7 to 4 px/m) | before | 27 of 60 | 496 ms | 32 ms |
+| | after | 5 of 60 | 308 ms | 18 ms |
+
+Four changes, each found from the per-frame trace and each with a test in `test_assets.js`:
+
+1. **Hold and scale.** The frame before a zoom begins is still on the canvas, sharp. It is copied once, and while the scale keeps changing that picture is drawn scaled about the same point (the projection is linear in the scale, so one scale and shift places it exactly): one blit however big the scene. People and vehicles are frozen for the length of the zoom. A change of more than 1.8 times from the held picture is drawn for real, and that frame becomes the next held one; so is the first frame after the zoom stops, and then the sprites sharpen as before. `sim.opts.holdZoom = false` turns it off. If the held picture does not cover the screen (zooming out) the cached ground fills the rest.
+2. **Octave buckets and a build budget.** When a frame is drawn for real during a zoom, sprites come in whole octaves (1, 2, 4, 8 px/m), so a zoom crosses one bucket per doubling, and at most 16 sprites are built per frame (`ZOOM_BUILDS_PER_FRAME`). A sprite that is missing is drawn scaled from the nearest one held (within 5 times smaller or 4 times larger); a person or vehicle with nothing held is left out for a few frames.
+3. **Pre-render and hold.** While the view is still and fully sharp, up to 12 sprites a frame (`PREWARM_PER_FRAME`) are built for the zoom levels either side of the current one, for the sprites the frame drew, so a zoom finds them ready. It stops when nothing is missing, and runs only in frames that built nothing else. `sim.opts.prewarm = false` turns it off. Not used with `pixel` mode.
+4. **Eviction, not clearing.** Over the sprite memory cap, only sprites more than 2.7 times away in scale are dropped; the whole cache was cleared before, so the next zoom frame rebuilt everything.
+
+What is left: a real frame at each 1.8 times of zoom. On a placeholder-size scene that is 60 to 120 ms; on a 12,000-building scene the cached ground has to be repainted too, about 300 ms. Pre-rendering the ground layer at the neighbouring levels would remove it.
+
 #### Pan and zoom frames
 
 Profiling the 12,500-building scene found that still frames were cheap (10 to 13 ms) but frames while panning or zooming cost 46 to 157 ms, because the ground layer and the far layer were keyed on the pan offset and the scale and were repainted at every step. Median frame time, node-canvas, 1200 by 700:

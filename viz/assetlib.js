@@ -313,51 +313,92 @@
 
   // Sprite cache: an asset at a given scale and colouring is painted once into an offscreen canvas, then blitted.
   // Set AssetLib.sprites.factory = (w, h) => canvas (browser: document.createElement; node: createCanvas).
-  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false, ink: false, grain: true, minDetail: 2.5, posterize: 0 };
+  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false, ink: false, grain: true, minDetail: 2.5, posterize: 0, maxZoomBuilds: Infinity, zooming: false, collect: null, index: new Map() };
   // round each colour channel of a canvas to a multiple of step (alpha untouched). Used once per sprite and per cached layer, never per frame.
   function quantise(cv, step) {
     const c = cv.getContext('2d'), d = c.getImageData(0, 0, cv.width, cv.height), a = d.data, k = 1 / step;
     for (let i = 0; i < a.length; i += 4) { a[i] = Math.min(255, Math.round(a[i] * k) * step); a[i + 1] = Math.min(255, Math.round(a[i + 1] * k) * step); a[i + 2] = Math.min(255, Math.round(a[i + 2] * k) * step); }
     c.putImageData(d, 0, 0);
   }
+  // Over the sprite memory cap: drop the sprites built for scales far from the one wanted (more than 2.7 times away), keeping the neighbouring
+  // octaves a zoom can still use. Only when that is not enough is everything dropped. (Clearing everything made the next zoom rebuild it all.)
+  function evict(sbWanted) {
+    for (const [k, sp] of sprites.cache) if (Math.abs(Math.log(sp.sb / sbWanted)) > 1.0) { sprites.cache.delete(k); sprites.pixels -= sp.px; }
+    if (sprites.cache.size > sprites.limit * 0.8 || sprites.pixels > sprites.maxPixels * 0.8) { sprites.cache.clear(); sprites.pixels = 0; }
+    sprites.index.clear();
+    for (const sp of sprites.cache.values()) { const held = sprites.index.get(sp.ikey); if (held) held.push(sp); else sprites.index.set(sp.ikey, [sp]); }
+  }
+  // The keys of the sprite for an asset at sprite scale sb (device pixels per metre). key is exact; ikey leaves out the scale and the detail and ink
+  // flags, so a sprite at a neighbouring scale can stand in for a missing one while the view is zooming.
+  function keysFor(asset, colours, reg, sb) {
+    let ck = colours._sk;   // the colour part is built once per colour set (a hidden property, so copies of a colour set do not inherit it)
+    if (ck === undefined) { ck = Object.keys(colours).sort().map(k => colours[k] || '-').join(''); Object.defineProperty(colours, '_sk', { value: ck, enumerable: false, writable: true, configurable: true }); }
+    const detail = sprites.detail && asset.group === 'buildings' && sb >= sprites.minDetail;                 // baked detail only where it can be seen
+    const ink = sprites.ink && (asset.group === 'buildings' || asset.group === 'trees') && sb >= sprites.minDetail;   // heavy ink on the silhouette only, hairlines inside
+    const pz = sprites.posterize ? '|p' + sprites.posterize : '', base = asset.id + '|' + asset.heading + '|' + reg.id;
+    return { detail, ink, key: base + '|' + sb + '|' + ck + (detail ? (sprites.grain ? '|d' : '|D') : '') + (ink ? '|i' : '') + pz, ikey: base + '|' + ck + pz };
+  }
+  // Paint one sprite into the cache. scale is the css scale the ink width follows.
+  function buildSprite(asset, colours, reg, sb, scale, kk) {
+    const q = sprites.dpr || 1, bb = asset.bbox, m = 2, { detail, ink, key, ikey } = kk;
+    const w = Math.ceil((bb.maxX - bb.minX) * sb) + m * 2, h = Math.ceil((bb.maxY - bb.minY) * sb) + m * 2;
+    if (sprites.cache.size > sprites.limit || sprites.pixels + w * h > sprites.maxPixels) evict(sb);
+    sprites.pixels += w * h;
+    const cv = sprites.factory(w, h), c = cv.getContext('2d');
+    paint(c, asset, colours, reg, m - bb.minX * sb, m - bb.minY * sb, sb, Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1) * (ink ? 0.5 : 1), detail);
+    if (detail && sprites.grain) { c.save(); c.globalCompositeOperation = 'source-atop'; c.fillStyle = grainPattern(c); c.fillRect(0, 0, w, h); c.restore(); }
+    if (ink) {
+      const lw = Math.max(1, Math.round(reg.lw * Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1) * 1.4)), tv = sprites.factory(w, h), t = tv.getContext('2d');
+      t.drawImage(cv, 0, 0); t.globalCompositeOperation = 'source-in'; t.fillStyle = reg.ink; t.fillRect(0, 0, w, h);
+      c.save(); c.globalCompositeOperation = 'destination-over';
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) c.drawImage(tv, dx * lw, dy * lw);
+      c.restore();
+    }
+    if (sprites.posterize) quantise(cv, sprites.posterize);
+    const sp = { cv, ox: m - bb.minX * sb, oy: m - bb.minY * sb, sb, key, ikey, px: w * h };
+    sprites.cache.set(key, sp); const held = sprites.index.get(ikey); if (held) held.push(sp); else sprites.index.set(ikey, [sp]);
+    return sp;
+  }
+  // Pre-render and hold: while the view is still, build the sprites for the zoom levels either side of the current one (whole octaves, the same
+  // ones a zoom draws), for the sprites seen in this frame, a few per frame. A zoom then finds them ready and only downscales. Returns how many it
+  // built, so 0 means nothing is missing. sprites.collect is the map of sprites the frame drew (set by the renderer while this is wanted).
+  function prewarm(scale, budget) {
+    if (!sprites.collect || !sprites.factory) return 0;
+    const q = sprites.dpr || 1, lev = Math.pow(2, Math.ceil(Math.log2(Math.max(1, scale * q)))), levels = [lev, lev * 2, lev / 2].filter(l => l >= 1 && l <= 64);
+    let n = 0;
+    for (const [asset, colours, reg] of sprites.collect.values()) for (const L of levels) {
+      const kk = keysFor(asset, colours, reg, L);
+      if (sprites.cache.has(kk.key)) continue;
+      if (n >= budget) return n;
+      buildSprite(asset, colours, reg, L, L / q, kk); n++;
+    }
+    return n;
+  }
   function drawSprite(ctx, asset, colours, reg, px, py, scale) {
     const lk = Math.max(0.3, Math.min(1, scale / 10));      // adaptive ink: full width from 10 px per metre up
     if (!sprites.factory) { paint(ctx, asset, colours, reg, px, py, scale, lk); return; }
     // sprites.exact: render at exactly the view's scale, so the blit is 1:1 (sharp, and several times cheaper than a resample).
-    // The viewer sets it once the view has held still; while it is changing, quarter-pixel buckets are used so that a zoom does not
-    // rebuild every sprite on every frame.
-    const q = sprites.dpr || 1, sb = sprites.exact ? Math.max(1, scale * q) : Math.max(1, Math.round(scale * q * 4) / 4);
-    // the colour part of the key is built once per colour set (a hidden property, so copies of a colour set do not inherit it)
-    let ck = colours._sk;
-    if (ck === undefined) { ck = Object.keys(colours).sort().map(k => colours[k] || '-').join(''); Object.defineProperty(colours, '_sk', { value: ck, enumerable: false, writable: true, configurable: true }); }
-    const detail = sprites.detail && asset.group === 'buildings' && sb >= sprites.minDetail;                 // baked detail only where it can be seen
-    const ink = sprites.ink && (asset.group === 'buildings' || asset.group === 'trees') && sb >= sprites.minDetail;   // heavy ink on the silhouette only, hairlines inside
-    const key = asset.id + '|' + asset.heading + '|' + reg.id + '|' + sb + '|' + ck + (detail ? (sprites.grain ? '|d' : '|D') : '') + (ink ? '|i' : '') + (sprites.posterize ? '|p' + sprites.posterize : '');
-    let sp = sprites.cache.get(key);
+    // The viewer sets it once the view has held still; while it is changing, whole octaves are used (sprites at 1, 2, 4, 8 ... px per metre,
+    // always drawn at most 2 times smaller than built), so a zoom crosses one bucket per doubling instead of one every quarter pixel.
+    const q = sprites.dpr || 1, sb = sprites.exact ? Math.max(1, scale * q) : Math.max(1, Math.pow(2, Math.ceil(Math.log2(scale * q))));
+    const kk = keysFor(asset, colours, reg, sb);
+    if (sprites.collect && sprites.exact) sprites.collect.set(kk.ikey, [asset, colours, reg]);
+    let sp = sprites.cache.get(kk.key), sbUse = sb;
+    // While the zoom is changing, a sprite that is missing at the new octave is drawn scaled from the nearest one already held, once this frame's
+    // build budget is spent (maxZoomBuilds). Rebuilding every visible sprite at each new bucket stalled a zoom for 150 to 500 ms at a time. The
+    // scaled blit is soft; the view sharpens (exact sprites, 150 builds a frame) once it stops. With nothing held to scale, a building or tree is
+    // built, and decoration (people, vehicles) is left out for a few frames.
+    if (!sp && sprites.zooming && sprites.builds >= sprites.maxZoomBuilds) {
+      const held = sprites.index.get(kk.ikey); let best = null, bd = Infinity;
+      if (held) for (const h of held) { const r = Math.log(h.sb / sb), d = Math.abs(r); if (r >= -1.6 && r <= 1.4 && d < bd && sprites.cache.get(h.key) === h) { best = h; bd = d; } }
+      if (best) { sp = best; sbUse = best.sb; }
+      else if (asset.group === 'people' || asset.group === 'vehicles') return;
+    }
     if (!sp && sprites.exact && sprites.builds >= sprites.maxBuilds) {      // over this frame's budget: show the bucketed sprite and sharpen on a later frame
       sprites.exact = false; drawSprite(ctx, asset, colours, reg, px, py, scale); sprites.exact = true; return;
     }
-    if (!sp) {
-      sprites.builds++;
-      const bb = asset.bbox, m = 2;
-      const w = Math.ceil((bb.maxX - bb.minX) * sb) + m * 2, h = Math.ceil((bb.maxY - bb.minY) * sb) + m * 2;
-      if (sprites.cache.size > sprites.limit || sprites.pixels + w * h > sprites.maxPixels) { sprites.cache.clear(); sprites.pixels = 0; }
-      sprites.pixels += w * h;
-      const cv = sprites.factory(w, h), c = cv.getContext('2d');
-      paint(c, asset, colours, reg, m - bb.minX * sb, m - bb.minY * sb, sb, Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1) * (ink ? 0.5 : 1), detail);
-      if (detail && sprites.grain) { c.save(); c.globalCompositeOperation = 'source-atop'; c.fillStyle = grainPattern(c); c.fillRect(0, 0, w, h); c.restore(); }
-      if (ink) {
-        const lw = Math.max(1, Math.round(reg.lw * Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1) * 1.4)), tv = sprites.factory(w, h), t = tv.getContext('2d');
-        t.drawImage(cv, 0, 0); t.globalCompositeOperation = 'source-in'; t.fillStyle = reg.ink; t.fillRect(0, 0, w, h);
-        c.save(); c.globalCompositeOperation = 'destination-over';
-        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) c.drawImage(tv, dx * lw, dy * lw);
-        c.restore();
-      }
-      if (sprites.posterize) quantise(cv, sprites.posterize);
-      sp = { cv, ox: m - bb.minX * sb, oy: m - bb.minY * sb };
-      sprites.cache.set(key, sp);
-    }
-    const k = scale / sb;                                                            // sprite pixels to canvas units
+    if (!sp) { sprites.builds++; sp = buildSprite(asset, colours, reg, sb, scale, kk); }
+    const k = scale / sbUse;                                                         // sprite pixels to canvas units
     const dx = Math.round((px - sp.ox * k) * q) / q, dy = Math.round((py - sp.oy * k) * q) / q;   // whole device pixels: no sub-pixel filtering
     if (q === 1 && Math.abs(k - 1) < 1e-9) ctx.drawImage(sp.cv, dx, dy);                        // 1:1: no resampling at all
     else ctx.drawImage(sp.cv, dx, dy, Math.round(sp.cv.width * k * q) / q, Math.round(sp.cv.height * k * q) / q);
@@ -801,7 +842,7 @@
     }
   };
 
-  root.AssetLib = { quantise, DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, spritePlacement, sprites, buildAsset,
+  root.AssetLib = { quantise, prewarm, DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, spritePlacement, sprites, buildAsset,
                     makeOutfit, vehicleTint, pickFleet, pickPerson, vehicleColours, personColours, flagsOf, scales, mix, shade, hash, hashStr, isData, faceOf,
                     registerGroup, baseColours, pickWeighted,
                     CARBON, theme, asTheme, resolveLook, snapTo, toGray };

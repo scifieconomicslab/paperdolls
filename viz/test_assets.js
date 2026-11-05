@@ -599,4 +599,56 @@ test('settling is spread over frames: no frame rebuilds more than the budget, an
   A.sprites.exact = false;
 });
 
+test('zooming never rebuilds more than the zoom budget in a frame, still draws every building, and sharpens once it stops', () => {
+  let createCanvas; try { createCanvas = require(process.env.NODE_CANVAS || 'canvas').createCanvas; } catch (e) { console.log('SKIP (node canvas not installed)'); return; }
+  A.sprites.factory = (w, h) => createCanvas(w, h); A.sprites.cache.clear(); A.sprites.pixels = 0; if (A.sprites.index) A.sprites.index.clear();
+  const s = sim('nw'), W = 900, H = 600, ctx = createCanvas(W, H).getContext('2d'), bg = A.REG.colorfigures.bg; s.opts.holdZoom = false;   // this one is about the sprite path, not the held picture
+  const mk = k => ({ w: W, h: H, scale: k, ox: W / 2 - (330 - 262) * k * 0.8660254, oy: H / 2 - (330 + 262) * k * 0.5 });
+  const painted = () => { const d = ctx.getImageData(0, 0, W, H).data, b = [parseInt(bg.substr(1, 2), 16), parseInt(bg.substr(3, 2), 16), parseInt(bg.substr(5, 2), 16)]; let n = 0; for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - b[0]) + Math.abs(d[i + 1] - b[1]) + Math.abs(d[i + 2] - b[2]) > 24) n++; return n; };
+  for (let i = 0; i < 80; i++) V.renderFrame(ctx, s, mk(1.5), {});                       // settled, sprites at 1.5 px per metre cached
+  const builds = [], ink = []; for (let i = 1; i <= 40; i++) { V.renderFrame(ctx, s, mk(1.5 * Math.pow(2.6 / 1.5, i / 40)), {}); builds.push(A.sprites.builds); ink.push(painted()); }
+  assert(Math.max(...builds) <= 16, 'builds in the busiest zoom frame: ' + Math.max(...builds) + ' (the old bucket rebuild was over 1000)');
+  for (let i = 0; i < 80; i++) V.renderFrame(ctx, s, mk(2.6), {});
+  const settledInk = painted();
+  assert(Math.min(...ink) > settledInk * 0.9, 'every zoom frame still draws the scene: ' + Math.min(...ink) + ' of ' + settledInk + ' painted pixels');
+  assert.strictEqual(A.sprites.builds, 0, 'sprites are exact again after the zoom stops'); assert.strictEqual(A.sprites.exact, true);
+  A.sprites.exact = false;
+});
+
+test('a still view pre-renders the neighbouring zoom levels a few sprites per frame, so a zoom finds them ready', () => {
+  let createCanvas; try { createCanvas = require(process.env.NODE_CANVAS || 'canvas').createCanvas; } catch (e) { console.log('SKIP (node canvas not installed)'); return; }
+  const W = 900, H = 600, mk = k => ({ w: W, h: H, scale: k, ox: W / 2 - (330 - 262) * k * 0.8660254, oy: H / 2 - (330 + 262) * k * 0.5 });
+  const levels = () => { const o = {}; for (const sp of A.sprites.cache.values()) o[sp.sb] = (o[sp.sb] || 0) + 1; return o; };
+  function run(prewarm) {                                   // settle at 1.5 px per metre, then zoom to 3, counting the sprites built on the way
+    A.sprites.factory = (w, h) => createCanvas(w, h); A.sprites.cache.clear(); A.sprites.pixels = 0; A.sprites.index.clear();
+    const s = sim('nw'), ctx = createCanvas(W, H).getContext('2d'), warm = []; s.opts.prewarm = prewarm; s.opts.holdZoom = false;
+    for (let i = 0; i < 260; i++) { V.renderFrame(ctx, s, mk(1.5), {}); warm.push(A.sprites.warmBuilds || 0); }
+    const held = levels(), builds = []; for (let i = 1; i <= 40; i++) { V.renderFrame(ctx, s, mk(1.5 * Math.pow(2, i / 40)), {}); builds.push(A.sprites.builds); }
+    A.sprites.exact = false; return { warm: Math.max(...warm), held, total: builds.reduce((a, b) => a + b, 0) };
+  }
+  const off = run(false), on = run(true);
+  assert.strictEqual(off.warm, 0, 'nothing is pre-rendered when it is switched off');
+  assert(on.warm > 0 && on.warm <= 12, 'pre-render builds per frame: ' + on.warm);
+  assert(on.held[1] > 50 && on.held[2] > 50 && on.held[4] > 50, 'levels 1, 2 and 4 are held: ' + JSON.stringify(on.held));
+  assert(on.total < off.total * 0.5, 'sprites built during the zoom: ' + on.total + ' with the levels held, ' + off.total + ' without');
+});
+
+test('zooming scales the last sharp frame instead of redrawing the scene, and a big jump or a stop draws for real', () => {
+  let createCanvas; try { createCanvas = require(process.env.NODE_CANVAS || 'canvas').createCanvas; } catch (e) { console.log('SKIP (node canvas not installed)'); return; }
+  A.sprites.factory = (w, h) => createCanvas(w, h); A.sprites.cache.clear(); A.sprites.pixels = 0; A.sprites.index.clear();
+  const W = 900, H = 600, mk = k => ({ w: W, h: H, scale: k, ox: W / 2 - (330 - 262) * k * 0.8660254, oy: H / 2 - (330 + 262) * k * 0.5 });
+  const s = sim('nw'), ctx = createCanvas(W, H).getContext('2d');
+  const painted = () => { const d = ctx.getImageData(0, 0, W, H).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] < 700) n++; return n; };
+  for (let i = 0; i < 80; i++) V.renderFrame(ctx, s, mk(2), {});
+  const settled = painted(), before = s.snapFrames || 0, ink = [];
+  for (let i = 1; i <= 20; i++) { V.renderFrame(ctx, s, mk(2 * Math.pow(1.5, i / 20)), {}); ink.push(painted()); }          // 2 to 3 px per metre: a ratio of 1.5
+  assert(s.snapFrames - before >= 18, 'frames drawn from the held picture during a 1.5 times zoom: ' + (s.snapFrames - before) + ' of 20');
+  assert(Math.min(...ink) > settled * 0.85, 'the held picture still shows the scene: ' + Math.min(...ink) + ' of ' + settled);
+  const mid = s.snapFrames; V.renderFrame(ctx, s, mk(9), {});
+  assert.strictEqual(s.snapFrames, mid, 'a jump of 3 times is drawn for real');
+  for (let i = 0; i < 6; i++) V.renderFrame(ctx, s, mk(9), {});
+  assert.strictEqual(A.sprites.exact, true); assert.strictEqual(s.snapFrames, mid, 'a view that has stopped is drawn for real, sharp');
+  A.sprites.exact = false;
+});
+
 console.log(passed + ' passed' + (process.exitCode ? ', with failures' : ''));
