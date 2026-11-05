@@ -1,0 +1,34 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: pip install -r requirements-dev.txt
+      - run: npm ci
+      - name: Doctor with the packages installed
+        run: python bin/paperdolls doctor
+      - name: Python and JavaScript tests
+        run: python -m pytest tests -q
+      - name: The built viewer pages are up to date
+        run: |
+          python viz/build_pages.py
+          git diff --exit-code -- viz/viewer_built.html viz/library_catalogue_built.html

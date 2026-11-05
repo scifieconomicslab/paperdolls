@@ -54,7 +54,7 @@ Show the frames and ask for feedback. Change `render.yaml` through the intake, n
 paperdolls build render.yaml trajectory.npz --out replay.html
 ```
 
-Report the file size and say which parts are invented. Another model file must follow `docs/model-interface.md`.
+Report the file size and say which parts are invented. Another model file must follow `docs/model-interface.md`. For a model that is not Great Retrofit, set `replay.legend` in `render.yaml` to name the four states in that model's words; without it the frames say "State 1" to "State 4". Never leave retrofit wording on another model's picture.
 
 ## Place scene
 

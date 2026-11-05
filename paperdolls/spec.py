@@ -83,6 +83,10 @@ def validate(data):
     weeks = rep.get("weeks", [])
     if not weeks or any((not isinstance(w, int)) or w < 0 or w >= int(params["run_time"]) for w in weeks):
         raise SpecError(f"replay.weeks must be integers within 0..{int(params['run_time'])-1}")
+    leg = rep.get("legend")
+    if leg is not None:
+        if not isinstance(leg, dict) or not leg or set(leg) - set(STATE_KEYS) - {"investor"} or any(not isinstance(v, str) or not v.strip() for v in leg.values()):
+            raise SpecError("replay.legend must map some of to_do, queued, in_progress, finished and investor to a label")
     bad = set(rep.get("registers", [])) - REGISTERS
     if bad:
         raise SpecError(f"unknown registers: {sorted(bad)}")
@@ -92,6 +96,26 @@ def validate(data):
     if unknown:
         raise SpecError(f"unknown palette families: {unknown}. Known: {sorted(families)}")
     return True
+
+
+STATE_KEYS = ("to_do", "queued", "in_progress", "finished")
+RETROFIT_LEGEND = [("To do", "to_do"), ("Queued", "queued"), ("In retrofit", "in_progress"),
+                   ("Retrofitted (held)", "finished"), ("Investor-owned (purple roof)", "investor")]
+
+
+def legend_for(data):
+    """The legend a replay frame carries, as (label, key) pairs, so it never describes a model that is not the one drawn.
+
+    replay.legend (a mapping from to_do, queued, in_progress, finished and optionally investor to a label) wins. Without it, the vendored
+    Great Retrofit model gets its retrofit labels, and any other model file gets neutral ones ("State 1" to "State 4", no investor entry),
+    because the four states are the exporter's codes and mean whatever that model says they mean."""
+    legend = (data.get("replay") or {}).get("legend")
+    if legend:
+        out = [(str(legend[k]), k) for k in STATE_KEYS if k in legend]
+        return out + ([(str(legend["investor"]), "investor")] if "investor" in legend else [])
+    if (data.get("model") or {}).get("path"):
+        return [(f"State {i + 1}", k) for i, k in enumerate(STATE_KEYS)]
+    return RETROFIT_LEGEND
 
 
 def require_confirmed(path):

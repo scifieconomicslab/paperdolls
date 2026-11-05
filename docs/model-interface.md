@@ -22,6 +22,17 @@ on_week(t, buildings, households, coops)
 - `households` is a dict keyed by household id. A household may have `is_investor`; when it is true, the building it owns is drawn with the investor marker.
 - The hook is read-only. It must not change model state and must not draw from the model's random number generator. `paperdolls check` runs the model with and without the hook and fails if any result array differs.
 
+## Naming the states
+
+The exporter stores four state codes, and the replay frames colour them. For the vendored Great Retrofit model the legend says "To do", "Queued", "In retrofit" and "Retrofitted (held)", and shows an investor entry. For any other model file the legend says "State 1" to "State 4" with no investor entry, because the four codes mean whatever that model says. Give them its words in `render.yaml`:
+
+```yaml
+replay:
+  legend: {to_do: Susceptible, queued: Exposed, in_progress: Infectious, finished: Recovered}
+```
+
+Keys are `to_do`, `queued`, `in_progress`, `finished` and optionally `investor`. A model with no investors simply never sets `is_investor`.
+
 ## What `check` tests
 
 | Check | Fails the run? |

@@ -134,3 +134,41 @@ def test_placeholder_viewer_needs_no_scene(work):
     lr("place", "p.yaml", cwd=work)
     lr("viewer", "p.yaml", cwd=work)
     assert (work / "paperdolls-out" / "placeholder-viewer.html").stat().st_size > 50_000
+
+
+def test_doctor_runs_and_names_the_fix_when_packages_are_missing():
+    """doctor is the check that finds missing packages, so it must not crash on them."""
+    code = ("import sys; [sys.modules.__setitem__(m, None) for m in ('numpy', 'PIL', 'yaml')]\n"
+            f"sys.path.insert(0, {str(ROOT)!r}); from paperdolls.cli import main; main(['doctor'])")
+    p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert p.returncode == 1 and "Traceback" not in p.stderr, p.stderr
+    assert "FAIL  Python packages: missing: numpy, pillow, pyyaml" in p.stdout and "pip install" in p.stdout
+
+
+def _replay_spec(tmp_path, model_path=None, legend=None):
+    sp = {"goal": "model_replay", "name": "t", "model": {"params": {"n": 10, "run_time": 5}}, "look": {"region": "nw", "register": "colorfigures"},
+          "replay": {"weeks": [0, 4]}}
+    if model_path:
+        sp["model"]["path"] = model_path
+    if legend:
+        sp["replay"]["legend"] = legend
+    f = tmp_path / "render.yaml"
+    f.write_text(yaml.safe_dump(sp), encoding="utf-8")
+    return f
+
+
+def test_legend_never_describes_a_model_that_is_not_the_one_drawn(tmp_path):
+    from paperdolls import spec
+    vendored = spec.load(_replay_spec(tmp_path))
+    assert [k for _, k in spec.legend_for(vendored)][-1] == "investor"                       # Great Retrofit: its own labels
+    other = spec.load(_replay_spec(tmp_path, model_path="m.py"))
+    labels = [l for l, _ in spec.legend_for(other)]
+    assert labels == ["State 1", "State 2", "State 3", "State 4"]                            # another model: neutral, no retrofit words
+    named = spec.load(_replay_spec(tmp_path, model_path="m.py", legend={"to_do": "Susceptible", "in_progress": "Infectious", "finished": "Recovered"}))
+    assert spec.legend_for(named) == [("Susceptible", "to_do"), ("Infectious", "in_progress"), ("Recovered", "finished")]
+
+
+def test_legend_must_use_known_states(tmp_path):
+    from paperdolls import spec
+    with pytest.raises(spec.SpecError, match="replay.legend"):
+        spec.load(_replay_spec(tmp_path, legend={"sick": "Sick"}))

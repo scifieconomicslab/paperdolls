@@ -97,7 +97,7 @@ class Renderer:
         ImageDraw.Draw(mask).polygon([(p[0]-minx, p[1]-miny) for p in quad], fill=255)
         img.paste(warped, (minx, miny), mask)
 
-    def frame(self, palette_fam, register, codes, week_label="", investor=None):
+    def frame(self, palette_fam, register, codes, week_label="", investor=None, legend=None):
         """Return a PIL image. codes[i] = state code of building i (see STATE_NAMES).
         investor[i] = 1 if building i is owned by an investor household (purple roof)."""
         pal = family_palette(palette_fam)
@@ -177,7 +177,7 @@ class Renderer:
         title = f"{palette_fam['name']} · {R['label']}"
         d.text((34, 24), title, font=_font(26, True), fill=ink)
         d.text((34, 60), f"{week_label}  Layout and vehicles illustrative. Palette proposed, not sampled.", font=_font(15), fill=ink)
-        for i, (label, key) in enumerate(LEGEND):
+        for i, (label, key) in enumerate(LEGEND if legend is None else legend):
             x = 34 + (i % 3)*330; y = 900 + (i // 3)*30
             col = (_mix(pal["roof"], R["investor"], 0.55) if key == "investor" else self._state_colour(key, pal, R))
             d.rectangle([x, y, x+20, y+20], fill=col, outline=ink)

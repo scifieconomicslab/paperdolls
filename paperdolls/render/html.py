@@ -9,6 +9,8 @@ def _png_b64(img):
     return base64.b64encode(buf.getvalue()).decode()
 
 def build_page(sp, traj, fams, layout, renderer, codes_fn):
+    from .. import spec as specmod
+    legend = specmod.legend_for(sp)
     name = H.escape(sp["name"])
     note = H.escape(sp.get("notes", "Illustrative replay. Layout, people and vehicles invented. Palettes proposed, not sampled."))
     sections = []
@@ -19,7 +21,7 @@ def build_page(sp, traj, fams, layout, renderer, codes_fn):
             cells = []
             for w in sp["replay"]["weeks"]:
                 img = renderer.frame(fam, reg, codes_fn(traj, w), f"Week {w}",
-                                     investor=codes_fn(traj, w, "investor"))
+                                     investor=codes_fn(traj, w, "investor"), legend=legend)
                 cells.append(f'<figure><img src="data:image/png;base64,{_png_b64(img)}" alt="{H.escape(fam["name"])}, {reg}, week {w}"><figcaption>Week {w}</figcaption></figure>')
             rows.append(f'<h3>{LABELS[reg]}</h3><div class="row">{"".join(cells)}</div>')
         swatches = "".join(f'<span class="sw" title="{k}" style="background:{fam[k]}"></span>' for k in ("wall","wall2","roof","ground","accent","shadow"))

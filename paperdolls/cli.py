@@ -1,9 +1,22 @@
 """Command-line entry points. Every stage is runnable without Claude."""
-import argparse, json, sys, tempfile
+import argparse, importlib, json, sys, tempfile
 from pathlib import Path
-from . import spec as specmod, export, checks, model_loader
-from .render import palettes, block, facades
-from .render.html import build_page
+
+
+class _Lazy:
+    """A module imported on first use. `paperdolls doctor` must run, and say what to install, on a machine that has none of
+    numpy, pillow or pyyaml, so nothing that needs them may load when this file does."""
+    def __init__(self, name):
+        self._name, self._mod = name, None
+
+    def __getattr__(self, attr):
+        if self._mod is None:
+            self._mod = importlib.import_module(self._name, __package__)
+        return getattr(self._mod, attr)
+
+
+specmod, export, checks, model_loader = _Lazy(".spec"), _Lazy(".export"), _Lazy(".checks"), _Lazy(".model_loader")
+palettes, block, facades = _Lazy(".render.palettes"), _Lazy(".render.block"), _Lazy(".render.facades")
 
 def _params(sp):
     return dict(sp["model"]["params"])
@@ -76,7 +89,7 @@ def cmd_frames(a):
             for w in sp["replay"]["weeks"]:
                 codes = export.codes_for_week(traj, w)
                 inv = export.codes_for_week(traj, w, "investor")
-                img = R.frame(fams[pid], reg, codes, f"Week {w}", investor=inv)
+                img = R.frame(fams[pid], reg, codes, f"Week {w}", investor=inv, legend=specmod.legend_for(sp))
                 img.save(out / f"{pid}_{reg}_w{w}.png")
     print(f"wrote frames to {out}")
 
@@ -85,6 +98,7 @@ def cmd_build(a):
     traj = export.load(a.trajectory)
     fams = palettes.load_families()
     n = int(_params(sp)["n"])
+    from .render.html import build_page
     L = block.Layout(n); R = block.Renderer(L, seed=int(_params(sp).get("seed", 0)))
     html = build_page(sp, traj, fams, L, R, export.codes_for_week)
     Path(a.out).write_text(html, encoding="utf-8")
@@ -113,8 +127,11 @@ def cmd_doctor(a):
     add("fail" if missing else "pass", "Python packages", ("missing: " + ", ".join(missing)) if missing else "numpy, pillow and pyyaml are installed",
         f'python3 -m pip install -r "{root / "requirements.txt"}"  (ask the user before installing)')
     try:
-        ok, msg = checks.palette_schema(palettes.load_families())
-        add("pass" if ok else "fail", "Palettes", msg, "Restore assets/palettes.json from the repository.")
+        if missing:
+            add("warn", "Palettes", "not checked until the Python packages are installed", "Install the packages above, then run doctor again.")
+        else:
+            ok, msg = checks.palette_schema(palettes.load_families())
+            add("pass" if ok else "fail", "Palettes", msg, "Restore assets/palettes.json from the repository.")
     except Exception as e:
         add("fail", "Palettes", f"could not read assets/palettes.json: {e}", "Restore assets/palettes.json from the repository.")
     have_model = model_loader.VENDOR.exists()
