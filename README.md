@@ -34,7 +34,7 @@ Ask Claude to make a replay or a scene, or run a command:
 | `/lab-render:place` | Builds a place scene from OpenStreetMap and reads the report with you. |
 | `/lab-render:doctor` | Checks that everything needed is installed. |
 
-The intake is a fixed interview. It asks one question at a time, checks each answer, and ends with a table of every decision. Nothing builds until you say yes to that table, and changing an answer withdraws the yes. The questions are listed in [docs/intake-questions.md](docs/intake-questions.md).
+The intake is a fixed interview. It asks one question at a time and builds up to a decision table that we can agree to or modify before committing. The questions are listed in [docs/intake-questions.md](docs/intake-questions.md).
 
 ## Command line
 
