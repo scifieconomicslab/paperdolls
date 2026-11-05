@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from lab_render import __version__
-from lab_render.intake import render_docs
+from paperdolls import __version__
+from paperdolls.intake import render_docs
 
 ROOT = Path(__file__).resolve().parents[1]
 NAME = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -22,8 +22,8 @@ def frontmatter(path):
 
 def test_manifest():
     m = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
-    assert NAME.match(m["name"]) and m["name"] == "lab-render"
-    assert m["version"] == __version__ == "0.6.2"
+    assert NAME.match(m["name"]) and m["name"] == "paperdolls"
+    assert m["version"] == __version__ == "0.7.0"
     assert m["license"] == "CC-BY-4.0" and m["description"] and m["author"]["name"]
     assert "UNLICENSED" not in json.dumps(m)
 
@@ -61,19 +61,19 @@ def test_no_stale_names_in_plugin_files():
     files = list((ROOT / "skills").rglob("*.md")) + list((ROOT / "commands").glob("*.md")) + list((ROOT / "agents").glob("*.md")) + [ROOT / "README.md"]
     for f in files:
         text = f.read_text(encoding="utf-8")
-        for stale in ("sim.yaml", "python -m lab_render", "retrofit-sim", "UNLICENSED"):
+        for stale in ("sim.yaml", "python -m paperdolls", "retrofit-sim", "UNLICENSED"):
             assert stale not in text, f"{f.relative_to(ROOT)} mentions {stale}"
 
 
-def test_every_lab_render_command_in_the_docs_exists():
+def test_every_paperdolls_command_in_the_docs_exists():
     text = "\n".join(p.read_text(encoding="utf-8") for p in [*(ROOT / "skills").rglob("*.md"), *(ROOT / "commands").glob("*.md"), ROOT / "README.md"])
     known = {"validate", "export", "check", "frames", "build", "ingest", "osm-query", "osm-fetch", "doctor", "looks", "intake", "place", "viewer"}
-    used = set(re.findall(r"(?:^|`)lab-render ([a-z][a-z-]+)", text, re.M))
+    used = set(re.findall(r"(?:^|`)paperdolls ([a-z][a-z-]+)", text, re.M))
     assert used <= known, f"documented commands that do not exist: {used - known}"
 
 
 def test_launcher_and_icon_exist():
-    assert (ROOT / "bin" / "lab-render").read_text().startswith("#!/usr/bin/env python3")
+    assert (ROOT / "bin" / "paperdolls").read_text().startswith("#!/usr/bin/env python3")
     assert "<svg" in (ROOT / "assets" / "icon.svg").read_text()
 
 

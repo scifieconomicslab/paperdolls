@@ -10,7 +10,7 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_ENDPOINT = "https://overpass-api.de/api/interpreter"
-USER_AGENT = "lab-render/0.5 (OSM ingest; https://github.com/scifieconomicslab)"
+USER_AGENT = "paperdolls/0.5 (OSM ingest; https://github.com/scifieconomicslab)"
 
 
 class FetchError(RuntimeError):
@@ -26,7 +26,7 @@ def fetch_overpass(query, out_path, endpoint=DEFAULT_ENDPOINT, timeout=360):
             raw = r.read()
     except urllib.error.HTTPError as e:
         hint = {429: "the server is rate limiting: wait a minute and try again, or use another endpoint", 504: "the query timed out on the server: use a smaller area or --bbox",
-                400: "the server rejected the query: check it with 'lab-render osm-query' and report the message"}.get(e.code, "")
+                400: "the server rejected the query: check it with 'paperdolls osm-query' and report the message"}.get(e.code, "")
         raise FetchError(f"Overpass answered HTTP {e.code} {e.reason}. {hint}".strip())
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         raise FetchError(f"could not reach {endpoint}: {getattr(e, 'reason', e)}. Run the query yourself at overpass-turbo.eu and pass the exported file to 'ingest'.")

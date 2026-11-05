@@ -1,4 +1,4 @@
-# The intake question bank. `lab-render intake` reads this file; docs/intake-questions.md is generated from it.
+# The intake question bank. `paperdolls intake` reads this file; docs/intake-questions.md is generated from it.
 #
 # Fields
 #   id           Dotted path into the project file (render.yaml). "look.region" is stored as look: {region: ...}.
@@ -68,7 +68,7 @@ questions:
     always_ask: true
     ask: "Which model should be replayed?"
     why: "The replay is a picture of exported model state. It never recomputes the economics."
-    note: "Choose vendored only if `lab-render doctor` reports the Great Retrofit model as present."
+    note: "Choose vendored only if `paperdolls doctor` reports the Great Retrofit model as present."
     options:
       - {value: vendored, label: "The Great Retrofit v2 model that ships with the plugin", detail: "Needs vendor/greatretrofit_v2/model.py. See the licence note in that folder."}
       - {value: file, label: "Another model file", detail: "It must follow docs/model-interface.md."}
@@ -167,7 +167,7 @@ questions:
       - {value: osm_relation, label: "A named area, by OpenStreetMap relation id", detail: "Cleanest: the map is cut to the boundary."}
       - {value: bbox, label: "A box on the map", detail: "South, west, north and east, in degrees."}
       - {value: extract_file, label: "An OpenStreetMap file I already have", detail: "Overpass JSON, OSM XML or GeoJSON."}
-      - {value: scene_file, label: "A scene.json made by lab-render earlier", detail: "Skips the ingest."}
+      - {value: scene_file, label: "A scene.json made by paperdolls earlier", detail: "Skips the ingest."}
       - {value: placeholder, label: "No place yet", detail: "Uses the synthetic placeholder scene."}
 
   - id: place.relation
@@ -266,7 +266,7 @@ questions:
     label: Output folder
     group: output
     type: text
-    default: lab-render-out
+    default: paperdolls-out
     min: 1
     max: 120
     ask: "Which folder should the results go in?"

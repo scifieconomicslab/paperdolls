@@ -102,5 +102,5 @@ def require_confirmed(path):
         return
     from .intake import Intake
     if not Intake(path).confirmed:
-        raise SpecError("the user has not confirmed the decisions. Run 'lab-render intake next' and follow it to the end: "
+        raise SpecError("the user has not confirmed the decisions. Run 'paperdolls intake next' and follow it to the end: "
                         "show the table, get a yes, and record it.")

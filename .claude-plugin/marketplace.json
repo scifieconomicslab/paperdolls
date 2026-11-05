@@ -9,10 +9,10 @@
   },
   "plugins": [
     {
-      "name": "lab-render",
+      "name": "paperdolls",
       "source": "./",
       "description": "Isometric visuals for policy audiences: replay renders of agent-based economic simulations and scenes of real places built from OpenStreetMap.",
-      "version": "0.6.2",
+      "version": "0.7.0",
       "license": "CC-BY-4.0",
       "keywords": ["simulation", "visualisation", "isometric", "policy"]
     }

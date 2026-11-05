@@ -20,7 +20,7 @@ on_week(t, buildings, households, coops)
 - `buildings` is a list. Each building has an `id`, a `state` and an `owner_id`.
 - `state` is one of `to_do`, `queued`, `in_progress` or `finished`. Any other value is drawn as `to_do`.
 - `households` is a dict keyed by household id. A household may have `is_investor`; when it is true, the building it owns is drawn with the investor marker.
-- The hook is read-only. It must not change model state and must not draw from the model's random number generator. `lab-render check` runs the model with and without the hook and fails if any result array differs.
+- The hook is read-only. It must not change model state and must not draw from the model's random number generator. `paperdolls check` runs the model with and without the hook and fails if any result array differs.
 
 ## What `check` tests
 

@@ -2,8 +2,8 @@
 import json
 from pathlib import Path
 
-from lab_render import checks
-from lab_render.render import palettes
+from paperdolls import checks
+from paperdolls.render import palettes
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = json.loads((ROOT / "assets" / "palettes.json").read_text(encoding="utf-8"))

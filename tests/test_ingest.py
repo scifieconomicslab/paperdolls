@@ -15,8 +15,8 @@ import pytest
 
 import osm_fixture as F
 from conftest import node_env
-from lab_render import cli
-from lab_render.ingest import build, classify, geo, query, readers, report
+from paperdolls import cli
+from paperdolls.ingest import build, classify, geo, query, readers, report
 
 ROOT = Path(__file__).resolve().parents[1]
 NODE = shutil.which("node")
@@ -398,7 +398,7 @@ import http.server
 import threading
 import urllib.parse
 
-from lab_render.ingest import fetch
+from paperdolls.ingest import fetch
 
 
 class _FakeOverpass(http.server.BaseHTTPRequestHandler):
@@ -433,7 +433,7 @@ def test_fetch_sends_the_query_as_a_form_post_with_a_user_agent_and_saves_the_an
     q = query.overpass_query(relation=REL)
     n = fetch.fetch_overpass(q, tmp_path / "e.json", endpoint=overpass)
     assert n > 100 and _FakeOverpass.seen["data"] == q
-    assert "application/x-www-form-urlencoded" in _FakeOverpass.seen["ct"] and "lab-render" in _FakeOverpass.seen["ua"]
+    assert "application/x-www-form-urlencoded" in _FakeOverpass.seen["ct"] and "paperdolls" in _FakeOverpass.seen["ua"]
     scene, _ = build.ingest(tmp_path / "e.json", boundary_relation=REL)
     assert len(scene["buildings"]) == 134, "what was fetched can be ingested"
 

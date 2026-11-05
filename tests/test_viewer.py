@@ -9,7 +9,7 @@ import pytest
 
 import osm_fixture as F
 from conftest import node_env
-from lab_render.ingest import build
+from paperdolls.ingest import build
 
 ROOT = Path(__file__).resolve().parents[1]
 NODE = shutil.which("node")

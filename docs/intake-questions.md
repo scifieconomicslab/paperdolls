@@ -1,6 +1,6 @@
 # Intake questions
 
-Generated from `assets/intake_questions.yaml` by `lab-render intake docs`. Edit the YAML and regenerate, not this file.
+Generated from `assets/intake_questions.yaml` by `paperdolls intake docs`. Edit the YAML and regenerate, not this file.
 
 The intake asks these questions in order. A question appears only when its `when` condition holds. Questions marked **always** are asked even when a default exists.
 
@@ -51,7 +51,7 @@ Why: The replay is a picture of exported model state. It never recomputes the ec
 - options:
   - `vendored`: The Great Retrofit v2 model that ships with the plugin. Needs vendor/greatretrofit_v2/model.py. See the licence note in that folder.
   - `file`: Another model file. It must follow docs/model-interface.md.
-- note for the model: Choose vendored only if `lab-render doctor` reports the Great Retrofit model as present.
+- note for the model: Choose vendored only if `paperdolls doctor` reports the Great Retrofit model as present.
 
 ### `model.path`: Model file
 
@@ -129,7 +129,7 @@ Why: Each choice needs different details, and a named area clips most cleanly.
   - `osm_relation`: A named area, by OpenStreetMap relation id. Cleanest: the map is cut to the boundary.
   - `bbox`: A box on the map. South, west, north and east, in degrees.
   - `extract_file`: An OpenStreetMap file I already have. Overpass JSON, OSM XML or GeoJSON.
-  - `scene_file`: A scene.json made by lab-render earlier. Skips the ingest.
+  - `scene_file`: A scene.json made by paperdolls earlier. Skips the ingest.
   - `placeholder`: No place yet. Uses the synthetic placeholder scene.
 
 ### `place.relation`: OSM relation id
@@ -222,4 +222,4 @@ Ask: "Which folder should the results go in?"
 
 Why: Every file the plugin writes goes there.
 
-- type: text; default: `lab-render-out`; range: 1 to 120
+- type: text; default: `paperdolls-out`; range: 1 to 120

@@ -139,7 +139,7 @@ Coordinates are metres in a local frame.
 
 A road's `width`, `pavement`, `cycle` and `tram` override its class. `pedestrian` carries people only; `tramway` is a tram track with no road alongside. `VizLib.validateScene(scene)` checks a scene and returns `{ ok, errors, warnings }`; `createSim` refuses an invalid scene with the first reasons.
 
-`makePlaceholderScene(seed)` is a synthetic stand-in. `lab-render ingest` builds the same shape from an OpenStreetMap extract (see the plugin README): it rotates the frame so the dominant street direction lies on an axis, maps OSM tags to classes, archetypes, storeys and tree kinds, and writes a report listing every assumption. The viewer (`viewer_built.html`) loads a scene file with its Scene control, pans by dragging, zooms with the wheel, and shows the OpenStreetMap attribution.
+`makePlaceholderScene(seed)` is a synthetic stand-in. `paperdolls ingest` builds the same shape from an OpenStreetMap extract (see the plugin README): it rotates the frame so the dominant street direction lies on an axis, maps OSM tags to classes, archetypes, storeys and tree kinds, and writes a report listing every assumption. The viewer (`viewer_built.html`) loads a scene file with its Scene control, pans by dragging, zooms with the wheel, and shows the OpenStreetMap attribution.
 
 ### Rendering cost
 
@@ -214,6 +214,6 @@ Ingest of 12,500 buildings takes about 1.1 s and the scene file is about 3 MB. B
 8. **Depth sorting** is by centre, so wide, tall or long things (towers, trams, buses, large tree crowns) can mis-order against a neighbour at a junction.
 9. **Wheelchair user** is the weakest figure; moped and motorbike detail is small at neighbourhood zoom. People walk a random path with no collision or queueing, and there is no level-of-detail at far zoom.
 10. **Regional tables are proposals**: fleets, climate numbers, drive sides, building grammar and species mixes need local review before policy use.
-11. **The Python frame renderer is the older one.** `lab_render/render` (used by `lab-render frames` and `build`) does not use looks, trees or the formal theme. The JavaScript scene library does. The pipeline should move to it.
+11. **The Python frame renderer is the older one.** `paperdolls/render` (used by `paperdolls frames` and `build`) does not use looks, trees or the formal theme. The JavaScript scene library does. The pipeline should move to it.
 12. **The OpenStreetMap ingest is not built**, including the mapping from OSM tags to archetypes and tree kinds, and the list of assumed defaults for the user to confirm.
 13. **Not run in a real browser.** The pages were exercised headlessly (jsdom with node canvas): no runtime errors, controls rebuild correctly. The look was checked in rendered frames, and the SVG was checked against the painter (they differ only by antialiasing).

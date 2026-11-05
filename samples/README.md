@@ -8,7 +8,7 @@
 Try it: open `viz/viewer_built.html` and choose `samples/osm_fixture_scene.json` with the Scene control. Or rebuild it:
 
 ```
-lab-render ingest samples/osm_fixture_extract.json --out samples/osm_fixture_scene.json --boundary-relation 99001
+paperdolls ingest samples/osm_fixture_extract.json --out samples/osm_fixture_scene.json --boundary-relation 99001
 ```
 
 The attribution shown with a real extract is "© OpenStreetMap contributors (ODbL)". The synthetic one carries the same line so the

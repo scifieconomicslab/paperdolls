@@ -1,13 +1,13 @@
 {
-  "name": "lab-render",
-  "version": "0.6.2",
+  "name": "paperdolls",
+  "version": "0.7.0",
   "description": "Isometric visuals for policy audiences: replay renders of agent-based economic simulations and scenes of real places built from OpenStreetMap.",
   "author": {
     "name": "Sci-Fi Economics Lab",
     "url": "https://github.com/scifieconomicslab"
   },
-  "homepage": "https://github.com/scifieconomicslab/lab-render",
-  "repository": "https://github.com/scifieconomicslab/lab-render",
+  "homepage": "https://github.com/scifieconomicslab/paperdolls",
+  "repository": "https://github.com/scifieconomicslab/paperdolls",
   "license": "CC-BY-4.0",
   "keywords": ["simulation", "visualisation", "isometric", "policy", "agent-based-model", "openstreetmap"]
 }

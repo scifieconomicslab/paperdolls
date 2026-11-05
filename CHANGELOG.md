@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0 (renamed to paperdolls)
+
+- **The project and the plugin are now called paperdolls.** It was lab-render. The command is `paperdolls`, the Python package is `paperdolls`, the commands are `/paperdolls:start`, `place`, `preview`, `build` and `doctor`, the skill is `paperdolls-visuals`, the default output folder is `paperdolls-out`, and the test environment variable is `PAPERDOLLS_NODE_MODULES`. The repository is `scifieconomicslab/paperdolls`.
+- To update an install: `/plugin marketplace add scifieconomicslab/paperdolls`, then `/plugin install paperdolls@scifi-economics-lab`. Scripts that call `lab-render`, import `lab_render` or read `lab-render-out` need the new names.
+- Entries below this one use the old names.
+
 ## 0.6.2 (panning and zooming)
 
 - **World-anchored layer caches.** Profiling showed that still frames cost 10 to 13 ms while panning or zooming cost 46 to 157 ms, because the ground and far-zoom layers were keyed on the view offset and repainted every frame. They are now cached at 1.8 times the view and anchored to the world: a pan frame is one blit, a zoom draws the old layer scaled and repaints once when it stops, and a fractional pan is repainted exactly once it stops. On the 12,500-building scene (node-canvas) pan frames went from 46 to 157 ms down to 5 to 14 ms, and zoom frames from 55 ms down to 6 to 19 ms.

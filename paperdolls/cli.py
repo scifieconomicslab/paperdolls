@@ -160,11 +160,11 @@ def cmd_intake(a):
             return
         if a.icmd == "init":
             Intake.init(a.file, force=a.force)
-            print(f"created {a.file}. Next: lab-render intake next {a.file}")
+            print(f"created {a.file}. Next: paperdolls intake next {a.file}")
             return
         it = Intake(a.file)
         if not Path(a.file).exists():
-            raise IntakeError(f"{a.file} does not exist. Run 'lab-render intake init {a.file}' first.")
+            raise IntakeError(f"{a.file} does not exist. Run 'paperdolls intake init {a.file}' first.")
         if a.icmd == "next":
             r = it.next()
             if a.json:
@@ -173,7 +173,7 @@ def cmd_intake(a):
         elif a.icmd == "answer":
             r = it.answer(a.id, a.value)
             print(f"OK: recorded {r['id']} = {r['value']}")
-            print(f"NEXT: run 'lab-render intake next {a.file}'")
+            print(f"NEXT: run 'paperdolls intake next {a.file}'")
         elif a.icmd == "status":
             rows = it.status()
             if a.json:
@@ -182,7 +182,7 @@ def cmd_intake(a):
                 print(f"{r['state']:9s} {r['id']:28s} {r['value'] if r['value'] is not None else ''}")
         elif a.icmd == "show":
             print(it.show())
-            print(f"\nAsk the user: is this right? Then record the reply: lab-render intake answer {a.file} confirmed yes   (or no)")
+            print(f"\nAsk the user: is this right? Then record the reply: paperdolls intake answer {a.file} confirmed yes   (or no)")
     except IntakeError as e:
         print(f"REJECTED: {e}", file=sys.stderr)
         sys.exit(3)
@@ -206,7 +206,7 @@ def _print_next(r, path):
             print(f"EXAMPLE: {q['example']}")
         if q.get("note_for_model"):
             print(f"NOTE FOR YOU (do not read aloud): {q['note_for_model']}")
-        print(f"RECORD WITH: lab-render intake answer {path} {q['id']} \"<the user's answer>\"")
+        print(f"RECORD WITH: paperdolls intake answer {path} {q['id']} \"<the user's answer>\"")
     elif st == "confirm":
         print(f"NEXT STEP: {r['instruction']}")
     else:
@@ -236,7 +236,7 @@ def cmd_viewer(a):
     scene, sp_path = None, out / "scene.json"
     if sp["place"]["kind"] != "placeholder":
         if not sp_path.exists():
-            raise SystemExit(f"cannot continue: no scene at {sp_path}. Run 'lab-render place {a.spec}' first.")
+            raise SystemExit(f"cannot continue: no scene at {sp_path}. Run 'paperdolls place {a.spec}' first.")
         scene = json.loads(sp_path.read_text(encoding="utf-8"))
     look = sp["look"]
     initial = {k: v for k, v in {"region": look.get("region"), "look": look.get("look"), "reg": look.get("register"), "drive": look.get("drive")}.items() if v}
@@ -288,10 +288,10 @@ def cmd_osm_fetch(a):
         n = fetch_overpass(overpass_query(relation=a.relation, bbox=bbox), a.out, endpoint=a.endpoint or DEFAULT_ENDPOINT)
     except (FetchError, ValueError) as e:
         raise SystemExit(f"fetch failed: {e}")
-    print(f"wrote {a.out} ({n} elements). Next: lab-render ingest {a.out}" + (f" --boundary-relation {a.relation}" if a.relation else ""))
+    print(f"wrote {a.out} ({n} elements). Next: paperdolls ingest {a.out}" + (f" --boundary-relation {a.relation}" if a.relation else ""))
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="lab-render")
+    ap = argparse.ArgumentParser(prog="paperdolls")
     sub = ap.add_subparsers(required=True)
     s = sub.add_parser("validate"); s.add_argument("spec"); s.set_defaults(f=cmd_validate)
     s = sub.add_parser("export"); s.add_argument("spec"); s.add_argument("--out"); s.set_defaults(f=cmd_export)

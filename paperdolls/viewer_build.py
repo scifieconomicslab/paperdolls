@@ -29,7 +29,7 @@ def _fill(template, **extra):
     return out
 
 
-def build_viewer(scene=None, initial=None, title="Lab Render viewer"):
+def build_viewer(scene=None, initial=None, title="Paperdolls viewer"):
     """The viewer page. With a scene, the page opens on it; without one it shows the synthetic placeholder.
 
     initial: optional {"region", "look", "reg", "drive"} to start with."""

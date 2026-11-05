@@ -1,7 +1,7 @@
 {
-  "name": "lab-render-dev",
+  "name": "paperdolls-dev",
   "private": true,
-  "description": "Test dependencies for lab-render. The viewer itself needs no packages: the HTML pages are self-contained.",
+  "description": "Test dependencies for paperdolls. The viewer itself needs no packages: the HTML pages are self-contained.",
   "scripts": {
     "test": "node viz/test_camera.js && node viz/test_assets.js"
   },

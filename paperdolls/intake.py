@@ -2,11 +2,11 @@
 
 A model runs the loop; this module decides what to ask next and checks every answer.
 
-    lab-render intake init  render.yaml
-    lab-render intake next  render.yaml         # the next question, or "complete"
-    lab-render intake answer render.yaml ID VALUE
-    lab-render intake show  render.yaml         # the decision table; the user must say yes to it
-    lab-render intake status render.yaml
+    paperdolls intake init  render.yaml
+    paperdolls intake next  render.yaml         # the next question, or "complete"
+    paperdolls intake answer render.yaml ID VALUE
+    paperdolls intake show  render.yaml         # the decision table; the user must say yes to it
+    paperdolls intake status render.yaml
 
 The questions live in assets/intake_questions.yaml. Nothing here invents an answer: a default is applied only when the bank says so, and
 every default is listed in the decision table. Any change to an answer withdraws an earlier "yes", so the user always confirms what will
@@ -412,7 +412,7 @@ class Intake:
         self.save()
         if self.confirmed:
             return {"status": "complete", **self.progress(answered, applicable)}
-        return {"status": "confirm", "instruction": "Run 'lab-render intake show', present the table to the user, and ask whether it is right. Record the reply with 'intake answer ... confirmed yes' or 'no'.",
+        return {"status": "confirm", "instruction": "Run 'paperdolls intake show', present the table to the user, and ask whether it is right. Record the reply with 'intake answer ... confirmed yes' or 'no'.",
                 **self.progress(answered, applicable)}
 
     def apply_default(self, q):
@@ -493,7 +493,7 @@ def render_docs():
     """The question bank as Markdown, for docs/intake-questions.md. A test keeps the committed file in step with the bank."""
     bank = load_bank()
     out = ["# Intake questions", "",
-           "Generated from `assets/intake_questions.yaml` by `lab-render intake docs`. Edit the YAML and regenerate, not this file.", "",
+           "Generated from `assets/intake_questions.yaml` by `paperdolls intake docs`. Edit the YAML and regenerate, not this file.", "",
            "The intake asks these questions in order. A question appears only when its `when` condition holds. Questions marked **always** are asked even when a default exists.", ""]
     for gid, title in bank["groups"].items():
         qs = [q for q in bank["questions"] if q["group"] == gid]

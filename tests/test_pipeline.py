@@ -3,8 +3,8 @@ import json
 from pathlib import Path
 import numpy as np
 import pytest
-from lab_render import spec, export, checks, model_loader
-from lab_render.render import palettes, facades, block
+from paperdolls import spec, export, checks, model_loader
+from paperdolls.render import palettes, facades, block
 from conftest import needs_model
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -1,13 +1,13 @@
 ---
-name: lab-render-visuals
-description: Make isometric visuals for policy audiences with lab-render. Use when the user wants to draw an agent-based economic simulation (the Great Retrofit model or another model file) as a replay page, or build a scene of a real place from OpenStreetMap and open it in the viewer. Covers the intake, the checks, the frames, the replay page and the viewer.
+name: paperdolls-visuals
+description: Make isometric visuals for policy audiences with paperdolls. Use when the user wants to draw an agent-based economic simulation (the Great Retrofit model or another model file) as a replay page, or build a scene of a real place from OpenStreetMap and open it in the viewer. Covers the intake, the checks, the frames, the replay page and the viewer.
 ---
 
-# lab-render visuals
+# paperdolls visuals
 
 A project is one of two kinds. A **model replay** records one run of a simulation and draws chosen weeks as isometric frames in a single HTML page. A **place scene** turns OpenStreetMap data into a scene and opens it in an offline viewer. The two are not linked yet: the model's buildings have ids but no coordinates, so a replay cannot sit on a real map.
 
-The commands are in the plugin's `bin/` folder, which is on the Bash tool's PATH, so run them as `lab-render ...`. If the command is not found, run `python3 "${CLAUDE_PLUGIN_ROOT}/bin/lab-render" ...` instead.
+The commands are in the plugin's `bin/` folder, which is on the Bash tool's PATH, so run them as `paperdolls ...`. If the command is not found, run `python3 "${CLAUDE_PLUGIN_ROOT}/bin/paperdolls" ...` instead.
 
 ## Rules
 
@@ -20,17 +20,17 @@ The commands are in the plugin's `bin/` folder, which is on the Bash tool's PATH
 
 ## Start: check the install
 
-Run `lab-render doctor`. It checks the Python version, the three packages (numpy, pillow, pyyaml), the palettes, the viewer templates and the vendored model. If packages are missing, show the user the install command it prints and ask before running it.
+Run `paperdolls doctor`. It checks the Python version, the three packages (numpy, pillow, pyyaml), the palettes, the viewer templates and the vendored model. If packages are missing, show the user the install command it prints and ask before running it.
 
 ## The intake
 
 The intake is a fixed interview that fills in `render.yaml`. The program decides the next question and checks every answer, so you only relay.
 
-1. `lab-render intake init render.yaml`
-2. `lab-render intake next render.yaml` prints the next question: the ID, what to ask, why, how to present it, the options and a suggested answer. Ask the user exactly that, one question at a time. Use buttons or a numbered list when it says so.
-3. `lab-render intake answer render.yaml ID "<the answer>"` records it. If it prints `REJECTED`, read the message to the user, in plain words, and ask again.
-4. Repeat from step 2. When `next` says `confirm`, run `lab-render intake show render.yaml`, show the table to the user, and ask whether it is right.
-5. Record the reply with `lab-render intake answer render.yaml confirmed yes`. Changing any answer afterward withdraws the yes, and you have to show the table again.
+1. `paperdolls intake init render.yaml`
+2. `paperdolls intake next render.yaml` prints the next question: the ID, what to ask, why, how to present it, the options and a suggested answer. Ask the user exactly that, one question at a time. Use buttons or a numbered list when it says so.
+3. `paperdolls intake answer render.yaml ID "<the answer>"` records it. If it prints `REJECTED`, read the message to the user, in plain words, and ask again.
+4. Repeat from step 2. When `next` says `confirm`, run `paperdolls intake show render.yaml`, show the table to the user, and ask whether it is right.
+5. Record the reply with `paperdolls intake answer render.yaml confirmed yes`. Changing any answer afterward withdraws the yes, and you have to show the table again.
 
 Do not guess an answer, and do not edit `render.yaml` by hand. Lines marked "note for you" are for you; do not read them aloud. The full list of questions is in `docs/intake-questions.md`.
 
@@ -41,9 +41,9 @@ If the user wants a simulation drawn on a real map, say that this is not built y
 Run these in order. Stop on any `FAIL` or non-zero exit.
 
 ```
-lab-render export render.yaml --out trajectory.npz
-lab-render check render.yaml
-lab-render frames render.yaml trajectory.npz --out frames/
+paperdolls export render.yaml --out trajectory.npz
+paperdolls check render.yaml
+paperdolls frames render.yaml trajectory.npz --out frames/
 ```
 
 `check` prints PASS or WARN for each test. Report every line to the user, including WARN lines. The Great Retrofit model has known WARNs: its weekly counts do not always add up to the building count, and its "finished" aggregate counts unsold finished buildings, not completed retrofits. The render uses per-building state, so it is unaffected, but the model's authors should hear about both. See `docs/known-issues.md`.
@@ -51,18 +51,18 @@ lab-render frames render.yaml trajectory.npz --out frames/
 Show the frames and ask for feedback. Change `render.yaml` through the intake, not the renderer. When the user approves the frames:
 
 ```
-lab-render build render.yaml trajectory.npz --out replay.html
+paperdolls build render.yaml trajectory.npz --out replay.html
 ```
 
 Report the file size and say which parts are invented. Another model file must follow `docs/model-interface.md`.
 
 ## Place scene
 
-1. `lab-render place render.yaml` finds the extract, ingests it and writes `scene.json` and `scene_report.md` in the output folder. With a relation id or a box it runs the Overpass query itself. If the network is blocked it stops, saves `query.ql`, and tells you what to do: ask the user to run the query at overpass-turbo.eu (Export, raw OSM data, JSON), save the file as `extract.json` in the output folder, and run `place` again.
+1. `paperdolls place render.yaml` finds the extract, ingests it and writes `scene.json` and `scene_report.md` in the output folder. With a relation id or a box it runs the Overpass query itself. If the network is blocked it stops, saves `query.ql`, and tells you what to do: ask the user to run the query at overpass-turbo.eu (Export, raw OSM data, JSON), save the file as `extract.json` in the output folder, and run `place` again.
 2. Read `scene_report.md` and summarise it for the user: how many buildings, roads and trees were drawn; the frame rotation; the estimated share of buildings that fit an asset; where storeys came from; what was left out; every warning.
 3. Show the assumptions and wait for a yes: storeys taken from a building type, archetypes assigned from tags, road widths from lane counts, trees scattered into parks. If most storeys are defaults, say the heights are mostly assumed.
 4. If the estimated asset share is low (many street grids, curved streets), tell the user plainly. The rest are drawn as plain extrusions and counted.
-5. `lab-render viewer render.yaml` writes one HTML file. Open it with the user. Drag or A and D pan, the wheel or W and S zoom, and Fit shows the whole scene.
+5. `paperdolls viewer render.yaml` writes one HTML file. Open it with the user. Drag or A and D pan, the wheel or W and S zoom, and Fit shows the whole scene.
 
 The ingest has only been run on a synthetic extract. The Overpass query and fetch client have not been run against the live service. Say so, and ask the user to read the report before trusting the scene.
 
@@ -70,7 +70,7 @@ OpenStreetMap data is ODbL. Carry "© OpenStreetMap contributors" with any pictu
 
 ## Region, look and register
 
-A region fixes the fleet, climate, building grammar, trees and drive side. Each region has three looks, named by materials and light. The register is `colorfigures` (the region's own colours, hand-inked) or `formal` (a grey technical drawing, with colour reserved for data). See the `palettes` skill. List them with `lab-render looks` or `lab-render looks --region nw`.
+A region fixes the fleet, climate, building grammar, trees and drive side. Each region has three looks, named by materials and light. The register is `colorfigures` (the region's own colours, hand-inked) or `formal` (a grey technical drawing, with colour reserved for data). See the `palettes` skill. List them with `paperdolls looks` or `paperdolls looks --region nw`.
 
 Drive side defaults to the region's guess. For Southeast Asia, East Asia and Sub-Saharan Africa the intake always asks, because countries differ. Never assume it.
 

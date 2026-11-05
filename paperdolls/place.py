@@ -20,7 +20,7 @@ class PlaceError(RuntimeError):
 
 def output_dir(spec_path, data):
     base = Path(spec_path).resolve().parent
-    out = base / get_path(data, "output.dir", "lab-render-out")
+    out = base / get_path(data, "output.dir", "paperdolls-out")
     out.mkdir(parents=True, exist_ok=True)
     return out
 

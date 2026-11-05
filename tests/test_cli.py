@@ -1,6 +1,6 @@
 """End-to-end tests of the command line: intake, place, viewer, doctor and looks.
 
-These run bin/lab-render as a subprocess, the way the skills do, so they also cover the launcher.
+These run bin/paperdolls as a subprocess, the way the skills do, so they also cover the launcher.
 """
 import json
 import os
@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-LAUNCHER = ROOT / "bin" / "lab-render"
+LAUNCHER = ROOT / "bin" / "paperdolls"
 FIXTURE = ROOT / "samples" / "osm_fixture_extract.json"
 
 PLACE_ANSWERS = {"goal": "place_scene", "name": "Fixture block", "audience": "researchers", "place.kind": "extract_file",
@@ -23,7 +23,7 @@ PLACE_ANSWERS = {"goal": "place_scene", "name": "Fixture block", "audience": "re
 def lr(*args, cwd=None, check=True):
     p = subprocess.run([sys.executable, str(LAUNCHER), *map(str, args)], capture_output=True, text=True, cwd=cwd)
     if check and p.returncode != 0:
-        raise AssertionError(f"lab-render {' '.join(map(str, args))} exited {p.returncode}\n{p.stdout}\n{p.stderr}")
+        raise AssertionError(f"paperdolls {' '.join(map(str, args))} exited {p.returncode}\n{p.stdout}\n{p.stderr}")
     return p
 
 
@@ -50,7 +50,7 @@ def work(tmp_path):
 
 
 def test_launcher_is_executable():
-    assert os.access(LAUNCHER, os.X_OK), "run: chmod +x bin/lab-render"
+    assert os.access(LAUNCHER, os.X_OK), "run: chmod +x bin/paperdolls"
 
 
 def test_doctor_reports_ready(work):
@@ -91,7 +91,7 @@ def test_place_and_viewer_on_the_osm_fixture(work):
     run_intake("p.yaml", PLACE_ANSWERS, work)
     out = lr("place", "p.yaml", cwd=work).stdout
     assert "buildings: 135" in out
-    folder = work / "lab-render-out"
+    folder = work / "paperdolls-out"
     scene = json.loads((folder / "scene.json").read_text())
     assert len(scene["buildings"]) == 135 and (folder / "scene_report.md").exists()
     lr("viewer", "p.yaml", cwd=work)
@@ -103,7 +103,7 @@ def test_viewer_needs_the_scene_first(work):
     lr("intake", "init", "p.yaml", cwd=work)
     run_intake("p.yaml", PLACE_ANSWERS, work)
     p = lr("viewer", "p.yaml", cwd=work, check=False)
-    assert p.returncode != 0 and "lab-render place" in (p.stdout + p.stderr)
+    assert p.returncode != 0 and "paperdolls place" in (p.stdout + p.stderr)
 
 
 def test_intake_rejects_a_path_that_does_not_exist(work):
@@ -133,4 +133,4 @@ def test_placeholder_viewer_needs_no_scene(work):
         lr("intake", "answer", "p.yaml", qid, value, cwd=work)
     lr("place", "p.yaml", cwd=work)
     lr("viewer", "p.yaml", cwd=work)
-    assert (work / "lab-render-out" / "placeholder-viewer.html").stat().st_size > 50_000
+    assert (work / "paperdolls-out" / "placeholder-viewer.html").stat().st_size > 50_000

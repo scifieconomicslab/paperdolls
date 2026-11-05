@@ -5,7 +5,7 @@ from pathlib import Path
 
 here = Path(__file__).resolve().parent
 sys.path.insert(0, str(here.parent))
-from lab_render.viewer_build import build_catalogue, build_viewer
+from paperdolls.viewer_build import build_catalogue, build_viewer
 
 for name, html in (("viewer_built.html", build_viewer()), ("library_catalogue_built.html", build_catalogue())):
     (here / name).write_text(html, encoding="utf-8")

@@ -56,7 +56,7 @@
   <div class="card"><b>Library: roads and ground</b><br>local, avenue (cycle lanes), boulevard (tram and median), cycle track. The look sets the surface: asphalt, concrete joints, setts or earth tracks, plus pavements, kerbs, gardens, parks, plazas and water. The formal register adds a faint ground grid.</div>
   <div class="card" style="grid-column:1/-1"><b>Scene schema (input)</b><br>
   <code>{ area, roads:[{id, class, tram?, width?, cycle?, pts:[[x,y],…]}], buildings:[{id, footprint:[[x,y],…], levels, archetype, state, investor}], landuse:[{kind:'park'|'garden'|'square'|'water', footprint}], trees:[[x,y] or [x,y,kind,scale],…] }</code><br>
-  Coordinates are metres in a local frame. <code>lab-render ingest</code> converts an OpenStreetMap extract into this shape (and writes a report of every assumption); load the resulting scene.json with the Scene control above.</div>
+  Coordinates are metres in a local frame. <code>paperdolls ingest</code> converts an OpenStreetMap extract into this shape (and writes a report of every assumption); load the resulting scene.json with the Scene control above.</div>
 </div>
 <script>
 /*__ASSETLIB__*/

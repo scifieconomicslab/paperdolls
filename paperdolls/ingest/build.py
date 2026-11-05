@@ -89,7 +89,7 @@ def ingest(path, rotation="auto", bbox=None, boundary_relation=None, name=None, 
         if not cands and boundary_relation in notes.get("open_relations", []):
             raise IngestError(f"boundary relation {boundary_relation} is in the file but its ways do not close into a ring (the extract may be cut off or missing members). Fetch it again with 'out geom;', or clip with --bbox instead.")
         if not cands:
-            raise IngestError(f"boundary relation {boundary_relation} is not in the file. The extract must include rel({boundary_relation}); see 'lab-render osm-query'.")
+            raise IngestError(f"boundary relation {boundary_relation} is not in the file. The extract must include rel({boundary_relation}); see 'paperdolls osm-query'.")
         best = max(cands, key=lambda f: ring_area(f.coords))
         clip_ring, clip_name = best.coords, best.tags.get("name")
     elif admin:

@@ -13,7 +13,7 @@ Found during the audit of v0.1.0 and kept up to date. Severity is in brackets.
 7. **Performance.** The model recomputes the wealth Gini over all households every week, and `check` runs the model several times. Large runs are slow. (Medium)
 8. **Memory and file size.** The exporter loads every week into memory and the HTML embeds every frame. Eight frames give a 1.2 MB page, so a large spec can make a very large file. (Medium)
 9. **A rerun with construction enabled is only covered by the relaxed check.** (Medium)
-10. **The Python frame renderer is the older one.** `lab_render/render` (used by `frames` and `build`) does not use looks, trees or the formal theme. The JavaScript scene library does. The pipeline should move to it. (Medium)
+10. **The Python frame renderer is the older one.** `paperdolls/render` (used by `frames` and `build`) does not use looks, trees or the formal theme. The JavaScript scene library does. The pipeline should move to it. (Medium)
 11. **One frame rotation per scene.** A city with several street grids gets the rotation that suits the most buildings. The rest fall back to plain extrusions. The report gives the estimated share. (Medium)
 12. **The model's buildings are not linked to the scene's buildings.** The model has ids and no coordinates. Assigning each to a real footprint is the spatial layer, which is not built. (Medium)
 13. **Font fallback.** The renderer looks for DejaVu fonts and falls back to a small bitmap font on other systems. A font should be bundled. (Low)
@@ -35,4 +35,4 @@ Found during the audit of v0.1.0 and kept up to date. Severity is in brackets.
 - Building heights depend on the render seed, so the seed changes the layout.
 - The spec rejects the final week index, which the model does not export.
 - The model's licence is settled: MIT, with the licence text in `vendor/greatretrofit_v2/LICENSE`.
-- `lab-render doctor` replaces the missing setup step. It checks the install and prints the fix for each problem.
+- `paperdolls doctor` replaces the missing setup step. It checks the install and prints the fix for each problem.
