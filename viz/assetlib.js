@@ -313,7 +313,13 @@
 
   // Sprite cache: an asset at a given scale and colouring is painted once into an offscreen canvas, then blitted.
   // Set AssetLib.sprites.factory = (w, h) => canvas (browser: document.createElement; node: createCanvas).
-  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false };
+  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false, ink: false, grain: true, minDetail: 2.5, posterize: 0 };
+  // round each colour channel of a canvas to a multiple of step (alpha untouched). Used once per sprite and per cached layer, never per frame.
+  function quantise(cv, step) {
+    const c = cv.getContext('2d'), d = c.getImageData(0, 0, cv.width, cv.height), a = d.data, k = 1 / step;
+    for (let i = 0; i < a.length; i += 4) { a[i] = Math.min(255, Math.round(a[i] * k) * step); a[i + 1] = Math.min(255, Math.round(a[i + 1] * k) * step); a[i + 2] = Math.min(255, Math.round(a[i + 2] * k) * step); }
+    c.putImageData(d, 0, 0);
+  }
   function drawSprite(ctx, asset, colours, reg, px, py, scale) {
     const lk = Math.max(0.3, Math.min(1, scale / 10));      // adaptive ink: full width from 10 px per metre up
     if (!sprites.factory) { paint(ctx, asset, colours, reg, px, py, scale, lk); return; }
@@ -324,8 +330,9 @@
     // the colour part of the key is built once per colour set (a hidden property, so copies of a colour set do not inherit it)
     let ck = colours._sk;
     if (ck === undefined) { ck = Object.keys(colours).sort().map(k => colours[k] || '-').join(''); Object.defineProperty(colours, '_sk', { value: ck, enumerable: false, writable: true, configurable: true }); }
-    const detail = sprites.detail && asset.group === 'buildings' && sb >= 2.5;                 // baked detail only where it can be seen
-    const key = asset.id + '|' + asset.heading + '|' + reg.id + '|' + sb + '|' + ck + (detail ? '|d' : '');
+    const detail = sprites.detail && asset.group === 'buildings' && sb >= sprites.minDetail;                 // baked detail only where it can be seen
+    const ink = sprites.ink && (asset.group === 'buildings' || asset.group === 'trees') && sb >= sprites.minDetail;   // heavy ink on the silhouette only, hairlines inside
+    const key = asset.id + '|' + asset.heading + '|' + reg.id + '|' + sb + '|' + ck + (detail ? (sprites.grain ? '|d' : '|D') : '') + (ink ? '|i' : '') + (sprites.posterize ? '|p' + sprites.posterize : '');
     let sp = sprites.cache.get(key);
     if (!sp && sprites.exact && sprites.builds >= sprites.maxBuilds) {      // over this frame's budget: show the bucketed sprite and sharpen on a later frame
       sprites.exact = false; drawSprite(ctx, asset, colours, reg, px, py, scale); sprites.exact = true; return;
@@ -337,8 +344,16 @@
       if (sprites.cache.size > sprites.limit || sprites.pixels + w * h > sprites.maxPixels) { sprites.cache.clear(); sprites.pixels = 0; }
       sprites.pixels += w * h;
       const cv = sprites.factory(w, h), c = cv.getContext('2d');
-      paint(c, asset, colours, reg, m - bb.minX * sb, m - bb.minY * sb, sb, Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1), detail);
-      if (detail) { c.save(); c.globalCompositeOperation = 'source-atop'; c.fillStyle = grainPattern(c); c.fillRect(0, 0, w, h); c.restore(); }
+      paint(c, asset, colours, reg, m - bb.minX * sb, m - bb.minY * sb, sb, Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1) * (ink ? 0.5 : 1), detail);
+      if (detail && sprites.grain) { c.save(); c.globalCompositeOperation = 'source-atop'; c.fillStyle = grainPattern(c); c.fillRect(0, 0, w, h); c.restore(); }
+      if (ink) {
+        const lw = Math.max(1, Math.round(reg.lw * Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1) * 1.4)), tv = sprites.factory(w, h), t = tv.getContext('2d');
+        t.drawImage(cv, 0, 0); t.globalCompositeOperation = 'source-in'; t.fillStyle = reg.ink; t.fillRect(0, 0, w, h);
+        c.save(); c.globalCompositeOperation = 'destination-over';
+        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) c.drawImage(tv, dx * lw, dy * lw);
+        c.restore();
+      }
+      if (sprites.posterize) quantise(cv, sprites.posterize);
       sp = { cv, ox: m - bb.minX * sb, oy: m - bb.minY * sb };
       sprites.cache.set(key, sp);
     }
@@ -786,7 +801,7 @@
     }
   };
 
-  root.AssetLib = { DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, spritePlacement, sprites, buildAsset,
+  root.AssetLib = { quantise, DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, spritePlacement, sprites, buildAsset,
                     makeOutfit, vehicleTint, pickFleet, pickPerson, vehicleColours, personColours, flagsOf, scales, mix, shade, hash, hashStr, isData, faceOf,
                     registerGroup, baseColours, pickWeighted,
                     CARBON, theme, asTheme, resolveLook, snapTo, toGray };

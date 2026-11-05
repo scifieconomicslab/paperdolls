@@ -11,14 +11,15 @@ const scene = V.makePlaceholderScene(7), theme = A.theme(fam, undefined, 'colorf
 const B = V.sceneBounds(scene), cx = (B[0] + B[2]) / 2, cy = (B[1] + B[3]) / 2;
 const view = { w: W, h: H, scale: k, ox: W / 2 - (cx - cy) * k * 0.8660254, oy: H / 2 - (cx + cy) * k * 0.5 };
 const med = x => x.sort((p, q) => p - q)[x.length >> 1];
-for (const detail of [false, true]) {
-  const sim = V.createSim(scene, { seed: 5, theme, region: fam.id, detail }); for (let i = 0; i < 40; i++) V.stepSim(sim, 0.1);
+const VARIANTS = [['off', {}], ['detail', { detail: true }], ['detail+ink', { detail: true, ink: true }], ['detail+ink+pixel1.5+posterize+fog', { detail: true, ink: true, pixel: 1.5, posterize: 12, fog: true }]];
+for (const [name, extra] of VARIANTS) {
+  const sim = V.createSim(scene, Object.assign({ seed: 5, theme, region: fam.id }, extra)); for (let i = 0; i < 40; i++) V.stepSim(sim, 0.1);
   const cv = createCanvas(W, H), c = cv.getContext('2d');
   const run = v => { const t0 = process.hrtime.bigint(); V.renderFrame(c, sim, v, {}); return Number(process.hrtime.bigint() - t0) / 1e6; };
   const first = run(view); for (let i = 0; i < 60; i++) run(view);
   const still = []; for (let i = 0; i < N; i++) still.push(run(view));
   const pan = []; for (let i = 0; i < N; i++) pan.push(run(Object.assign({}, view, { ox: view.ox + 3 * (i + 1), oy: view.oy + 1.5 * (i + 1) })));
   run(view); for (let i = 0; i < 60; i++) run(view);
-  fs.writeFileSync(path.join(out, 'detail_' + (detail ? 'on' : 'off') + '.png'), cv.toBuffer('image/png'));
-  console.log(`detail ${detail ? 'on ' : 'off'}: first frame ${first.toFixed(0)} ms, settled ${med(still).toFixed(1)} ms, pan ${med(pan).toFixed(1)} ms, sprites cached ${A.sprites.cache.size}`);
+  fs.writeFileSync(path.join(out, 'variant_' + name.replace(/\+/g, '_') + '.png'), cv.toBuffer('image/png'));
+  console.log(`${name.padEnd(32)}: first frame ${first.toFixed(0)} ms, settled ${med(still).toFixed(1)} ms, pan ${med(pan).toFixed(1)} ms, sprites cached ${A.sprites.cache.size}`);
 }

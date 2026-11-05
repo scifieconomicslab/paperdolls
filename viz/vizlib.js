@@ -642,9 +642,41 @@
   // instead of stalling on one.
   const SPRITE_BUILDS_PER_FRAME = 150;
   const OCCLUSION_MIN_ITEMS = 300;
+  // Opt-in finish (colorfigures only): sim.opts.pixel = n (2 or more) draws the scene at 1/n resolution and upscales it with nearest-neighbour, so
+  // every pixel is n by n and the ink is one logical pixel wide; sim.opts.posterize = step rounds each colour channel to a multiple of step (at the
+  // low resolution, so it is cheap); sim.opts.fog = true lays a cool haze toward the top of the screen and darkens the edges. Fog is two gradient
+  // fills. The low-resolution frame has no grain, because at that size grain reads as noise.
   function renderFrame(ctx, sim, view, layers) {
-    const A = A_(); A.sprites.builds = 0; A.sprites.maxBuilds = SPRITE_BUILDS_PER_FRAME;
-    try { return renderFrameInner(ctx, sim, view, layers); } finally { A.sprites.maxBuilds = Infinity; }
+    const A = A_(), o = sim.opts, finish = sim.theme.reg !== 'formal';
+    const ps = finish && A.sprites.factory && o.pixel > 1 ? o.pixel : 1;
+    A.sprites.posterize = ps > 1 && o.posterize > 1 ? o.posterize : 0;
+    A.sprites.grain = ps === 1; A.sprites.minDetail = ps > 1 ? 1.25 : 2.5;
+    A.sprites.builds = 0; A.sprites.maxBuilds = SPRITE_BUILDS_PER_FRAME;
+    try {
+      if (ps === 1) renderFrameInner(ctx, sim, view, layers);
+      else {
+        const iw = Math.ceil(view.w / ps), ih = Math.ceil(view.h / ps);
+        let P = sim._px; if (!P || P.w !== iw || P.h !== ih) { const cv = A.sprites.factory(iw, ih); P = sim._px = { cv, c: cv.getContext('2d', { willReadFrequently: true }), w: iw, h: ih }; }
+        const dpr = A.sprites.dpr; A.sprites.dpr = 1;                       // the low-resolution frame is drawn at device scale 1 and magnified once
+        try { renderFrameInner(P.c, sim, { w: iw, h: ih, scale: view.scale / ps, ox: view.ox / ps, oy: view.oy / ps }, layers); } finally { A.sprites.dpr = dpr; }
+        ctx.save(); ctx.imageSmoothingEnabled = o.pixelSmooth === true; ctx.drawImage(P.cv, 0, 0, iw * ps, ih * ps); ctx.restore();
+      }
+      if (finish && o.fog) drawFog(ctx, sim.theme, view);
+    } finally { A.sprites.maxBuilds = Infinity; }
+  }
+  // The haze is painted once into a canvas the size of the view and blitted each frame.
+  function drawFog(ctx, pal, view) {
+    const A = A_(), key = [view.w, view.h, pal.bg, pal.shadow].join('|');
+    let F = drawFog.cache;
+    if (!F || F.key !== key) {
+      const hz = mixHex(pal.bg, '#c8d8ee', 0.7).match(/\d+/g).map(Number), sh = hexRgb(pal.shadow), cv = A.sprites.factory(Math.ceil(view.w), Math.ceil(view.h)), c = cv.getContext('2d');
+      let g = c.createLinearGradient(0, 0, 0, view.h); g.addColorStop(0, 'rgba(' + hz.join(',') + ',0.42)'); g.addColorStop(0.55, 'rgba(' + hz.join(',') + ',0)');
+      c.fillStyle = g; c.fillRect(0, 0, view.w, view.h);
+      g = c.createRadialGradient(view.w / 2, view.h / 2, view.h * 0.45, view.w / 2, view.h / 2, view.w * 0.62); g.addColorStop(0, 'rgba(' + sh.join(',') + ',0)'); g.addColorStop(1, 'rgba(' + sh.join(',') + ',0.28)');
+      c.fillStyle = g; c.fillRect(0, 0, view.w, view.h);
+      F = drawFog.cache = { key, cv };
+    }
+    ctx.drawImage(F.cv, 0, 0, view.w, view.h);
   }
   function renderFrameInner(ctx, sim, view, layers) {
     layers = Object.assign({ buildings: true, vehicles: true, people: true, trees: true }, layers || {});
@@ -656,7 +688,7 @@
     // the whole view (scale and offset) unchanged for a few frames: cached layers are then repainted exactly if they are off by a fraction of a pixel
     if (zs.ox === view.ox && zs.oy === view.oy && zs.vscale === view.scale) zs.stillView = (zs.stillView || 0) + 1; else { zs.ox = view.ox; zs.oy = view.oy; zs.vscale = view.scale; zs.stillView = 0; }
     const detail = sim.opts.detail === true && pal.reg !== 'formal';
-    A.sprites.detail = detail;
+    A.sprites.detail = detail; A.sprites.ink = sim.opts.ink === true && pal.reg !== 'formal';
     const shadow = mixHex(pal.shadow, pal.bg, 0.72);
     const sRgb = hexRgb(pal.shadow);
     const heightOfEntity = e => e.params ? A_().buildingHeight(e.kind, e.params.N) : e.levels * (LIB.buildings[e.kind] || LIB.buildings.terrace).storeyH;
@@ -678,7 +710,7 @@
         }
       }
     };
-    const F = A.sprites.factory, gkey = [view.w, view.h, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings, detail].join('|');
+    const F = A.sprites.factory, gkey = [view.w, view.h, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings, detail, A.sprites.ink, A.sprites.posterize].join('|');
     const settled = zs.stillView >= 3, zooming = zs.still < 2;
     if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg);
     else drawStatic(ctx, view);
@@ -775,6 +807,7 @@
       const mw = Math.ceil(view.w * LAYER_MARGIN), mh = Math.ceil(view.h * LAYER_MARGIN);
       const cv = A.sprites.factory(Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d');
       c.scale(q, q); paint(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh });
+      if (A.sprites.posterize) A.quantise(cv, A.sprites.posterize);
       L = sim[slot] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh }; sx = mw * q; sy = mh * q;
       sim.layerRepaints = (sim.layerRepaints || 0) + 1;
     }

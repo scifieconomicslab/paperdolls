@@ -42,6 +42,9 @@
   <label><input type="checkbox" id="lVeh" checked> vehicles</label>
   <label><input type="checkbox" id="lPeople" checked> people</label>
   <label><input type="checkbox" id="lDetail"> detail</label>
+  <label><input type="checkbox" id="lInk"> ink outline</label>
+  <label><input type="checkbox" id="lPixel"> pixel</label>
+  <label><input type="checkbox" id="lFog"> fog</label>
   <button id="play" class="on">Pause</button>
   <button id="reseed">New seed</button>
 </div>
@@ -135,6 +138,7 @@
     const drive = document.getElementById('drive').value;
     sim = V.createSim(scene, { seed: state.seed, trafficScale: +document.getElementById('traffic').value,
                                peopleScale: +document.getElementById('people').value, theme: themeNow(), region: state.region, drive: drive === 'auto' ? null : drive, detail: document.getElementById('lDetail').checked });
+    finish();
     applyHooks();
     const st2 = sim.stats, why = Object.keys(st2.reasons).map(k => k + ': ' + st2.reasons[k]).join('; ');
     const kinds = {}; sim.trees.forEach(t => kinds[t.kind] = (kinds[t.kind] || 0) + 1);
@@ -165,6 +169,9 @@
       V.setMotion(sim, 'tram', { mode: 'path', loop: true, path: [[0, -40, 258], [70, 790, 258], [80, 790, 262], [150, -40, 262], [160, -40, 258]] });
     } else V.setMotion(sim, 'tram', null);
   }
+  // ink, pixel and fog are read by the renderer each frame, so they switch on a running sim without a rebuild
+  function finish() { const o = sim.opts; o.ink = document.getElementById('lInk').checked; o.pixel = document.getElementById('lPixel').checked ? 1.5 : 0; o.posterize = o.pixel ? 12 : 0; o.fog = document.getElementById('lFog').checked; }
+  for (const id of ['lInk', 'lPixel', 'lFog']) document.getElementById(id).onchange = finish;
   function layers() { return { buildings: document.getElementById('lBuild').checked, vehicles: document.getElementById('lVeh').checked, people: document.getElementById('lPeople').checked }; }
   let last = performance.now();
   function frame(now) {
