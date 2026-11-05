@@ -1,0 +1,4 @@
+# Runtime dependencies of the lab-render command line.
+numpy>=1.26,<3
+pillow>=10.0
+pyyaml>=6.0

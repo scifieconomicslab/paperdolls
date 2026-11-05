@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asset library: catalogue (people, vehicles, buildings)</title>
+<style>
+ :root { --ink:#231e16; --paper:#f4f1ea; --muted:#5d5950; --line:#d6d1c4; }
+ * { box-sizing:border-box; }
+ body { margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink); background:var(--paper); }
+ header { padding:18px 24px 8px; }
+ h1 { font-size:21px; margin:0 0 4px; }
+ h2 { font-size:17px; margin:0 0 8px; }
+ h3 { font-size:14px; margin:14px 0 6px; }
+ .note { color:var(--muted); max-width:1000px; }
+ .warn { color:#8a2a2a; max-width:1000px; font-size:13px; margin-top:4px; }
+ .controls { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; padding:10px 24px; background:#f8f6f0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+ .controls label { display:flex; gap:6px; align-items:center; }
+ select,button { font:inherit; padding:3px 7px; border:1px solid #9d978a; border-radius:6px; background:#fff; color:var(--ink); }
+ button.on { background:var(--ink); color:#fff; }
+ main { padding:8px 24px 60px; }
+ section { margin:22px 0 34px; border-top:1px solid var(--line); padding-top:12px; }
+ .row { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:flex-end; margin:6px 0 10px; }
+ figure { margin:0; background:#fff; border:1px solid #cfc8b8; border-radius:6px; padding:6px 8px 4px; }
+ figure svg { display:block; }
+ figcaption { font-size:11px; color:var(--muted); padding-top:2px; text-align:center; }
+ .kind { font-weight:600; margin:10px 0 2px; }
+ table { border-collapse:collapse; width:100%; max-width:1100px; }
+ td,th { text-align:left; padding:4px 8px; border-bottom:1px solid var(--line); vertical-align:middle; font-size:13px; }
+ .bar { height:9px; background:#c9bfa6; border-radius:3px; }
+ .meter { display:inline-block; width:54px; height:7px; background:#e4dfd0; border-radius:3px; vertical-align:middle; margin:0 8px 0 4px; }
+ .meter i { display:block; height:100%; background:#7e8a96; border-radius:3px; }
+ .legend { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:13px; margin:6px 0; }
+ .legend span { display:inline-flex; align-items:center; gap:6px; }
+ .legend i { width:16px; height:16px; border:1px solid var(--ink); border-radius:3px; display:inline-block; }
+ pre { background:#fbfaf6; border:1px solid var(--line); border-radius:6px; padding:10px 12px; overflow:auto; font-size:12px; line-height:1.45; max-width:1100px; }
+ code { background:#f0ede4; padding:1px 4px; border-radius:3px; }
+ .outline svg [data-surface] { stroke:#d6007a; stroke-width:2.4; paint-order:stroke; }
+ .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:14px; }
+ .small { font-size:12px; color:var(--muted); }
+ .looks { display:grid; grid-template-columns:repeat(auto-fit,minmax(480px,1fr)); gap:14px; }
+ .regs { display:grid; grid-template-columns:repeat(auto-fit,minmax(540px,1fr)); gap:14px; }
+ .lookcard { background:#fff; border:1px solid #cfc8b8; border-radius:8px; padding:10px 12px; }
+ .lookcard.on { border-color:#231e16; box-shadow:0 0 0 1px #231e16; }
+ .swrow { display:flex; align-items:center; gap:3px; margin:3px 0; }
+ .swl { width:150px; font-size:11px; color:var(--muted); }
+ .swc { width:26px; height:16px; border:1px solid rgba(0,0,0,.35); border-radius:2px; display:inline-block; }
+ .vig { width:100%; height:auto; border:1px solid #cfc8b8; border-radius:6px; margin-top:6px; display:block; }
+</style></head><body>
+<header>
+  <h1>Asset library: catalogue (v0.4: people, vehicles, buildings, trees, themes)</h1>
+  <div class="note">Every asset is defined once, parametrically, and pre-built for the four isometric headings. Each view carries up to three faces: left, right and top (<code>data-face</code> in the SVG). Paper dolls, vehicles and buildings carry a <b>data surface</b> (<code>data-surface</code>): the garment on people, the body or livery on vehicles, the walls on buildings. A simulation recolours it to show an output.</div>
+  <div class="warn">Everything regional here (fleets, climate, outfits, drive side) is a proposal to be checked with local authors. People are paper dolls with one neutral paper tone for head and limbs and no skin tones. Regional variation follows climate and the local fleet, never identity.</div>
+</header>
+<div class="controls">
+  <label>Region <select id="region"></select></label>
+  <label>Look <select id="look"></select></label>
+  <label>Register <button id="rC" class="on">Colorfigures</button><button id="rF">Formal</button></label>
+  <label>Data colouring <select id="scale"><option value="retrofit">Retrofit state (categorical)</option><option value="seq">Numeric output (sequential)</option></select></label>
+  <label><input type="checkbox" id="outline"> outline data surface</label>
+  <label>Size <input type="range" id="size" min="12" max="40" value="22"></label>
+</div>
+<main id="out"></main>
+<script>
+/*__ASSETLIB__*/
+</script>
+<script>
+/*__BUILDINGLIB__*/
+</script>
+<script>
+/*__TREELIB__*/
+</script>
+<script>
+/*__VIZLIB__*/
+</script>
+<script>
+(function () {
+  const A = window.AssetLib, V = window.VizLib;
+  A.sprites.factory = (w, hh) => { const cv = document.createElement('canvas'); cv.width = w; cv.height = hh; return cv; };
+  const FAMS = /*__PALETTES__*/;
+  const regionSel = document.getElementById('region'), lookSel = document.getElementById('look');
+  FAMS.families.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.name + ' (' + f.places + ')'; regionSel.appendChild(o); });
+  const st = { region: 'nw', look: 'brick', reg: 'colorfigures', scale: 'retrofit', outline: false, size: 22 };
+  const famRec = () => FAMS.families.find(f => f.id === st.region);
+  const themeNow = () => A.theme(famRec(), st.look, st.reg);
+  function fillLooks() { lookSel.innerHTML = ''; famRec().looks.forEach(k => { const o = document.createElement('option'); o.value = k.id; o.textContent = k.name; lookSel.appendChild(o); }); lookSel.value = st.look; }
+  const HEAD = ['SE', 'SW', 'NW', 'NE'];
+
+  function veh(kind, h, f, seed, dataColour, mul) {
+    const reg = A.REG[st.reg];
+    return A.toSVG(A.getAsset('vehicles', kind, h), A.vehicleColours(kind, reg, A.vehicleTint(f, seed), dataColour), reg, { scale: st.size * A.STYLE.vehicle * (mul || 1) });
+  }
+  function ppl(kind, h, f, regionId, seed, dataColours, mul) {
+    const reg = A.REG[st.reg], n = A.DEFS.people[kind].members.length, outs = [];
+    for (let i = 0; i < n; i++) outs.push(A.makeOutfit(regionId, f, seed + i * 31));
+    return A.toSVG(A.getAsset('people', kind, h, A.flagsOf(outs)), A.personColours(kind, reg, outs, dataColours), reg, { scale: st.size * A.STYLE.person * (mul || 1) });
+  }
+  // building: params from the archetype and region, overlays as geometry, data colour optional
+  function bld(kind, h, f, regionId, W, D, N, seed, ov, dataColour, mul) {
+    const reg = A.REG[st.reg], p = A.buildingParams(regionId, kind, N, { W: W, D: D }, seed), asset = A.getAsset('buildings', kind, h, A.buildingExtra(p, ov || []));
+    return A.toSVG(asset, A.buildingColours(reg, f, { wall: A.wallFor(f, seed), data: dataColour, seed }), reg, { scale: st.size * (mul || 0.55) });
+  }
+  const BSIZE = { terrace: [5, 12, 3], shophouse: [9, 14, 3], block: [24, 14, 5], villa: [10, 12, 2], tower: [20, 20, 12], shed: [28, 18, 1] };
+  const BMUL = { terrace: 0.55, shophouse: 0.5, block: 0.4, villa: 0.5, tower: 0.3, shed: 0.36 };
+  const sw = (cols, label) => '<div class="swrow"><span class="swl">' + label + '</span>' + cols.map(x => '<span class="swc" style="background:' + x + '" title="' + x + '"></span>').join('') + '</div>';
+  function swatchRows(t) { return sw(t.walls, 'walls') + sw(t.roofs.concat(t.accents), 'roofs, accents') + sw([t.road, t.pave, t.ground, t.kerb], 'road, pavement, ground, kerb') + sw([t.grass].concat(t.canopies, t.bloom ? [t.bloom] : [], [t.water]), 'grass, trees, bloom, water'); }
+  function tree(kind, h, th, seed, dataColour, mul) { const reg = A.REG[th.reg]; return A.toSVG(A.getAsset('trees', kind, h, { s: 1, v: seed % 6 }), A.treeColours(reg, th, seed, kind, dataColour), reg, { scale: st.size * (mul || 0.7) }); }
+  // scene previews: the same neighbourhood drawn with a look in a register (sims are cached, since building one takes a moment)
+  const scene = V.makePlaceholderScene(7), simCache = new Map(), NEIGH = { cx: 300, cy: 270, scale: 4.1 };
+  function vignette(cv, th) {
+    const key = th.famId + '/' + th.lookId + '/' + th.reg;
+    let sim = simCache.get(key);
+    if (!sim) { if (simCache.size > 8) simCache.delete(simCache.keys().next().value); sim = V.createSim(scene, { seed: 11, trafficScale: 0.7, peopleScale: 0.7, theme: th, region: th.famId }); for (let i = 0; i < 60; i++) V.stepSim(sim, 0.1); simCache.set(key, sim); }
+    const W = cv.width, H = cv.height, s = NEIGH.scale * (W / 460);
+    V.renderFrame(cv.getContext('2d'), sim, { w: W, h: H, scale: s, ox: W / 2 - (NEIGH.cx - NEIGH.cy) * s * 0.8660254, oy: H / 2 - (NEIGH.cx + NEIGH.cy) * s * 0.5 }, {});
+  }
+  function paintVignettes() { document.querySelectorAll('canvas.vig').forEach(cv => vignette(cv, A.theme(famRec(), cv.dataset.look, cv.dataset.reg))); }
+  const fig = (svg, cap) => '<figure>' + svg + '<figcaption>' + cap + '</figcaption></figure>';
+  const meter = (label, v) => label + '<span class="meter"><i style="width:' + Math.round(v * 100) + '%"></i></span>';
+
+  function dataScale() {
+    const reg = A.REG[st.reg];
+    if (st.scale === 'retrofit') return { s: A.scales.retrofitStates(reg, themeNow().wall), values: ['to_do', 'queued', 'in_progress', 'finished', 'investor'], title: 'Retrofit state' };
+    return { s: A.scales.sequential(['#f4e9c8', '#e9b44c', '#c8452f', '#6b1d3a'], [0, 1], ['0', '0.33', '0.67', '1']), values: [0, 0.25, 0.5, 0.75, 1], title: 'A numeric output, 0 to 1' };
+  }
+
+  function render() {
+    const fr = famRec(), f = themeNow(), rg = A.REGIONS[st.region], reg = A.REG[st.reg];
+    let h = '';
+
+    // 1. this region
+    h += '<section><h2>Region: ' + fr.name + '</h2>';
+    h += '<div class="small">Places: ' + fr.places + '. Traffic drives on the <b>' + (rg.drive === 'ask' ? 'left or right depending on the country: ask at intake' : rg.drive) + '</b>. ' +
+         meter('cold', rg.climate.cold) + meter('sun', rg.climate.sun) + meter('rain', rg.climate.rain) + ' (drives coats, sun hats and umbrellas)</div>';
+    h += '<h3>Fleet (weights are proposals)</h3><table><tr><th>Class</th><th>Weight</th><th>Network</th><th>View</th></tr>';
+    const tot = rg.fleet.reduce((a, e) => a + e[1], 0);
+    rg.fleet.slice().sort((a, b) => b[1] - a[1]).forEach((e, i) => {
+      h += '<tr><td>' + A.DEFS.vehicles[e[0]].label + '</td><td style="width:180px"><div class="bar" style="width:' + Math.round(e[1] / tot * 170) + 'px"></div> ' + Math.round(e[1] / tot * 100) + '%</td><td>' + A.DEFS.vehicles[e[0]].network + '</td><td>' + veh(e[0], 0, f, i * 5 + 1, null, 0.8) + '</td></tr>';
+    });
+    h += '<tr><td>Co-op van</td><td>always</td><td>road</td><td>' + veh('van_coop', 0, f, 1, null, 0.8) + '</td></tr></table>';
+    h += '<h3>People: outfits for this region (climate-driven)</h3><div class="row">';
+    ['man', 'woman', 'couple', 'parent_child', 'man', 'woman', 'couple', 'woman'].forEach((k, i) => { h += fig(ppl(k, i % 2 ? 1 : 0, f, st.region, 100 + i * 17, null), A.DEFS.people[k].label); });
+    h += '</div></section>';
+
+
+    // 1b. the looks in this region
+    h += '<section><h2>Looks in this region</h2><div class="small">A region owns several looks, named by materials and light (never by who lives there). A look sets wall, roof and accent colours, the road surface (' + [...new Set(fr.looks.map(k => k.surface))].join(', ') + ' here), pavements, grass, tree foliage, bloom and water. The preview is the same neighbourhood in the current register. Colours are proposals, not sampled from photographs.</div><div class="looks">';
+    fr.looks.forEach(k => {
+      const t = A.theme(fr, k.id, st.reg);
+      h += '<div class="lookcard' + (k.id === st.look ? ' on' : '') + '"><b>' + k.name + '</b> <span class="small">(' + t.surface + ' roads' + (t.bloom ? ', flowering trees' : '') + ')</span><div class="small">' + k.note + '</div>' + swatchRows(t) + '<canvas class="vig" width="460" height="280" data-look="' + k.id + '" data-reg="' + st.reg + '"></canvas></div>';
+    });
+    h += '</div></section>';
+
+    // 1c. the two registers side by side
+    const statesLegend = r => Object.keys(A.REG[r].states).filter(k => A.REG[r].states[k]).map(k => '<span><i style="background:' + A.REG[r].states[k] + '"></i>' + k.replace('_', ' ') + '</span>').join('') + '<span><i style="background:' + A.REG[r].coop + '"></i>co-op vans</span>';
+    h += '<section><h2>Registers: colorfigures and formal, side by side</h2><div class="small">The register decides how a look is drawn. <b>Colorfigures</b> keeps the region\'s colours with warm hand-inked lines. <b>Formal</b> is a technical drawing built on IBM Carbon tokens: flat fills, hairlines, a faint ground grid, walls and roofs snapped to Carbon\'s neutral grays (warm or cool, light or dark, following the region), neutral vehicles and people, muted greens, and colour reserved for data: the retrofit states use IBM\'s data-visualisation colours and co-op vans use IBM Blue 60. Carbon tokens confirmed against carbondesignsystem.com: white, gray 10/20/30/50/60/80/100, blue 10/30/60/70/80, purple 40/60/70, yellow 30, green 60, red 60. Cool gray, warm gray, blue 20/40, cyan 50, teal 50 and gray 40/70/90 are from memory and still to be checked.</div><div class="regs">';
+    ['colorfigures', 'formal'].forEach(r2 => { const t2 = A.theme(fr, st.look, r2); h += '<div class="lookcard"><b>' + (r2 === 'formal' ? 'Formal' : 'Colorfigures') + '</b>' + swatchRows(t2) + '<div class="legend">' + statesLegend(r2) + '</div><canvas class="vig" width="560" height="340" data-look="' + st.look + '" data-reg="' + r2 + '"></canvas></div>'; });
+    h += '</div></section>';
+
+    // 1d. trees
+    const tmix = rg.trees.slice().sort((a, b) => b[1] - a[1]), ttot = rg.trees.reduce((a, e) => a + e[1], 0);
+    h += '<section><h2>Trees</h2><div class="small">Nine kinds as low-poly foliage that takes the register\'s flat tones. Foliage colours, bloom and trunk come from the look. Flowering trees only appear when the look has a bloom colour' + (f.bloom ? ' (this one does)' : ' (this one does not, so they become plain broadleaf)') + '. Species mixes per region are proposals.</div>';
+    h += '<h3>Mix for this region</h3><table><tr><th>Kind</th><th>Share</th><th>View</th></tr>' + tmix.map((e, i) => '<tr><td>' + A.TREES[e[0]].label + '</td><td style="width:200px"><div class="bar" style="width:' + Math.round(e[1] / ttot * 180) + 'px"></div> ' + Math.round(e[1] / ttot * 100) + '%</td><td>' + tree(e[0] === 'blossom' && !f.bloom ? 'broadleaf' : e[0], i % 4, f, 11 + i * 7, null, 0.55) + '</td></tr>').join('') + '</table>';
+    h += '<h3>All kinds</h3><div class="row">' + Object.keys(A.TREES).map((k, i) => fig(tree(k, i % 4, f, 3 + i * 5), k)).join('') + '</div>';
+    const dsT = dataScale();
+    h += '<h3>Foliage as a data surface</h3><div class="legend">' + dsT.s.legend().map(e => '<span><i style="background:' + e.colour + '"></i>' + e.label + '</span>').join('') + '</div><div class="row">' + dsT.values.map(v => fig(tree('plane', 0, f, 8, dsT.s.colour(v), 0.6), String(v))).join('') + '</div></section>';
+
+    // 2. people, four headings
+    h += '<section><h2>People: paper dolls, four headings</h2><div class="small">Flat cut-outs facing the direction of travel. No walking animation. The garment is the data surface. NW and NE show the back of the paper (slightly darker).</div>';
+    Object.keys(A.DEFS.people).forEach((k, ki) => {
+      h += '<div class="kind">' + A.DEFS.people[k].label + ' <span class="small">(' + k + ')</span></div><div class="row">';
+      for (let i = 0; i < 4; i++) h += fig(ppl(k, i, f, st.region, 300 + ki * 13), HEAD[i]);
+      h += '</div>';
+    });
+    h += '</section>';
+
+    // 3. vehicles, four headings
+    h += '<section><h2>Vehicles: four headings</h2><div class="small">Each view shows the faces turned toward the camera: left, right, top. Wheels, windows and lights appear only on visible faces.</div>';
+    Object.keys(A.DEFS.vehicles).forEach((k, ki) => {
+      h += '<div class="kind">' + A.DEFS.vehicles[k].label + ' <span class="small">(' + k + ', network: ' + A.DEFS.vehicles[k].network + ')</span></div><div class="row">';
+      for (let i = 0; i < 4; i++) h += fig(veh(k, i, f, ki * 3 + 1, null, k === 'tram' ? 0.6 : (k === 'bus' || k === 'double_decker' ? 0.8 : 1)), HEAD[i]);
+      h += '</div>';
+    });
+    h += '</section>';
+
+    // 4. data surface
+    const ds = dataScale();
+    h += '<section><h2>Data surface: one asset, many readings</h2><div class="small">' + ds.title + '. Shape never changes; only the data surface (garment, body, livery) takes the colour. Tick "outline data surface" above to see exactly which polygons they are.</div>';
+    h += '<div class="legend">' + ds.s.legend().map(e => '<span><i style="background:' + e.colour + '"></i>' + e.label + '</span>').join('') + '</div>';
+    const showV = ['city_car', 'van', 'bus', 'tram', 'three_wheeler', 'moped', 'cargo_bike', 'lorry'];
+    showV.forEach(k => {
+      h += '<div class="kind">' + A.DEFS.vehicles[k].label + '</div><div class="row">';
+      ds.values.forEach((v, i) => { h += fig(veh(k, 0, f, 3, ds.s.colour(v), k === 'tram' ? 0.5 : (k === 'bus' ? 0.7 : 1)), String(v)); });
+      h += '</div>';
+    });
+    ['man', 'woman', 'couple', 'family'].forEach(k => {
+      h += '<div class="kind">' + A.DEFS.people[k].label + '</div><div class="row">';
+      ds.values.forEach((v, i) => {
+        const n = A.DEFS.people[k].members.length;
+        const cols = []; for (let m = 0; m < n; m++) cols.push(ds.s.colour(ds.values[(i + m) % ds.values.length]));
+        h += fig(ppl(k, 0, f, st.region, 500, cols), n > 1 ? 'members differ' : String(v));
+      });
+      h += '</div>';
+    });
+    h += '</section>';
+
+    // 4b. buildings
+    h += '<section><h2>Buildings: archetypes at four headings</h2><div class="small">Six archetypes, sized in whole bays, built from a rule-based facade grammar (house: exactly one door; shop: at least one door; no run of three blank bays; balconies stacked in columns). The front faces the street: it is visible at SW and NE, and you see the back at SE and NW. Left and right walls are the party walls. Windows, doors and balconies appear only on faces that are turned toward the camera, and nothing that stands proud of a hidden wall is drawn.</div>';
+    Object.keys(A.ARCH).forEach((k, ki) => {
+      const b = BSIZE[k];
+      h += '<div class="kind">' + A.ARCH[k].label + ' <span class="small">(' + k + ': ' + b[0] + ' m wide, ' + b[1] + ' m deep, ' + b[2] + ' storeys)</span></div><div class="row">';
+      for (let i = 0; i < 4; i++) h += fig(bld(k, [3, 0, 1, 2][i], f, st.region, b[0], b[1], b[2], 20 + ki, [], null, BMUL[k]), ['NE (front)', 'SW (front)', 'SE (back)', 'NW (back)'][i]);
+      h += '</div>';
+    });
+    h += '</section>';
+    h += '<section><h2>Buildings: overlays and the data surface</h2><div class="small">Overlays are discrete geometry a simulation switches on (here the Great Retrofit mapping: queued = band, in retrofit = scaffold, finished = solar, investor-owned = roof marker). The walls are the data surface and take any output colour.</div><div class="row">';
+    [['none', []], ['band', ['band']], ['scaffold', ['scaffold']], ['solar', ['solar']], ['marker', ['marker']], ['all four', ['band', 'scaffold', 'solar', 'marker']]].forEach(e => { h += fig(bld('block', 3, f, st.region, 24, 14, 5, 33, e[1], null, 0.4), e[0]); });
+    h += '</div><div class="legend">' + ds.s.legend().map(e => '<span><i style="background:' + e.colour + '"></i>' + e.label + '</span>').join('') + '</div><div class="row">';
+    ds.values.forEach(v => { h += fig(bld('block', 3, f, st.region, 24, 14, 5, 33, [], ds.s.colour(v), 0.4), String(v)); });
+    h += '</div><div class="row">';
+    ds.values.forEach(v => { h += fig(bld('terrace', 3, f, st.region, 5, 12, 3, 8, [], ds.s.colour(v), 0.55), String(v)); });
+    h += '</div></section>';
+    h += '<section><h2>Buildings: which footprints fit an asset</h2><div class="small">A footprint takes an asset when it is close to a rectangle (at least 82% of its bounding rectangle) and within 12 degrees of an axis; otherwise the scene draws a generic extrusion and counts it. Nothing is silently approximated. The front faces the nearest road.</div><div class="row">';
+    const rectFp = (cx, cy, w, hh, deg) => { const t = deg * Math.PI / 180, cs = Math.cos(t), sn = Math.sin(t); return [[-w / 2, -hh / 2], [w / 2, -hh / 2], [w / 2, hh / 2], [-w / 2, hh / 2]].map(q => [cx + q[0] * cs - q[1] * sn, cy + q[0] * sn + q[1] * cs]); };
+    const roadsEx = [{ class: 'local', pts: [[-40, 0], [40, 0]] }];
+    [['rectangle', rectFp(0, 14, 10, 14, 0)], ['rotated 8 degrees', rectFp(0, 14, 10, 14, 8)], ['rotated 30 degrees', rectFp(0, 14, 10, 14, 30)], ['L-shape', [[-9, 8], [11, 8], [11, 14], [-1, 14], [-1, 24], [-9, 24]]], ['too small', rectFp(0, 14, 2, 2, 0)]].forEach(e => {
+      const fit = A.fitFootprint(e[1], roadsEx), S = 7, ox = 45, oy = 10;
+      const pts = e[1].map(q => (ox + q[0] * S).toFixed(1) + ',' + (oy + q[1] * S).toFixed(1)).join(' ');
+      h += '<figure><svg width="130" height="200" viewBox="0 0 130 200"><line x1="0" y1="' + oy + '" x2="130" y2="' + oy + '" stroke="#999" stroke-width="6"/><polygon points="' + pts + '" fill="' + (fit.ok ? '#bfe0c4' : '#f0c8c0') + '" stroke="#231e16"/></svg><figcaption><b>' + e[0] + '</b><br>' + (fit.ok ? 'asset: ' + fit.W + ' x ' + fit.D + ' m, front faces the road' : 'extrusion: ' + fit.reason) + '</figcaption></figure>';
+    });
+    h += '</div></section>';
+
+    // 5. all regions
+    h += '<section><h2>All twelve regions at a glance</h2><div class="small">Same classes, different fleets and outfits. Drive side and climate are proposals.</div><table><tr><th>Region</th><th>Drive</th><th>Typical fleet (top four)</th><th>People</th><th>Buildings (roofs, shutters, awnings, air conditioning)</th><th>Trees</th></tr>';
+    FAMS.families.forEach((ff, fi) => {
+      const tt = A.theme(ff, 0, st.reg), r = A.REGIONS[ff.id], top = r.fleet.slice().sort((a, b) => b[1] - a[1]).slice(0, 4);
+      h += '<tr><td><b>' + ff.name + '</b><br><span class="small">' + ff.places + '</span></td><td>' + (r.drive === 'ask' ? 'ask' : r.drive) + '</td><td><div class="row">';
+      top.forEach((e, i) => { h += veh2(e[0], tt, fi * 7 + i, 0.62); });
+      h += '</div></td><td><div class="row">';
+      ['man', 'woman', 'couple'].forEach((k, i) => { h += ppl2(k, tt, 700 + fi * 11 + i * 5, 0.7); });
+      h += '</div></td><td><div class="row">';
+      [['terrace', 4], ['block', 9], ['shophouse', 15]].forEach(e => { const b = BSIZE[e[0]]; h += fig(bld(e[0], 3, tt, ff.id, b[0], b[1], 3, 60 + fi * 7 + e[1], [], null, e[0] === 'block' ? 0.26 : 0.3), A.ARCH[e[0]].label); });
+      const rb = A.REGIONS[ff.id].buildings, pc = v => Math.round(v * 100) + '%';
+      const topTrees = A.REGIONS[ff.id].trees.slice().sort((a, b) => b[1] - a[1]).slice(0, 3).map(e => e[0] === 'blossom' && !tt.bloom ? 'broadleaf' : e[0]);
+      h += '</div><div class="small">roofs ' + Object.keys(rb.roof).map(k => k + ' ' + pc(rb.roof[k] / Object.values(rb.roof).reduce((a, b) => a + b, 0))).join(', ') + '; shutters ' + pc(rb.shutters) + '; awnings ' + pc(rb.awning) + '; air conditioning ' + pc(rb.ac) + '</div></td><td><div class="row">' + topTrees.map((k, i) => fig(tree(k, i, tt, 20 + fi * 3 + i, null, 0.34), k)).join('') + '</div></td></tr>';
+    });
+    h += '</table></section>';
+
+    // 6. motion and data hooks
+    h += '<section><h2>Motion and data hooks</h2><div class="small">Motion is decorative by default (a random walk on the network). A class can be given real motion, and its data surface can be bound to an output. Both are per class, not per asset.</div><pre>' +
+`// non-decorative motion for a class of agents
+VizLib.setMotion(sim, 'tram', { mode: 'path', loop: true, path: [[0, x0, y0], [60, x1, y1], [120, x0, y0]] });   // timetable
+VizLib.setMotion(sim, 'bus',  { mode: 'driven', update(agent, t, dt, sim) { return { x, y, heading }; } });   // from model output
+VizLib.setMotion(sim, 'people', { mode: 'static' });                                                            // stand still
+VizLib.setMotion(sim, 'bus', null);                                                                              // back to decorative
+
+// colour the data surface of a class from a simulation output
+const legend = VizLib.bindData(sim, 'people', AssetLib.scales.retrofitStates(reg), agent => agent.data.state);
+VizLib.bindData(sim, 'vehicles', AssetLib.scales.sequential(['#f4e9c8', '#c8452f'], [0, 1]), agent => agent.data.load);
+
+// every class declares the network it moves on: road, rail, cycle or pavement (def.network)</pre></section>`;
+
+    // 7. schema
+    h += '<section><h2>Asset schema</h2><pre>' +
+`DEFS.vehicles.&lt;id&gt; = { id, kind, label, network, parts: [...], rider?, riderLift? }
+DEFS.people.&lt;id&gt;   = { id, kind, label, members: [{ kind, u, hands? }], network }
+buildings           = registerGroup('buildings', (kind, { W, D, N, variant, fs, ov }) =&gt; ({ parts })), ARCH.&lt;kind&gt; = { bayW, storeyH, groundH, style, sides, ... }
+
+part types (local frame: x forward, y lateral, z up, metres):
+  prism  { prof: [[x,z],...], y: [ya,yb], role, topRole?, edgeRole?, capRole?, layer? }   side profile extruded across the vehicle
+  box    { b: [x0,y0,z0,x1,y1,z1], role }
+  flat   { side: 1 | -1 | 'both' | 0, y, poly: [[x,z],...], role }                          panel on a side plane
+  disc   { side, y, c: [x,z], r, role }                                                      wheel, hub
+  end    { end: 1 | -1 | 0, x, poly: [[y,z],...], role }                                     panel on an end plane (windscreens, lights, paper dolls)
+  face   { pts: [[x,y,z],...], n: [nx,ny,nz], role }                                         free polygon with an outward normal (hip roofs, awnings, solar panels)
+  prism  also takes axis: 'x' (profile in (y,z) extruded along x: gable roofs)
+  any part may set needs: [x, y]: drawn only if that wall faces the camera (balconies, awnings, scaffold)
+
+roles: data (the recolourable surface), glass, wheel, hub, frame, trim, light, paper, roof, cab, interior, plus hat, accent, bottom for people,
+       and for buildings: roofflat, door, shutter, awning, chimney, solar, scaffold, band, marker
+built asset = { prims: [{ pts, role, w: [wx, wy, wz] }], bbox, heading }   // one per heading 0..3, in screen metres
+outputs: AssetLib.toSVG(asset, colours, reg)   AssetLib.paint(ctx, asset, colours, reg, px, py, scale)   AssetLib.drawSprite(...) (cached)</pre></section>`;
+    document.getElementById('out').innerHTML = h;
+    paintVignettes();
+    document.getElementById('out').className = st.outline ? 'outline' : '';
+  }
+  // helpers used by the all-regions table (they take a family record directly)
+  function veh2(kind, ff, seed, mul) { const reg = A.REG[st.reg]; return fig(A.toSVG(A.getAsset('vehicles', kind, 0), A.vehicleColours(kind, reg, A.vehicleTint(ff, seed)), reg, { scale: st.size * A.STYLE.vehicle * mul }), A.DEFS.vehicles[kind].label); }
+  function ppl2(kind, ff, seed, mul) {
+    const reg = A.REG[st.reg], n = A.DEFS.people[kind].members.length, outs = [];
+    for (let i = 0; i < n; i++) outs.push(A.makeOutfit(ff.famId || ff.id, ff, seed + i * 31));
+    return fig(A.toSVG(A.getAsset('people', kind, 1, A.flagsOf(outs)), A.personColours(kind, reg, outs), reg, { scale: st.size * A.STYLE.person * mul }), A.DEFS.people[kind].label);
+  }
+
+  regionSel.value = st.region; fillLooks();
+  regionSel.onchange = e => { st.region = e.target.value; st.look = famRec().looks[0].id; fillLooks(); render(); };
+  lookSel.onchange = e => { st.look = e.target.value; render(); };
+  document.getElementById('rC').onclick = () => { st.reg = 'colorfigures'; document.getElementById('rC').classList.add('on'); document.getElementById('rF').classList.remove('on'); render(); };
+  document.getElementById('rF').onclick = () => { st.reg = 'formal'; document.getElementById('rF').classList.add('on'); document.getElementById('rC').classList.remove('on'); render(); };
+  document.getElementById('scale').onchange = e => { st.scale = e.target.value; render(); };
+  document.getElementById('outline').onchange = e => { st.outline = e.target.checked; render(); };
+  document.getElementById('size').oninput = e => { st.size = +e.target.value; render(); };
+  render();
+})();
+</script>
+</body></html>

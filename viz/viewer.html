@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>/*__TITLE__*/</title>
+<style>
+ :root { --ink:#231e16; --paper:#f4f1ea; --muted:#5d5950; }
+ body { margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink); background:var(--paper); }
+ header { padding:14px 22px 6px; }
+ h1 { font-size:20px; margin:0 0 4px; }
+ .note { color:#8a2a2a; max-width:980px; font-size:13px; }
+ .controls { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; padding:10px 22px; background:#f7f5ef; border-top:1px solid #d6d1c4; border-bottom:1px solid #d6d1c4; position:sticky; top:0; z-index:4; }
+ .controls label { display:flex; gap:6px; align-items:center; }
+ select,button { font:inherit; padding:3px 7px; border:1px solid #9d978a; border-radius:6px; background:#fff; color:var(--ink); }
+ button.on { background:var(--ink); color:#fff; }
+ #stage { display:block; width:100%; height:72vh; background:#f2efe7; cursor:grab; touch-action:none; }
+ #stage.dragging { cursor:grabbing; }
+ .err { color:#a2191f; }
+ .grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; padding:14px 22px 30px; }
+ .card { background:#fff; border:1px solid #cfc8b8; border-radius:8px; padding:12px; font-size:13px; }
+ code { background:#f0ede4; padding:1px 4px; border-radius:3px; }
+</style></head><body>
+<header>
+  <h1 id="title">/*__TITLE__*/</h1>
+  <div class="note">People and vehicles are decoration: they and their motion are not model output. A region sets the fleet, trees, building styles and drive side, and a look sets the colours within it. Regional tables and colours are proposals for local people to check.</div>
+</header>
+<div class="controls">
+  <label>Scene <input type="file" id="sceneFile" accept=".json,application/json"></label>
+  <button id="scenePlaceholder">Placeholder</button>
+  <label>Region <select id="region"></select></label>
+  <label>Look <select id="look"></select></label>
+  <label>Register
+    <button id="rC" class="on">Colorfigures</button><button id="rF">Formal</button>
+  </label>
+  <label>Drive on <select id="drive"><option value="auto">region default</option><option value="right">right</option><option value="left">left</option></select></label>
+  <label>Colour data surface by <select id="bind"><option value="none">nothing (default colours)</option><option value="retrofit">retrofit state</option><option value="seq">numeric output</option></select></label>
+  <label>Buildings show <select id="bbind"><option value="retrofit">retrofit state</option><option value="seq">numeric output</option><option value="plain">plain walls</option></select></label>
+  <label><input type="checkbox" id="timetable"> trams on a timetable</label>
+  <label>Traffic <input id="traffic" type="range" min="0" max="3" step="0.25" value="1"></label>
+  <label>People <input id="people" type="range" min="0" max="3" step="0.25" value="1"></label>
+  <label>Zoom <input id="zoom" type="range" min="0" max="1" step="0.002" value="0"></label>
+  <button id="fit" title="Show the whole scene">Fit</button>
+  <label><input type="checkbox" id="lBuild" checked> buildings</label>
+  <label><input type="checkbox" id="lVeh" checked> vehicles</label>
+  <label><input type="checkbox" id="lPeople" checked> people</label>
+  <button id="play" class="on">Pause</button>
+  <button id="reseed">New seed</button>
+</div>
+<div id="attrib" class="note" style="padding:6px 22px 0;font-size:12px"></div>
+<div id="looknote" class="note" style="padding:6px 22px 0;font-size:12px"></div>
+<div id="bstats" class="note" style="padding:2px 22px 6px;font-size:12px"></div>
+<canvas id="stage"></canvas>
+<div class="grid">
+  <div class="card"><b>Library: vehicles</b> (assetlib.js)<br>19 classes, each pre-built for the four isometric headings with only the faces turned toward the camera. Regions choose the fleet (tuk-tuks, cargo bikes, double-deckers, minibuses, trams…) and the drive side. The body or livery is the <i>data surface</i>. See library_catalogue.html.</div>
+  <div class="card"><b>Library: people</b> (assetlib.js)<br>Paper dolls: flat cut-outs, one neutral paper tone, no skin tones, no walking animation. Man, woman, boy, girl, couple, parent and child, family, wheelchair user, rider. Outfits follow the region's climate (coats, sun hats, umbrellas). The garment is the data surface.</div>
+  <div class="card"><b>Library: buildings</b> (buildinglib.js)<br>Six archetypes pre-built for four headings, sized in whole bays, with a rule-based facade grammar and regional variants. The walls are the data surface; scaffold, solar, band and marker are overlays. Footprints that are not near-rectangular or are rotated more than 12 degrees off the axes fall back to a generic extrusion and are counted above.</div>
+  <div class="card"><b>Library: trees</b> (treelib.js)<br>Nine kinds (broadleaf, oak, plane, columnar, conifer, umbrella, palm, blossom, shrub) as low-poly foliage that takes the register's flat tones. Each region has a species mix; foliage colours and bloom come from the look, so the same tree reads differently under each look and register. Flowering trees only appear when the look has a bloom colour.</div>
+  <div class="card"><b>Library: roads and ground</b><br>local, avenue (cycle lanes), boulevard (tram and median), cycle track. The look sets the surface: asphalt, concrete joints, setts or earth tracks, plus pavements, kerbs, gardens, parks, plazas and water. The formal register adds a faint ground grid.</div>
+  <div class="card" style="grid-column:1/-1"><b>Scene schema (input)</b><br>
+  <code>{ area, roads:[{id, class, tram?, width?, cycle?, pts:[[x,y],…]}], buildings:[{id, footprint:[[x,y],…], levels, archetype, state, investor}], landuse:[{kind:'park'|'garden'|'square'|'water', footprint}], trees:[[x,y] or [x,y,kind,scale],…] }</code><br>
+  Coordinates are metres in a local frame. <code>lab-render ingest</code> converts an OpenStreetMap extract into this shape (and writes a report of every assumption); load the resulting scene.json with the Scene control above.</div>
+</div>
+<script>
+/*__ASSETLIB__*/
+</script>
+<script>
+/*__BUILDINGLIB__*/
+</script>
+<script>
+/*__TREELIB__*/
+</script>
+<script>
+/*__VIZLIB__*/
+</script>
+<script>
+/*__CAMERA__*/
+</script>
+<script>
+/*__CONTROLS__*/
+</script>
+<script>
+(function () {
+  const V = window.VizLib, A = window.AssetLib;
+  A.sprites.factory = (w, hh) => { const c = document.createElement('canvas'); c.width = w; c.height = hh; return c; };
+  A.sprites.dpr = window.devicePixelRatio || 1;
+  const FAMS = /*__PALETTES__*/;
+  const canvas = document.getElementById('stage');
+  const ctx = canvas.getContext('2d');
+  const regSel = document.getElementById('region'), lookSel = document.getElementById('look');
+  FAMS.families.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.name + ' (' + f.places + ')'; regSel.appendChild(o); });
+  const INITIAL = /*__INITIAL__*/;                      // { region, look, reg, drive }, set when a page is built for a specific place
+  const EMBEDDED_SCENE = /*__SCENE__*/;                // a scene object, or null for the placeholder
+  let state = Object.assign({ region: 'nw', look: 'brick', reg: 'colorfigures', seed: 11, playing: true }, INITIAL);
+  const famOf = () => FAMS.families.find(x => x.id === state.region);
+  const themeNow = () => A.theme(famOf(), state.look, state.reg);
+  function fillLooks() {
+    lookSel.innerHTML = ''; famOf().looks.forEach(k => { const o = document.createElement('option'); o.value = k.id; o.textContent = k.name; lookSel.appendChild(o); });
+    lookSel.value = state.look;
+  }
+  function showLook() { const t = themeNow(); document.getElementById('looknote').textContent = t.name + ': ' + t.note + ' Road surface: ' + t.surface + '. ' + (t.reg === 'formal' ? 'Formal register: Carbon neutral tokens, colour reserved for data.' : ''); }
+  // Camera and input: drag or A and D to pan, wheel or W and S to zoom. See camera.js and controls.js.
+  let scene = EMBEDDED_SCENE || V.makePlaceholderScene(7);
+  let sim = null;
+  const zoomEl = document.getElementById('zoom');
+  const cam = LabCamera.create({ bounds: V.sceneBounds(scene), width: canvas.clientWidth || 1200, height: canvas.clientHeight || 700 });
+  let sliderHeld = false;
+  const syncZoom = () => { if (!sliderHeld) zoomEl.value = cam.zoomFraction(); };       // the slider follows the camera, except while it is being dragged
+  const controls = LabControls.attach(canvas, cam, { onChange: syncZoom });
+  zoomEl.addEventListener('pointerdown', () => { sliderHeld = true; });
+  window.addEventListener('pointerup', () => { sliderHeld = false; });
+  zoomEl.oninput = () => cam.setZoomFraction(+zoomEl.value);
+  document.getElementById('fit').onclick = () => { cam.fitAll(); syncZoom(); };
+  window.labViewer = { camera: cam, controls };                                         // a handle for tests and for the browser console
+  function focusScene() { cam.setBounds(V.sceneBounds(scene)); syncZoom(); }
+  function showScene() {
+    const a = scene.area || {}, el = document.getElementById('attrib');
+    el.textContent = a.source === 'osm' ? (a.name + ': ' + a.attribution + '. The frame is rotated ' + a.rotation_deg + ' degrees so most buildings sit on the isometric axes; north points ' + a.north_on_screen_deg + ' degrees clockwise from the top of the screen. Drag or A and D to pan; wheel or W and S to zoom.') : 'Placeholder scene: synthetic, not a real place. Drag or A and D to pan; wheel or W and S to zoom.';
+  }
+  function loadScene(text) {
+    let s; const msg = document.getElementById('bstats');
+    try { s = JSON.parse(text); } catch (e) { msg.className = 'note err'; msg.textContent = 'Not a scene file: ' + e.message; return; }
+    const chk = V.validateScene(s);
+    if (!chk.ok) { msg.className = 'note err'; msg.textContent = 'Invalid scene: ' + chk.errors.slice(0, 3).join('; ') + (chk.errors.length > 3 ? ' (and ' + (chk.errors.length - 3) + ' more)' : ''); return; }
+    scene = s; msg.className = 'note'; rebuild(); focusScene(); showScene();
+    if (chk.warnings.length) msg.textContent += ' Warnings: ' + chk.warnings.join('; ') + '.';
+  }
+  document.getElementById('sceneFile').onchange = e => { const f = e.target.files && e.target.files[0]; if (f) { const r = new FileReader(); r.onload = () => loadScene(r.result); r.readAsText(f); } };
+  document.getElementById('scenePlaceholder').onclick = () => { scene = V.makePlaceholderScene(7); rebuild(); focusScene(); showScene(); };
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvas.clientWidth * dpr; canvas.height = canvas.clientHeight * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cam.resize(canvas.clientWidth || 1200, canvas.clientHeight || 700); syncZoom();
+  }
+  function rebuild() {
+    const drive = document.getElementById('drive').value;
+    sim = V.createSim(scene, { seed: state.seed, trafficScale: +document.getElementById('traffic').value,
+                               peopleScale: +document.getElementById('people').value, theme: themeNow(), region: state.region, drive: drive === 'auto' ? null : drive });
+    applyHooks();
+    const st2 = sim.stats, why = Object.keys(st2.reasons).map(k => k + ': ' + st2.reasons[k]).join('; ');
+    const kinds = {}; sim.trees.forEach(t => kinds[t.kind] = (kinds[t.kind] || 0) + 1);
+    document.getElementById('bstats').textContent = (scene.area && scene.area.source === 'osm' ? 'OSM scene. ' : '') + 'Buildings: ' + st2.assets + ' drawn from assets, ' + st2.extruded + ' as generic extrusions' + (why ? ' (' + why + ')' : '') + '. Trees: ' + sim.trees.length + ' (' + Object.keys(kinds).map(k => k + ' ' + kinds[k]).join(', ') + '). Overlays follow the Great Retrofit mapping on invented states.';
+    showLook();
+    resize();
+  }
+  // Illustrative data and motion. In a real replay these come from the model export, not from the agent seed.
+  function applyHooks() {
+    const mode = document.getElementById('bind').value, reg = A.REG[state.reg];
+    const states = ['to_do', 'queued', 'in_progress', 'finished', 'investor'];
+    if (mode === 'retrofit') {
+      const sc = A.scales.retrofitStates(reg);
+      V.bindData(sim, 'people', sc, a => a.outfits.map((o, i) => states[(a.seed + i * 3) % 5]));
+      V.bindData(sim, 'vehicles', sc, a => states[a.seed % 5]);
+    } else if (mode === 'seq') {
+      const sc = A.scales.sequential(['#f4e9c8', '#e9b44c', '#c8452f', '#6b1d3a'], [0, 1]);
+      V.bindData(sim, 'people', sc, a => a.outfits.map((o, i) => A.hash(a.seed + i) ));
+      V.bindData(sim, 'vehicles', sc, a => A.hash(a.seed));
+    } else { V.bindData(sim, 'people', null); V.bindData(sim, 'vehicles', null); }
+    // buildings: retrofit state (default style), a numeric output on the walls, or plain walls
+    const bm = document.getElementById('bbind').value;
+    if (bm === 'seq') { sim.buildingStyle = null; V.bindData(sim, 'buildings', A.scales.sequential(['#f4e9c8', '#e9b44c', '#c8452f', '#6b1d3a'], [0, 1]), e => A.hash(e.seed)); }
+    else if (bm === 'plain') { V.bindData(sim, 'buildings', null); sim.buildingStyle = () => ({ data: null, overlays: [] }); }
+    else { V.bindData(sim, 'buildings', null); sim.buildingStyle = null; }
+    if (document.getElementById('timetable').checked) {
+      // trams run a fixed out-and-back timetable along the boulevard: motion driven by a schedule, not a random walk
+      V.setMotion(sim, 'tram', { mode: 'path', loop: true, path: [[0, -40, 258], [70, 790, 258], [80, 790, 262], [150, -40, 262], [160, -40, 258]] });
+    } else V.setMotion(sim, 'tram', null);
+  }
+  function layers() { return { buildings: document.getElementById('lBuild').checked, vehicles: document.getElementById('lVeh').checked, people: document.getElementById('lPeople').checked }; }
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (state.playing) V.stepSim(sim, dt);
+    V.renderFrame(ctx, sim, cam.view(), layers());
+    requestAnimationFrame(frame);
+  }
+  regSel.onchange = e => { state.region = e.target.value; state.look = famOf().looks[0].id; fillLooks(); rebuild(); };
+  lookSel.onchange = e => { state.look = e.target.value; V.setTheme(sim, themeNow()); showLook(); applyHooks(); };
+  document.getElementById('drive').onchange = rebuild;
+  document.getElementById('bind').onchange = () => { applyHooks(); };
+  document.getElementById('timetable').onchange = () => { applyHooks(); };
+  document.getElementById('bbind').onchange = () => { applyHooks(); };
+  document.getElementById('rC').onclick = () => { state.reg = 'colorfigures'; V.setTheme(sim, themeNow()); setBtn(); showLook(); applyHooks(); };
+  document.getElementById('rF').onclick = () => { state.reg = 'formal'; V.setTheme(sim, themeNow()); setBtn(); showLook(); applyHooks(); };
+  function setBtn() { document.getElementById('rC').classList.toggle('on', state.reg === 'colorfigures'); document.getElementById('rF').classList.toggle('on', state.reg === 'formal'); }
+  document.getElementById('traffic').oninput = rebuild;
+  document.getElementById('people').oninput = rebuild;
+  document.getElementById('play').onclick = e => { state.playing = !state.playing; e.target.textContent = state.playing ? 'Pause' : 'Play'; e.target.classList.toggle('on', state.playing); };
+  document.getElementById('reseed').onclick = () => { state.seed = (Math.random() * 1e6) | 0; rebuild(); };
+  window.addEventListener('resize', resize);
+  regSel.value = state.region; fillLooks(); document.getElementById('drive').value = INITIAL.drive || 'auto'; setBtn();
+  focusScene(); showScene();
+  rebuild();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body></html>

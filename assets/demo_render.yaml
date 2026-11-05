@@ -1,0 +1,54 @@
+# The Great Retrofit v2 demo configuration, in the shape the intake writes. Its parameters seed a new vendored-model project.
+goal: model_replay
+name: Great Retrofit demo (120 households, seed 42)
+audience: researchers
+notes: Replay of the v2 notebook demo configuration. Layout, people and vehicles are illustrative.
+model:
+  source: vendored
+  params:
+    n: 120
+    n_co_ops: 4
+    E: 100000
+    tau: 20
+    surplus: 0.2
+    mean_time: 12
+    time_var: 4
+    week_cost: 1000
+    run_time: 260
+    seed: 42
+    n_households: 120
+    income_mean: 45000
+    income_cv: 0.35
+    wealth_pareto_alpha: 1.5
+    aspiration_mean: 50
+    aspiration_sd: 15
+    search_length: 5
+    n_neighbourhoods: 4
+    enable_bargaining: true
+    max_bid_shade: 0.2
+    seller_reservation_pct: 0.8
+    n_banks: 3
+    bank_ltv_mean: 0.8
+    bank_ltv_sd: 0.05
+    bank_spread_mean: 0.02
+    enable_default: true
+    income_ar1_rho: 0.95
+    income_shock_sd: 0.1
+    unemployment_prob: 0.001
+    enable_investors: true
+    investor_hurdle_mean: 0.05
+    investor_hurdle_sd: 0.01
+    enable_construction: true
+    build_cost: 150000
+    construction_lag_weeks: 52
+    depreciation_rate: 0.01
+    enable_demographics: true
+    birth_rate: 0.01
+    death_rate: 0.01
+    enable_heterogeneous_expectations: true
+    extrapolator_share: 0.5
+look:
+  region: nw
+  register: both
+replay:
+  weeks: [0, 26, 78, 259]

@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lab-render"
+version = "0.5.1"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "pillow>=10.0", "pyyaml>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+lab-render = "lab_render.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["lab_render*"]

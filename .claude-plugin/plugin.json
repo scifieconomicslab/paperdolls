@@ -1,0 +1,9 @@
+{
+  "name": "lab-render",
+  "version": "0.5.1",
+  "description": "Replay renders of agent-based economic simulations in a colorfigures-style isometric look. v1: replay only, Python pipeline, Claude-guided Q&A.",
+  "author": {"name": "Sci-Fi Economics Lab (to confirm)"},
+  "license": "CC-BY-4.0",
+  "keywords": ["simulation", "visualisation", "isometric", "policy", "agent-based-model"],
+  "requirements": {"python": ">=3.10", "packages": "requirements.txt"}
+}

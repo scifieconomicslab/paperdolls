@@ -1,0 +1,2366 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lab Render viewer</title>
+<style>
+ :root { --ink:#231e16; --paper:#f4f1ea; --muted:#5d5950; }
+ body { margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink); background:var(--paper); }
+ header { padding:14px 22px 6px; }
+ h1 { font-size:20px; margin:0 0 4px; }
+ .note { color:#8a2a2a; max-width:980px; font-size:13px; }
+ .controls { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; padding:10px 22px; background:#f7f5ef; border-top:1px solid #d6d1c4; border-bottom:1px solid #d6d1c4; position:sticky; top:0; z-index:4; }
+ .controls label { display:flex; gap:6px; align-items:center; }
+ select,button { font:inherit; padding:3px 7px; border:1px solid #9d978a; border-radius:6px; background:#fff; color:var(--ink); }
+ button.on { background:var(--ink); color:#fff; }
+ #stage { display:block; width:100%; height:72vh; background:#f2efe7; cursor:grab; touch-action:none; }
+ #stage.dragging { cursor:grabbing; }
+ .err { color:#a2191f; }
+ .grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; padding:14px 22px 30px; }
+ .card { background:#fff; border:1px solid #cfc8b8; border-radius:8px; padding:12px; font-size:13px; }
+ code { background:#f0ede4; padding:1px 4px; border-radius:3px; }
+</style></head><body>
+<header>
+  <h1 id="title">Lab Render viewer</h1>
+  <div class="note">People and vehicles are decoration: they and their motion are not model output. A region sets the fleet, trees, building styles and drive side, and a look sets the colours within it. Regional tables and colours are proposals for local people to check.</div>
+</header>
+<div class="controls">
+  <label>Scene <input type="file" id="sceneFile" accept=".json,application/json"></label>
+  <button id="scenePlaceholder">Placeholder</button>
+  <label>Region <select id="region"></select></label>
+  <label>Look <select id="look"></select></label>
+  <label>Register
+    <button id="rC" class="on">Colorfigures</button><button id="rF">Formal</button>
+  </label>
+  <label>Drive on <select id="drive"><option value="auto">region default</option><option value="right">right</option><option value="left">left</option></select></label>
+  <label>Colour data surface by <select id="bind"><option value="none">nothing (default colours)</option><option value="retrofit">retrofit state</option><option value="seq">numeric output</option></select></label>
+  <label>Buildings show <select id="bbind"><option value="retrofit">retrofit state</option><option value="seq">numeric output</option><option value="plain">plain walls</option></select></label>
+  <label><input type="checkbox" id="timetable"> trams on a timetable</label>
+  <label>Traffic <input id="traffic" type="range" min="0" max="3" step="0.25" value="1"></label>
+  <label>People <input id="people" type="range" min="0" max="3" step="0.25" value="1"></label>
+  <label>Zoom <input id="zoom" type="range" min="0" max="1" step="0.002" value="0"></label>
+  <button id="fit" title="Show the whole scene">Fit</button>
+  <label><input type="checkbox" id="lBuild" checked> buildings</label>
+  <label><input type="checkbox" id="lVeh" checked> vehicles</label>
+  <label><input type="checkbox" id="lPeople" checked> people</label>
+  <button id="play" class="on">Pause</button>
+  <button id="reseed">New seed</button>
+</div>
+<div id="attrib" class="note" style="padding:6px 22px 0;font-size:12px"></div>
+<div id="looknote" class="note" style="padding:6px 22px 0;font-size:12px"></div>
+<div id="bstats" class="note" style="padding:2px 22px 6px;font-size:12px"></div>
+<canvas id="stage"></canvas>
+<div class="grid">
+  <div class="card"><b>Library: vehicles</b> (assetlib.js)<br>19 classes, each pre-built for the four isometric headings with only the faces turned toward the camera. Regions choose the fleet (tuk-tuks, cargo bikes, double-deckers, minibuses, trams…) and the drive side. The body or livery is the <i>data surface</i>. See library_catalogue.html.</div>
+  <div class="card"><b>Library: people</b> (assetlib.js)<br>Paper dolls: flat cut-outs, one neutral paper tone, no skin tones, no walking animation. Man, woman, boy, girl, couple, parent and child, family, wheelchair user, rider. Outfits follow the region's climate (coats, sun hats, umbrellas). The garment is the data surface.</div>
+  <div class="card"><b>Library: buildings</b> (buildinglib.js)<br>Six archetypes pre-built for four headings, sized in whole bays, with a rule-based facade grammar and regional variants. The walls are the data surface; scaffold, solar, band and marker are overlays. Footprints that are not near-rectangular or are rotated more than 12 degrees off the axes fall back to a generic extrusion and are counted above.</div>
+  <div class="card"><b>Library: trees</b> (treelib.js)<br>Nine kinds (broadleaf, oak, plane, columnar, conifer, umbrella, palm, blossom, shrub) as low-poly foliage that takes the register's flat tones. Each region has a species mix; foliage colours and bloom come from the look, so the same tree reads differently under each look and register. Flowering trees only appear when the look has a bloom colour.</div>
+  <div class="card"><b>Library: roads and ground</b><br>local, avenue (cycle lanes), boulevard (tram and median), cycle track. The look sets the surface: asphalt, concrete joints, setts or earth tracks, plus pavements, kerbs, gardens, parks, plazas and water. The formal register adds a faint ground grid.</div>
+  <div class="card" style="grid-column:1/-1"><b>Scene schema (input)</b><br>
+  <code>{ area, roads:[{id, class, tram?, width?, cycle?, pts:[[x,y],…]}], buildings:[{id, footprint:[[x,y],…], levels, archetype, state, investor}], landuse:[{kind:'park'|'garden'|'square'|'water', footprint}], trees:[[x,y] or [x,y,kind,scale],…] }</code><br>
+  Coordinates are metres in a local frame. <code>lab-render ingest</code> converts an OpenStreetMap extract into this shape (and writes a report of every assumption); load the resulting scene.json with the Scene control above.</div>
+</div>
+<script>
+/* assetlib.js: people and vehicles for SimCity-style isometric replays (v0.2).
+ *
+ * Every asset is defined once, parametrically, in its own local frame (metres, x forward, y lateral, z up).
+ * For each of the four axis headings the library builds the faces that face the camera
+ * (right face = world +x, left face = world +y, top), as a list of polygons in "screen metres".
+ * The same polygon list is emitted as SVG (catalogue, export) or painted on a canvas (scenes).
+ *
+ * Data surface: every asset has polygons with role "data" (people: garment; vehicles: body or livery).
+ * A simulation recolours them to show an output (state, income band, anything), without touching shape.
+ *
+ * People are paper dolls: flat cut-outs, one neutral paper tone for head and limbs, no skin tones.
+ * Regional variation is driven by climate (cold, sun, rain) and by the region's fleet, not by identity.
+ * Everything regional here is a PROPOSAL and must be checked with local authors.
+ */
+(function (root) {
+  'use strict';
+
+  const C30 = 0.8660254;
+  const VIEW = [1, 1, 1.2];
+
+  // ---------- colour helpers (hex in, hex out) ----------
+  function h2r(h) { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16)); }
+  function r2h(c) { return '#' + c.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join(''); }
+  function shade(h, k) { return r2h(h2r(h).map(v => v * k)); }
+  function mix(a, b, t) { const A = h2r(a), B = h2r(b); return r2h(A.map((v, i) => v * (1 - t) + B[i] * t)); }
+  function hash(n) { // deterministic float in [0,1) from an integer
+    n = (n | 0) ^ 61; n ^= n >>> 16; n = (n + (n << 3)) | 0; n ^= n >>> 4; n = Math.imul(n, 0x27d4eb2d); n ^= n >>> 15;
+    return (n >>> 0) / 4294967296;
+  }
+
+  // ---------- Carbon tokens (IBM Carbon Design System), used by the formal register ----------
+  // Checked against carbondesignsystem.com: white, gray 10/20/30/50/60/80/100, blue 10/30/60/70/80, purple 40/60/70, yellow 30,
+  // green 60, red 60. From memory of Carbon's palette and still to be checked: gray 40/70/90, cool gray, warm gray, blue 20/40,
+  // cyan 50, teal 50.
+  const CARBON = {
+    white: '#ffffff',
+    gray: { 10: '#f4f4f4', 20: '#e0e0e0', 30: '#c6c6c6', 40: '#a8a8a8', 50: '#8d8d8d', 60: '#6f6f6f', 70: '#525252', 80: '#393939', 90: '#262626', 100: '#161616' },
+    cool: { 10: '#f2f4f8', 20: '#dde1e6', 30: '#c1c7cd', 40: '#a2a9b0', 50: '#878d96', 60: '#697077', 70: '#4d5358', 80: '#343a3f', 90: '#21272a', 100: '#121619' },
+    warm: { 10: '#f7f3f2', 20: '#e5e0df', 30: '#cac5c4', 40: '#ada8a8', 50: '#8f8b8b', 60: '#726e6e', 70: '#565151', 80: '#3c3838', 90: '#272525', 100: '#171414' },
+    blue: { 10: '#edf5ff', 20: '#d0e2ff', 30: '#a6c8ff', 40: '#78a9ff', 60: '#0f62fe', 70: '#0043ce', 80: '#002d9c' },
+    purple: { 40: '#be95ff', 60: '#8a3ffc', 70: '#6929c4' }, green: { 60: '#198038' }, yellow: { 30: '#f1c21b' }, red: { 60: '#da1e28' },
+    cyan: { 50: '#1192e8' }, teal: { 50: '#009d9a' }
+  };
+
+  // ---------- registers ----------
+  // A register is how a palette is drawn. colorfigures: warm, hand-inked, the region's own colours. formal: a Carbon-based
+  // technical drawing: flat fills, hairlines, neutral tokens, one accent (IBM Blue), a faint ground grid, and colour reserved
+  // for data (the retrofit states use IBM's data-visualisation colours).
+  const REG = {
+    colorfigures: { id: 'colorfigures', bg: '#f2efe7', ink: '#231e16', lw: 1.1, tones: [1.14, 1.0, 0.76], paper: '#fbf6ea', glass: '#b6cfdc', coop: '#93d3b0',
+                    tram: '#c8452f', grid: false, states: { to_do: null, queued: '#6f96c8', in_progress: '#f4b829', finished: '#93d3b0', investor: '#8e80ac' } },
+    formal: { id: 'formal', bg: CARBON.gray[10], ink: CARBON.gray[90], lw: 0.75, tones: [1.08, 0.98, 0.84], paper: CARBON.white, glass: CARBON.blue[20], coop: CARBON.blue[60],
+              tram: CARBON.cool[70], grid: true, states: { to_do: null, queued: CARBON.cyan[50], in_progress: CARBON.yellow[30], finished: CARBON.teal[50], investor: CARBON.purple[60] } }
+  };
+  for (const k of Object.keys(REG)) { const r = REG[k]; r.queued = r.states.queued; r.inprog = r.states.in_progress; r.finished = r.states.finished; r.investor = r.states.investor; }
+
+  // nearest design token in CIELAB (so a regional colour lands on a token, not between tokens)
+  function lum(h) { const c = h2r(h); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; }
+  function toGray(h) { const l = lum(h); return r2h([l, l, l]); }
+  const labCache = new Map();
+  function lab(h) {
+    let v = labCache.get(h); if (v) return v;
+    const c = h2r(h).map(x => { x /= 255; return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+    const X = (c[0] * 0.4124 + c[1] * 0.3576 + c[2] * 0.1805) / 0.95047, Y = c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722, Z = (c[0] * 0.0193 + c[1] * 0.1192 + c[2] * 0.9505) / 1.08883;
+    const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+    v = [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))]; labCache.set(h, v); return v;
+  }
+  function snapTo(h, set) {
+    const L = lab(h); let best = set[0], bd = 1e18;
+    for (const t of set) { const l = lab(t), d = (L[0] - l[0]) ** 2 + (L[1] - l[1]) ** 2 + (L[2] - l[2]) ** 2; if (d < bd) { bd = d; best = t; } }
+    return best;
+  }
+  const grades = (scale, from, to) => Object.keys(scale).map(Number).filter(g => g >= from && g <= to).map(g => scale[g]);
+  const NEUTRAL_WALLS = [].concat(grades(CARBON.gray, 10, 70), grades(CARBON.cool, 10, 70), grades(CARBON.warm, 10, 70));
+  const NEUTRAL_ROOFS = [].concat(grades(CARBON.gray, 60, 90), grades(CARBON.cool, 60, 90), grades(CARBON.warm, 60, 90));
+
+  // ---------- themes: a palette family + a look, resolved for a register ----------
+  // A family (palettes.json) owns several looks. theme(family, look, register) returns every colour the renderers need.
+  function resolveLook(fam, ref) {
+    if (fam.looks && fam.looks.length) {
+      if (typeof ref === 'number') return fam.looks[((ref % fam.looks.length) + fam.looks.length) % fam.looks.length];
+      if (typeof ref === 'string') return fam.looks.find(l => l.id === ref) || fam.looks[0];
+      return fam.looks[0];
+    }
+    // a flat legacy record (wall, wall2, roof, ground, accent, shadow) becomes a single look
+    return { id: 'legacy', name: fam.name || 'legacy', note: '', surface: 'asphalt', walls: [fam.wall, fam.wall2, mix(fam.wall, fam.wall2, 0.5), shade(fam.wall, 0.9)],
+             roofs: [fam.roof, shade(fam.roof, 0.8)], accents: [fam.accent, fam.wall2, '#d8b04a'], ground: fam.ground, road: fam.road || shade(fam.ground, 0.9),
+             pave: fam.pave || mix(fam.ground, '#ffffff', 0.35), grass: fam.grass || '#b9d3a2', canopies: fam.canopies || ['#7fa27a', '#5f8a62', '#9ab87a'],
+             bloom: fam.bloom || null, water: fam.water || '#a9c9d8', shadow: fam.shadow };
+  }
+  function finishTheme(t) { t.wall = t.walls[0]; t.wall2 = t.walls[1]; t.roof = t.roofs[0]; t.accent = t.accents[0]; return t; }
+
+  function colorTheme(fam, k) {
+    const R = REG.colorfigures;
+    return finishTheme({
+      famId: fam.id, famName: fam.name, lookId: k.id, name: k.name, note: k.note || '', reg: 'colorfigures', surface: k.surface || 'asphalt',
+      walls: k.walls, roofs: k.roofs, accents: k.accents, ground: k.ground, road: k.road, pave: k.pave, grass: k.grass, canopies: k.canopies, bloom: k.bloom || null,
+      water: k.water, shadow: k.shadow, bg: R.bg, roofflat: mix(k.ground, '#6e6e6e', 0.55), mark: '#f5f0dc', rail: '#6d6a62', median: mix(k.grass, k.ground, 0.3),
+      plaza: k.pave, kerb: shade(k.pave, 0.82), trunk: mix('#6b5a45', k.shadow, 0.2), grid: null,
+      vehicles: [k.accents[0], k.walls[1], mix(k.roofs[0], '#ffffff', 0.45), '#d9d1bf', '#7b8a98', '#3f4a49', k.walls[0]],
+      tops: [k.accents[0], k.walls[1], mix(k.roofs[0], '#ffffff', 0.35), mix(k.walls[0], '#ffffff', 0.25), mix(k.accents[0], '#ffffff', 0.45), '#e9e2d0', '#6b7b8c'],
+      bottoms: [k.roofs[0], mix(k.roofs[0], '#000000', 0.2), '#3f4a5c', '#5a5248', mix(k.walls[0], '#000000', 0.45)],
+      peopleAccents: [k.accents[0], k.walls[1], '#d8b04a']
+    });
+  }
+
+  // Formal: the region still decides warm or cool and light or dark, but every colour is snapped to a Carbon token, and
+  // everything that is not data is neutral. Greens are built from Carbon green 60, water from blue 60.
+  function formalTheme(fam, k) {
+    const C = CARBON, G = C.green[60], neutralWall = h => snapTo(mix(mix(h, toGray(h), 0.5), '#ffffff', 0.28), NEUTRAL_WALLS), darkRoof = h => snapTo(mix(h, toGray(h), 0.85), NEUTRAL_ROOFS);
+    const earth = k.surface === 'earth';
+    const cl = Math.max(0, Math.min(1, (lum(k.canopies[0]) - 90) / 140)), cr = 0.42 + 0.2 * cl;    // lighter foliage in the look gives lighter formal greens
+    return finishTheme({
+      famId: fam.id, famName: fam.name, lookId: k.id, name: k.name, note: k.note || '', reg: 'formal', surface: k.surface || 'asphalt',
+      walls: k.walls.map(neutralWall), roofs: k.roofs.map(darkRoof), accents: [C.blue[60], C.gray[70], C.blue[30]],
+      ground: C.gray[20], road: k.surface === 'concrete' ? C.gray[30] : (earth ? C.warm[40] : C.gray[40]), pave: C.white,
+      grass: mix(C.gray[20], G, 0.22), canopies: [mix(G, C.gray[30], cr), mix(G, C.gray[40], cr + 0.12), mix(G, C.gray[20], cr - 0.1)], bloom: k.bloom ? mix(C.purple[40], C.gray[20], 0.3) : null,
+      water: mix(C.gray[20], C.blue[60], 0.22), shadow: C.gray[50], bg: C.gray[10], roofflat: C.gray[30], mark: C.gray[10], rail: C.gray[70], median: C.gray[30],
+      plaza: C.gray[10], kerb: C.gray[30], trunk: C.gray[60], grid: '#dcdcdc',
+      vehicles: [C.gray[30], C.gray[40], C.gray[50], C.gray[60], C.cool[20], C.warm[20], C.gray[70]],
+      tops: [C.gray[50], C.gray[60], C.gray[40], C.cool[60], C.cool[50], C.warm[50], C.gray[30]], bottoms: [C.gray[80], C.gray[90], C.cool[80], C.gray[70], C.warm[80]],
+      peopleAccents: [C.blue[60], C.gray[60], C.blue[30]]
+    });
+  }
+
+  const themeCache = new Map();
+  function theme(fam, lookRef, regId) {
+    const reg = REG[regId] ? regId : 'colorfigures', look = resolveLook(fam, lookRef), key = (fam.id || 'x') + '|' + look.id + '|' + reg;
+    let t = themeCache.get(key);
+    if (!t) { t = reg === 'formal' ? formalTheme(fam, look) : colorTheme(fam, look); themeCache.set(key, t); }
+    return t;
+  }
+  // accepts a resolved theme, or a palette family record (first look, colorfigures)
+  function asTheme(x, regId) { return (x && x.walls && x.tops) ? x : theme(x, undefined, regId); }
+
+  // Stylisation: people are drawn 1.2x life size so they read at neighbourhood zoom. Vehicles use the same factor
+  // so the proportions between them stay true.
+  const STYLE = { person: 1.2, vehicle: 1.2 };
+
+  // ---------- transforms ----------
+  function rotFn(h) { const c = [1, 0, -1, 0][h & 3], s = [0, 1, 0, -1][h & 3]; return (lx, ly) => [lx * c - ly * s, lx * s + ly * c]; }
+  function P3(R, lx, ly, lz) { const w = R(lx, ly); return [(w[0] - w[1]) * C30, (w[0] + w[1]) * 0.5 - lz]; }
+  function depthOf(R, lx, ly, lz) { const w = R(lx, ly); return w[0] + w[1] + lz * 1.2; }
+  function snapHeading(rad) { return ((Math.round(rad / (Math.PI / 2)) % 4) + 4) % 4; }
+
+  function circle(cx, cz, r, n) { const a = []; for (let i = 0; i < n; i++) { const t = i / n * Math.PI * 2; a.push([cx + Math.cos(t) * r, cz + Math.sin(t) * r]); } return a; }
+  function halfEllipse(cx, cz, rx, rz, n) { const a = []; for (let i = 0; i <= n; i++) { const t = Math.PI * i / n; a.push([cx + Math.cos(t) * rx, cz + Math.sin(t) * rz]); } return a; }
+
+  // ---------- part builders: each returns { key, prims } ----------
+  function visible(n) { return n[0] * VIEW[0] + n[1] * VIEW[1] + n[2] * VIEW[2] > 1e-4; }
+
+  // prism: a profile extruded across the object. Default: profile in (x,z), extruded along y over p.y.
+  // axis: 'x': profile in (y,z), extruded along x over p.x (gable roofs, ridge along the width).
+  function buildPrism(p, R) {
+    const ax = p.axis === 'x';
+    const prof = p.prof, n = prof.length;
+    let A = 0; for (let i = 0; i < n; i++) { const a = prof[i], b = prof[(i + 1) % n]; A += a[0] * b[1] - b[0] * a[1]; }
+    const sgn = A > 0 ? 1 : -1, ext = ax ? p.x : p.y, e0 = ext[0], e1 = ext[1];
+    const L3 = (u, e, z) => ax ? [e, u, z] : [u, e, z];          // profile coordinate, extrusion coordinate, height -> local 3D
+    const edges = [], caps = [];
+    for (let i = 0; i < n; i++) {
+      const a = prof[i], b = prof[(i + 1) % n];
+      const dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz); if (L < 1e-6) continue;
+      const nx = sgn * dz / L, nz = -sgn * dx / L;
+      const wn = ax ? R(0, nx) : R(nx, 0);
+      if (!visible([wn[0], wn[1], nz])) continue;
+      const role = nz > 0.85 ? (p.topRole || p.role) : (p.edgeRole || p.role);
+      edges.push({ pts: [P3(R, ...L3(a[0], e0, a[1])), P3(R, ...L3(b[0], e0, b[1])), P3(R, ...L3(b[0], e1, b[1])), P3(R, ...L3(a[0], e1, a[1]))],
+                   role, w: [wn[0] * wn[0], wn[1] * wn[1], nz * nz], d: depthOf(R, ...L3((a[0] + b[0]) / 2, (e0 + e1) / 2, (a[1] + b[1]) / 2)) });
+    }
+    edges.sort((u, v) => u.d - v.d);
+    for (const s of [-1, 1]) {
+      const wn = ax ? R(s, 0) : R(0, s);
+      if (!visible([wn[0], wn[1], 0])) continue;
+      caps.push({ pts: prof.map(q => P3(R, ...L3(q[0], s > 0 ? e1 : e0, q[1]))), role: p.capRole || p.role, w: [wn[0] * wn[0], wn[1] * wn[1], 0] });
+    }
+    let cu = 0, cz = 0; prof.forEach(q => { cu += q[0]; cz += q[1]; });
+    return { key: depthOf(R, ...L3(cu / n, (e0 + e1) / 2, cz / n)) + (p.bias || 0), prims: edges.concat(caps) };
+  }
+
+  // face: a free polygon in local 3D with an explicit outward normal (hip roofs, awnings, solar panels)
+  function buildFace(p, R) {
+    const len = Math.hypot(p.n[0], p.n[1], p.n[2]) || 1, ln = [p.n[0] / len, p.n[1] / len, p.n[2] / len];
+    const wn = R(ln[0], ln[1]);
+    if (!visible([wn[0], wn[1], ln[2]])) return { key: 0, prims: [] };
+    let cx = 0, cy = 0, cz = 0; p.pts.forEach(q => { cx += q[0]; cy += q[1]; cz += q[2]; });
+    const m = p.pts.length;
+    return { key: depthOf(R, cx / m, cy / m, cz / m) + (p.bias || 0),
+             prims: [{ pts: p.pts.map(q => P3(R, q[0], q[1], q[2])), role: p.role, w: [wn[0] * wn[0], wn[1] * wn[1], ln[2] * ln[2]], ink: p.ink, lw: p.lw }] };
+  }
+
+  function buildFlat(p, R) {
+    const sides = p.side === 'both' ? [1, -1] : [p.side || 0];
+    const out = []; let cx = 0, cz = 0; p.poly.forEach(q => { cx += q[0]; cz += q[1]; }); cx /= p.poly.length; cz /= p.poly.length;
+    let key = 0;
+    for (const s of sides) {
+      let wn, yy;
+      if (s !== 0) { wn = R(0, s); if (!visible([wn[0], wn[1], 0])) continue; yy = s * Math.abs(p.y || 0); }
+      else { const L = R(0, 1); wn = (L[0] * VIEW[0] + L[1] * VIEW[1] > 0) ? L : [-L[0], -L[1]]; yy = p.y || 0; }
+      out.push({ pts: p.poly.map(q => P3(R, q[0], yy, q[1])), role: p.role, w: [wn[0] * wn[0], wn[1] * wn[1], 0], ink: p.ink, lw: p.lw });
+      key = depthOf(R, cx, yy, cz);
+    }
+    return { key: key + (p.bias === undefined ? 0.3 : p.bias), prims: out };
+  }
+
+  // flat polygon in the (y,z) plane at x = p.x, normal along local x (end: +1 or -1), or end: 0 = whichever faces the camera (paper dolls)
+  function buildEnd(p, R) {
+    let s = p.end, back = false;
+    if (s === 0) { const X = R(1, 0); s = (X[0] * VIEW[0] + X[1] * VIEW[1] > 0) ? 1 : -1; back = s < 0; }
+    const wn = R(s, 0);
+    if (!visible([wn[0], wn[1], 0])) return { key: 0, prims: [] };
+    let cy = 0, cz = 0; p.poly.forEach(q => { cy += q[0]; cz += q[1]; }); cy /= p.poly.length; cz /= p.poly.length;
+    return { key: depthOf(R, p.x || 0, cy, cz) + (p.bias === undefined ? 0.3 : p.bias),
+             prims: [{ pts: p.poly.map(q => P3(R, p.x || 0, q[0], q[1])), role: p.role, w: [wn[0] * wn[0], wn[1] * wn[1], 0], back, ink: p.ink, lw: p.lw }] };
+  }
+
+  function buildPart(p, R) {
+    if (p.t === 'box') { const b = p.b; return buildPrism({ prof: [[b[0], b[2]], [b[3], b[2]], [b[3], b[5]], [b[0], b[5]]], y: [b[1], b[4]], role: p.role, topRole: p.topRole, edgeRole: p.edgeRole, capRole: p.capRole, bias: p.bias }, R); }
+    if (p.t === 'prism') return buildPrism(p, R);
+    if (p.t === 'flat') return buildFlat(p, R);
+    if (p.t === 'disc') return buildFlat({ side: p.side, y: p.y, poly: circle(p.c[0], p.c[1], p.r, p.n || 14), role: p.role, bias: p.bias, ink: p.ink }, R);
+    if (p.t === 'end') return buildEnd(p, R);
+    if (p.t === 'face') return buildFace(p, R);
+    throw new Error('unknown part type ' + p.t);
+  }
+
+  function buildAsset(def, heading) {
+    const R = rotFn(heading), list = [];
+    def.parts.forEach((p, i) => {
+      // a part that stands proud of a wall (balcony, awning, step, scaffold) declares that wall's outward direction in
+      // needs: [x, y]. If that wall faces away from the camera the part is behind the building, so it is not drawn.
+      if (p.needs) { const wn = R(p.needs[0], p.needs[1]); if (!visible([wn[0], wn[1], 0])) return; }
+      const o = buildPart(p, R);
+      const layer = p.layer !== undefined ? p.layer : ((p.t === 'prism' || p.t === 'box') ? 0 : 5);
+      if (o.prims.length) list.push({ key: o.key, i, layer, prims: o.prims });
+    });
+    if (def.sort !== false) list.sort((a, b) => (a.layer - b.layer) || (a.key - b.key) || (a.i - b.i));
+    const prims = [].concat(...list.map(l => l.prims));
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity; const roles = new Set();
+    for (const pr of prims) { roles.add(pr.role); for (const q of pr.pts) { minX = Math.min(minX, q[0]); maxX = Math.max(maxX, q[0]); minY = Math.min(minY, q[1]); maxY = Math.max(maxY, q[1]); } }
+    return { id: def.id, group: def.group, kind: def.kind, heading, prims, roles: Array.from(roles), bbox: { minX, maxX, minY, maxY } };
+  }
+
+  // ---------- output: SVG and canvas ----------
+  function faceOf(w) { return w[2] > 0.5 ? 'top' : (w[0] > w[1] ? 'right' : 'left'); }
+  const shadeMemo = new Map();
+  function primFill(pr, colours, reg) {
+    const c = colours[pr.role]; if (!c) return null;
+    let k = reg.tones[0] * pr.w[2] + reg.tones[1] * pr.w[1] + reg.tones[2] * pr.w[0];
+    if (pr.back) k *= 0.93;
+    const key = c + k.toFixed(3);                       // the same colour and tone recur across thousands of polygons
+    let v = shadeMemo.get(key);
+    if (v === undefined) { if (shadeMemo.size > 60000) shadeMemo.clear(); v = shade(c, k); shadeMemo.set(key, v); }
+    return v;
+  }
+  function isData(role) { return role === 'data' || role.indexOf('data@') === 0; }
+
+  function toSVG(asset, colours, reg, o) {
+    o = o || {}; const s = o.scale || 40, pad = 6, bb = asset.bbox;
+    const w = (bb.maxX - bb.minX) * s + pad * 2, h = (bb.maxY - bb.minY) * s + pad * 2;
+    const X = v => ((v - bb.minX) * s + pad).toFixed(1), Y = v => ((v - bb.minY) * s + pad).toFixed(1);
+    let out = '<svg xmlns="http://www.w3.org/2000/svg" class="asset" viewBox="0 0 ' + w.toFixed(1) + ' ' + h.toFixed(1) + '" width="' + w.toFixed(0) + '" height="' + h.toFixed(0) + '" data-asset="' + asset.kind + '" data-heading="' + asset.heading + '">';
+    for (const pr of asset.prims) {
+      const fill = primFill(pr, colours, reg);
+      const pts = pr.pts.map(q => X(q[0]) + ',' + Y(q[1])).join(' ');
+      const stroke = pr.ink === false ? 'none' : reg.ink;
+      out += '<polygon points="' + pts + '" fill="' + (fill || 'none') + '" stroke="' + stroke + '" stroke-width="' + (reg.lw * (pr.lw || 1)).toFixed(2) +
+             '" stroke-linejoin="round" vector-effect="non-scaling-stroke" data-face="' + faceOf(pr.w) + '" data-role="' + pr.role + '"' + (isData(pr.role) ? ' data-surface="1"' : '') + '/>';
+    }
+    return out + '</svg>';
+  }
+
+  // lwMul thins the ink line (scenes pass less than 1 when zoomed out, so tiny polygons are not swamped by their outline)
+  function paint(ctx, asset, colours, reg, px, py, scale, lwMul) {
+    ctx.lineJoin = 'round'; const lk = lwMul === undefined ? 1 : lwMul;
+    for (const pr of asset.prims) {
+      const fill = primFill(pr, colours, reg);
+      ctx.beginPath();
+      pr.pts.forEach((q, i) => { const x = px + q[0] * scale, y = py + q[1] * scale; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+      ctx.closePath();
+      if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+      if (pr.ink !== false) { ctx.strokeStyle = reg.ink; ctx.lineWidth = reg.lw * (pr.lw || 1) * lk; ctx.stroke(); }
+    }
+  }
+
+  // Sprite cache: an asset at a given scale and colouring is painted once into an offscreen canvas, then blitted.
+  // Set AssetLib.sprites.factory = (w, h) => canvas (browser: document.createElement; node: createCanvas).
+  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity };
+  function drawSprite(ctx, asset, colours, reg, px, py, scale) {
+    const lk = Math.max(0.3, Math.min(1, scale / 10));      // adaptive ink: full width from 10 px per metre up
+    if (!sprites.factory) { paint(ctx, asset, colours, reg, px, py, scale, lk); return; }
+    // sprites.exact: render at exactly the view's scale, so the blit is 1:1 (sharp, and several times cheaper than a resample).
+    // The viewer sets it once the view has held still; while it is changing, quarter-pixel buckets are used so that a zoom does not
+    // rebuild every sprite on every frame.
+    const q = sprites.dpr || 1, sb = sprites.exact ? Math.max(1, scale * q) : Math.max(1, Math.round(scale * q * 4) / 4);
+    // the colour part of the key is built once per colour set (a hidden property, so copies of a colour set do not inherit it)
+    let ck = colours._sk;
+    if (ck === undefined) { ck = Object.keys(colours).sort().map(k => colours[k] || '-').join(''); Object.defineProperty(colours, '_sk', { value: ck, enumerable: false, writable: true, configurable: true }); }
+    const key = asset.id + '|' + asset.heading + '|' + reg.id + '|' + sb + '|' + ck;
+    let sp = sprites.cache.get(key);
+    if (!sp && sprites.exact && sprites.builds >= sprites.maxBuilds) {      // over this frame's budget: show the bucketed sprite and sharpen on a later frame
+      sprites.exact = false; drawSprite(ctx, asset, colours, reg, px, py, scale); sprites.exact = true; return;
+    }
+    if (!sp) {
+      sprites.builds++;
+      const bb = asset.bbox, m = 2;
+      const w = Math.ceil((bb.maxX - bb.minX) * sb) + m * 2, h = Math.ceil((bb.maxY - bb.minY) * sb) + m * 2;
+      if (sprites.cache.size > sprites.limit || sprites.pixels + w * h > sprites.maxPixels) { sprites.cache.clear(); sprites.pixels = 0; }
+      sprites.pixels += w * h;
+      const cv = sprites.factory(w, h), c = cv.getContext('2d');
+      paint(c, asset, colours, reg, m - bb.minX * sb, m - bb.minY * sb, sb, Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1));
+      sp = { cv, ox: m - bb.minX * sb, oy: m - bb.minY * sb };
+      sprites.cache.set(key, sp);
+    }
+    const k = scale / sb;                                                            // sprite pixels to canvas units
+    const dx = Math.round((px - sp.ox * k) * q) / q, dy = Math.round((py - sp.oy * k) * q) / q;   // whole device pixels: no sub-pixel filtering
+    if (q === 1 && Math.abs(k - 1) < 1e-9) ctx.drawImage(sp.cv, dx, dy);                        // 1:1: no resampling at all
+    else ctx.drawImage(sp.cv, dx, dy, Math.round(sp.cv.width * k * q) / q, Math.round(sp.cv.height * k * q) / q);
+  }
+
+  // ---------- vehicles ----------
+  const DEFS = { vehicles: {}, people: {} };
+  function addVehicle(id, label, network, parts, extra) { DEFS.vehicles[id] = Object.assign({ id: 'v:' + id, kind: id, group: 'vehicles', label, network, parts, rider: null }, extra || {}); }
+
+  function wheelParts(xs, r, hw, hub) {
+    const out = [];
+    for (const x of xs) {
+      out.push({ t: 'disc', side: 'both', y: hw + 0.01, c: [x, r], r, role: 'wheel', n: 16 });
+      out.push({ t: 'disc', side: 'both', y: hw + 0.02, c: [x, r], r: r * (hub || 0.42), role: 'hub', n: 10, bias: 0.4 });
+    }
+    return out;
+  }
+  function lights(hl, hw, z, rear) {
+    return [-1, 1].map(s => ({ t: 'end', end: 1, x: hl + 0.005, poly: [[s * hw * 0.78 - 0.14, z - 0.06], [s * hw * 0.78 + 0.14, z - 0.06], [s * hw * 0.78 + 0.14, z + 0.06], [s * hw * 0.78 - 0.14, z + 0.06]], role: 'light', lw: 0.7 }));
+  }
+  function pillars(xs, hw, zb, zr) { return xs.map(x => ({ t: 'flat', side: 'both', y: hw + 0.012, poly: [[x - 0.05, zb + 0.02], [x + 0.05, zb + 0.02], [x + 0.035, zr - 0.03], [x - 0.035, zr - 0.03]], role: 'data', ink: false, bias: 0.45 })); }
+
+  function carLike(o) {
+    const hl = o.len / 2, hw = o.wid / 2, z0 = o.z0, zb = o.zb, zr = o.zr, nose = zb - (o.noseDrop === undefined ? 0.2 : o.noseDrop);
+    const parts = [
+      { t: 'prism', y: [-hw, hw], role: 'data', prof: [[-hl, z0], [hl, z0], [hl, nose], [o.ws0, zb], [o.rr0, zb], [-hl, zb - (o.tailDrop === undefined ? 0.08 : o.tailDrop)]] },
+      { t: 'prism', y: [-hw * 0.92, hw * 0.92], role: 'glass', topRole: 'data', layer: 1, prof: [[o.rr0, zb], [o.ws0, zb], [o.ws1, zr], [o.rr1, zr]] }
+    ];
+    return parts.concat(pillars(o.pillars || [(o.ws0 + o.rr0) / 2], hw * 0.92, zb, zr), lights(hl, hw, nose - 0.12), wheelParts(o.wheels, o.r, hw));
+  }
+
+  addVehicle('bicycle', 'Bicycle', 'cycle', [
+    { t: 'flat', side: 0, poly: [[-0.52, 0.34], [-0.08, 0.40], [-0.12, 0.43], [-0.56, 0.37]], role: 'frame', bias: 0 },
+    { t: 'flat', side: 0, poly: [[-0.08, 0.40], [0.24, 0.80], [0.19, 0.81], [-0.12, 0.43]], role: 'frame', bias: 0 },
+    { t: 'flat', side: 0, poly: [[0.22, 0.80], [0.54, 0.34], [0.58, 0.37], [0.27, 0.83]], role: 'frame', bias: 0 },
+    { t: 'flat', side: 0, poly: [[-0.18, 0.86], [0.08, 0.86], [0.08, 0.9], [-0.18, 0.9]], role: 'trim', bias: 0 },
+    { t: 'flat', side: 0, poly: [[0.2, 0.84], [0.34, 0.84], [0.34, 0.98], [0.3, 0.98], [0.3, 0.88], [0.2, 0.88]], role: 'frame', bias: 0 },
+    { t: 'disc', side: 0, y: 0, c: [-0.55, 0.34], r: 0.34, role: 'wheel', n: 16, bias: 0 },
+    { t: 'disc', side: 0, y: 0, c: [-0.55, 0.34], r: 0.27, role: 'trim', n: 16, bias: 0.05 },
+    { t: 'disc', side: 0, y: 0, c: [0.55, 0.34], r: 0.34, role: 'wheel', n: 16, bias: 0 },
+    { t: 'disc', side: 0, y: 0, c: [0.55, 0.34], r: 0.27, role: 'trim', n: 16, bias: 0.05 },
+    { t: 'box', b: [-0.92, -0.17, 0.5, -0.42, 0.17, 0.86], role: 'data', layer: 6 }
+  ], { rider: 'cyclist' });
+
+  addVehicle('cargo_bike', 'Cargo bike', 'cycle', [
+    { t: 'flat', side: 0, poly: [[-0.8, 0.34], [0.2, 0.42], [0.2, 0.46], [-0.8, 0.38]], role: 'frame', bias: 0 },
+    { t: 'flat', side: 0, poly: [[-0.5, 0.4], [-0.3, 0.86], [-0.35, 0.86], [-0.55, 0.4]], role: 'frame', bias: 0 },
+    { t: 'flat', side: 0, poly: [[1.38, 0.34], [1.34, 0.98], [1.28, 0.98], [1.34, 0.34]], role: 'frame', bias: 0 },
+    { t: 'flat', side: 0, poly: [[1.2, 0.98], [1.46, 0.98], [1.46, 1.04], [1.2, 1.04]], role: 'frame', bias: 0 },
+    { t: 'flat', side: 0, poly: [[-0.5, 0.9], [-0.2, 0.9], [-0.2, 0.95], [-0.5, 0.95]], role: 'trim', bias: 0 },
+    { t: 'disc', side: 0, y: 0, c: [-0.85, 0.34], r: 0.34, role: 'wheel', n: 16, bias: 0 },
+    { t: 'disc', side: 0, y: 0, c: [-0.85, 0.34], r: 0.27, role: 'trim', n: 16, bias: 0.05 },
+    { t: 'disc', side: 0, y: 0, c: [1.36, 0.3], r: 0.3, role: 'wheel', n: 16, bias: 0 },
+    { t: 'disc', side: 0, y: 0, c: [1.36, 0.3], r: 0.23, role: 'trim', n: 16, bias: 0.05 },
+    { t: 'prism', y: [-0.42, 0.42], role: 'data', topRole: 'trim', layer: 6, prof: [[0.2, 0.36], [1.12, 0.36], [1.12, 1.0], [0.2, 1.0]] }
+  ], { rider: 'cyclist' });
+
+  addVehicle('moped', 'Moped / scooter', 'road', [
+    { t: 'prism', y: [-0.14, 0.14], role: 'data', prof: [[-0.55, 0.32], [0.38, 0.32], [0.5, 0.95], [0.34, 0.98], [0.2, 0.58], [-0.1, 0.5], [-0.52, 0.6]] },
+    { t: 'prism', y: [-0.1, 0.1], role: 'trim', prof: [[-0.5, 0.6], [0.0, 0.58], [0.0, 0.7], [-0.5, 0.72]], bias: 0.1 },
+    { t: 'box', b: [0.36, -0.28, 1.0, 0.48, 0.28, 1.06], role: 'frame' },
+    { t: 'end', end: 1, x: 0.51, poly: [[-0.09, 0.82], [0.09, 0.82], [0.09, 0.92], [-0.09, 0.92]], role: 'light', lw: 0.7 }
+  ].concat(wheelParts([-0.52, 0.52], 0.25, 0.1)), { rider: 'cyclist', riderLift: -0.18 });
+
+  addVehicle('motorbike', 'Motorbike', 'road', [
+    { t: 'prism', y: [-0.12, 0.12], role: 'frame', prof: [[-0.5, 0.35], [0.4, 0.35], [0.3, 0.7], [-0.45, 0.7]] },
+    { t: 'prism', y: [-0.16, 0.16], role: 'data', prof: [[-0.1, 0.68], [0.42, 0.68], [0.4, 0.98], [-0.12, 0.92]], bias: 0.1 },
+    { t: 'prism', y: [-0.1, 0.1], role: 'trim', prof: [[-0.62, 0.7], [-0.1, 0.7], [-0.1, 0.84], [-0.62, 0.8]], bias: 0.1 },
+    { t: 'box', b: [0.5, -0.3, 1.02, 0.6, 0.3, 1.07], role: 'frame' },
+    { t: 'flat', side: 0, poly: [[0.36, 0.7], [0.62, 0.34], [0.66, 0.37], [0.4, 0.74]], role: 'frame', bias: 0 }
+  ].concat(wheelParts([-0.7, 0.68], 0.32, 0.06)), { rider: 'cyclist', riderLift: -0.1 });
+
+  addVehicle('three_wheeler', 'Three-wheeler taxi (tuk-tuk)', 'road', [
+    { t: 'prism', y: [-0.7, 0.7], role: 'data', prof: [[-1.15, 0.36], [0.35, 0.36], [0.35, 1.05], [-1.15, 1.05]] },
+    { t: 'prism', y: [-0.36, 0.36], role: 'data', prof: [[0.3, 0.36], [1.2, 0.36], [1.2, 0.78], [0.85, 1.0], [0.3, 1.05]], bias: 0.05 },
+    { t: 'box', b: [-1.2, -0.76, 1.6, 0.4, 0.76, 1.68], role: 'roof' },
+    { t: 'flat', side: 'both', y: 0.71, poly: [[-1.1, 1.08], [0.3, 1.08], [0.3, 1.58], [-1.1, 1.58]], role: 'interior', ink: false, bias: 0.25 },
+    { t: 'end', end: 1, x: 0.41, poly: [[-0.7, 1.05], [0.7, 1.05], [0.7, 1.58], [-0.7, 1.58]], role: 'glass', bias: 0.2 },
+    { t: 'end', end: 1, x: 1.21, poly: [[-0.15, 0.55], [0.15, 0.55], [0.15, 0.68], [-0.15, 0.68]], role: 'light', lw: 0.7 },
+    { t: 'disc', side: 0, y: 0, c: [1.05, 0.28], r: 0.28, role: 'wheel', n: 14, layer: -2 },
+    { t: 'disc', side: 0, y: 0, c: [1.05, 0.28], r: 0.12, role: 'hub', n: 10, layer: -1 }
+  ].concat(wheelParts([-0.7], 0.28, 0.7)));
+
+  addVehicle('utility_three_wheeler', 'Three-wheeler utility', 'road', [
+    { t: 'prism', y: [-0.52, 0.52], role: 'data', prof: [[-0.1, 0.34], [1.15, 0.34], [1.15, 0.8], [0.85, 1.0], [0.55, 1.5], [-0.1, 1.5]] },
+    { t: 'flat', side: 'both', y: 0.53, poly: [[0.15, 1.0], [0.55, 1.0], [0.5, 1.42], [0.15, 1.42]], role: 'glass', bias: 0.3 },
+    { t: 'prism', y: [-0.62, 0.62], role: 'data', topRole: 'trim', prof: [[-1.35, 0.5], [-0.1, 0.5], [-0.1, 0.98], [-1.35, 0.98]], bias: 0.05 },
+    { t: 'end', end: 1, x: 1.16, poly: [[-0.12, 0.55], [0.12, 0.55], [0.12, 0.66], [-0.12, 0.66]], role: 'light', lw: 0.7 },
+    { t: 'disc', side: 0, y: 0, c: [0.95, 0.26], r: 0.26, role: 'wheel', n: 14, layer: -2 },
+    { t: 'disc', side: 0, y: 0, c: [0.95, 0.26], r: 0.11, role: 'hub', n: 10, layer: -1 }
+  ].concat(wheelParts([-0.85], 0.26, 0.62)));
+
+  addVehicle('city_car', 'City car', 'road', carLike({ len: 3.7, wid: 1.62, z0: 0.22, zb: 0.85, zr: 1.5, ws0: 0.7, ws1: 0.3, rr0: -1.7, rr1: -1.3, wheels: [-1.15, 1.15], r: 0.29, pillars: [-0.5, 0.0] }));
+  addVehicle('hatchback', 'Hatchback', 'road', carLike({ len: 4.2, wid: 1.76, z0: 0.24, zb: 0.88, zr: 1.48, ws0: 0.85, ws1: 0.4, rr0: -1.9, rr1: -1.45, wheels: [-1.3, 1.3], r: 0.31, pillars: [-0.7, 0.05] }));
+  addVehicle('sedan', 'Saloon', 'road', carLike({ len: 4.6, wid: 1.8, z0: 0.24, zb: 0.88, zr: 1.45, ws0: 0.95, ws1: 0.45, rr0: -1.25, rr1: -0.85, wheels: [-1.4, 1.4], r: 0.32, pillars: [-0.45], tailDrop: 0.02 }));
+  addVehicle('suv', 'SUV', 'road', carLike({ len: 4.7, wid: 1.92, z0: 0.3, zb: 1.0, zr: 1.75, ws0: 0.95, ws1: 0.5, rr0: -2.2, rr1: -2.12, wheels: [-1.4, 1.4], r: 0.38, pillars: [-0.9, 0.0], noseDrop: 0.22 }));
+
+  addVehicle('pickup', 'Pickup', 'road', [
+    { t: 'prism', y: [-0.97, 0.97], role: 'data', prof: [[-0.2, 0.3], [2.5, 0.3], [2.5, 0.85], [1.0, 1.0], [-0.2, 1.0]] },
+    { t: 'prism', y: [-0.9, 0.9], role: 'glass', topRole: 'data', prof: [[-0.2, 1.0], [1.0, 1.0], [0.6, 1.72], [-0.2, 1.72]] },
+    { t: 'prism', y: [-0.97, 0.97], role: 'data', topRole: 'trim', prof: [[-2.6, 0.3], [-0.2, 0.3], [-0.2, 1.0], [-2.6, 1.0]], bias: -0.1 }
+  ].concat(pillars([0.2], 0.9, 1.0, 1.72), lights(2.5, 0.97, 0.7), wheelParts([-1.7, 1.55], 0.38, 0.97)));
+
+  addVehicle('van', 'Delivery van', 'road', [
+    { t: 'prism', y: [-0.97, 0.97], role: 'data', prof: [[-2.45, 0.3], [2.45, 0.3], [2.45, 0.95], [1.6, 1.08], [1.05, 2.0], [-2.45, 2.0]], edgeRole: 'data' },
+    { t: 'flat', side: 'both', y: 0.98, poly: [[1.12, 1.2], [1.62, 1.2], [1.28, 1.9], [1.12, 1.9]], role: 'glass', bias: 0.3 },
+    { t: 'flat', side: 'both', y: 0.98, poly: [[-2.4, 0.95], [1.0, 0.95], [1.0, 1.0], [-2.4, 1.0]], role: 'trim', ink: false, bias: 0.3 },
+    { t: 'end', end: 1, x: 2.455, poly: [[-0.75, 0.86], [0.75, 0.86], [0.75, 0.74], [-0.75, 0.74]], role: 'trim', lw: 0.7 }
+  ].concat(lights(2.45, 0.97, 0.78), wheelParts([-1.5, 1.55], 0.36, 0.97)));
+
+  addVehicle('van_coop', 'Co-op van', 'road', [
+    { t: 'prism', y: [-0.97, 0.97], role: 'data', prof: [[-2.45, 0.3], [2.45, 0.3], [2.45, 0.95], [1.6, 1.08], [1.05, 2.0], [-2.45, 2.0]], edgeRole: 'data' },
+    { t: 'flat', side: 'both', y: 0.98, poly: [[1.12, 1.2], [1.62, 1.2], [1.28, 1.9], [1.12, 1.9]], role: 'glass', bias: 0.3 },
+    { t: 'flat', side: 'both', y: 0.98, poly: [[-2.2, 1.0], [0.8, 1.0], [0.8, 1.2], [-2.2, 1.2]], role: 'trim', bias: 0.3 },
+    { t: 'flat', side: 'both', y: 0.98, poly: [[-2.0, 1.35], [-0.9, 1.35], [-0.9, 1.7], [-2.0, 1.7]], role: 'trim', bias: 0.3 }
+  ].concat(lights(2.45, 0.97, 0.78), wheelParts([-1.5, 1.55], 0.36, 0.97)), { coop: true });
+
+  addVehicle('kei_van', 'Small box van', 'road', [
+    { t: 'prism', y: [-0.74, 0.74], role: 'data', prof: [[-1.7, 0.25], [1.7, 0.25], [1.7, 0.9], [1.15, 1.0], [0.85, 1.75], [-1.7, 1.75]], edgeRole: 'data' },
+    { t: 'flat', side: 'both', y: 0.75, poly: [[0.9, 1.1], [1.2, 1.1], [0.98, 1.65], [0.9, 1.65]], role: 'glass', bias: 0.3 }
+  ].concat(lights(1.7, 0.74, 0.7), wheelParts([-1.05, 1.05], 0.27, 0.74)));
+
+  function windowBand(x0, x1, step, w, z0, z1, hw) { const out = []; for (let x = x0; x + w <= x1; x += step) out.push({ t: 'flat', side: 'both', y: hw + 0.012, poly: [[x, z0], [x + w, z0], [x + w, z1], [x, z1]], role: 'glass', bias: 0.3 }); return out; }
+
+  addVehicle('minibus', 'Minibus (shared taxi)', 'road', [
+    { t: 'prism', y: [-1.0, 1.0], role: 'data', prof: [[-2.9, 0.35], [2.9, 0.35], [2.9, 1.2], [2.4, 1.3], [2.1, 2.3], [-2.9, 2.3]], edgeRole: 'data' }
+  ].concat(windowBand(-2.6, 2.0, 0.95, 0.75, 1.35, 2.0, 1.0), lights(2.9, 1.0, 0.9), wheelParts([-1.9, 1.8], 0.4, 1.0)));
+
+  addVehicle('bus', 'Bus', 'road', [
+    { t: 'box', b: [-5.5, -1.25, 0.45, 5.5, 1.25, 3.1], role: 'data' },
+    { t: 'end', end: 1, x: 5.505, poly: [[-1.1, 1.6], [1.1, 1.6], [1.1, 2.8], [-1.1, 2.8]], role: 'glass', bias: 0.3 },
+    { t: 'flat', side: 'both', y: 1.26, poly: [[-5.5, 0.45], [5.5, 0.45], [5.5, 0.8], [-5.5, 0.8]], role: 'trim', bias: 0.3 },
+    { t: 'flat', side: 'both', y: 1.26, poly: [[4.0, 0.9], [5.0, 0.9], [5.0, 2.6], [4.0, 2.6]], role: 'interior', bias: 0.3 }
+  ].concat(windowBand(-4.9, 3.8, 1.45, 1.15, 1.5, 2.7, 1.25), wheelParts([-3.6, 3.3], 0.5, 1.25)));
+
+  addVehicle('double_decker', 'Double-decker bus', 'road', [
+    { t: 'box', b: [-5.0, -1.28, 0.45, 5.0, 1.28, 4.35], role: 'data' },
+    { t: 'end', end: 1, x: 5.005, poly: [[-1.1, 1.6], [1.1, 1.6], [1.1, 2.6], [-1.1, 2.6]], role: 'glass', bias: 0.3 },
+    { t: 'end', end: 1, x: 5.005, poly: [[-1.1, 3.1], [1.1, 3.1], [1.1, 4.05], [-1.1, 4.05]], role: 'glass', bias: 0.3 },
+    { t: 'flat', side: 'both', y: 1.29, poly: [[-5.0, 0.45], [5.0, 0.45], [5.0, 0.8], [-5.0, 0.8]], role: 'trim', bias: 0.3 }
+  ].concat(windowBand(-4.5, 4.9, 1.3, 1.05, 1.3, 2.3, 1.28), windowBand(-4.5, 4.9, 1.3, 1.05, 3.0, 4.0, 1.28), wheelParts([-3.2, 3.0], 0.5, 1.28)));
+
+  addVehicle('tram', 'Tram', 'rail', [
+    { t: 'box', b: [-8.0, -1.3, 0.55, 8.0, 1.3, 3.4], role: 'data', topRole: 'trim' },
+    { t: 'box', b: [-8.0, -1.3, 0.3, 8.0, 1.3, 0.62], role: 'frame', bias: -0.05 },
+    { t: 'end', end: 1, x: 8.005, poly: [[-1.2, 1.5], [1.2, 1.5], [1.2, 3.0], [-1.2, 3.0]], role: 'glass', bias: 0.3 },
+    { t: 'flat', side: 'both', y: 1.31, poly: [[-8.0, 0.62], [8.0, 0.62], [8.0, 0.95], [-8.0, 0.95]], role: 'trim', bias: 0.3 },
+    { t: 'box', b: [-0.6, -0.5, 3.4, 0.6, 0.5, 3.75], role: 'frame', bias: 0.2 }
+  ].concat(windowBand(-7.5, 7.6, 1.55, 1.2, 1.4, 2.8, 1.3)));
+
+  addVehicle('lorry', 'Lorry', 'road', [
+    { t: 'box', b: [-4.8, -1.22, 0.7, 0.9, 1.22, 3.3], role: 'data', topRole: 'trim' },
+    { t: 'box', b: [-4.8, -1.0, 0.45, 3.3, 1.0, 0.7], role: 'frame', bias: -0.1 },
+    { t: 'prism', y: [-1.15, 1.15], role: 'cab', topRole: 'cab', prof: [[1.0, 0.5], [3.3, 0.5], [3.3, 1.9], [2.9, 2.75], [1.0, 2.75]] },
+    { t: 'flat', side: 'both', y: 1.16, poly: [[2.0, 1.5], [2.85, 1.5], [2.7, 2.5], [2.0, 2.5]], role: 'glass', bias: 0.3 },
+    { t: 'end', end: 1, x: 3.305, poly: [[-0.9, 1.0], [0.9, 1.0], [0.9, 1.5], [-0.9, 1.5]], role: 'trim', bias: 0.3 }
+  ].concat(wheelParts([-3.6, -2.4, 2.3], 0.55, 1.1)));
+
+  // ---------- people: paper dolls ----------
+  // A doll is a set of flat polygons in the (u,z) plane facing the direction of travel. Head and limbs share one
+  // paper tone (no skin tones). The garment is the data surface.
+  const BASE = {
+    man:   { sw: 0.24, sz: 1.5, ww: 0.19, wz: 0.92, hz: 1.66, hr: 0.115, dress: false },
+    woman: { sw: 0.2, sz: 1.42, ww: 0.14, wz: 0.64, hem: 0.34, hz: 1.56, hr: 0.105, dress: true }
+  };
+  const KINDS = {
+    man: { base: 'man', s: 1 }, woman: { base: 'woman', s: 1 },
+    boy: { base: 'man', s: 0.64, headK: 1.28 }, girl: { base: 'woman', s: 0.66, headK: 1.28 }
+  };
+
+  function arm(S, H, w0, w1) {
+    const dx = H[0] - S[0], dz = H[1] - S[1], L = Math.hypot(dx, dz) || 1, nx = -dz / L, nz = dx / L;
+    return [[S[0] + nx * w0 / 2, S[1] + nz * w0 / 2], [H[0] + nx * w1 / 2, H[1] + nz * w1 / 2], [H[0] - nx * w1 / 2, H[1] - nz * w1 / 2], [S[0] - nx * w0 / 2, S[1] - nz * w0 / 2]];
+  }
+
+  // Parts for one doll. r(role) adds the member suffix so group members can carry different colours.
+  function dollParts(kind, u0, flags, r, o) {
+    o = o || {};
+    const K = KINDS[kind], b = BASE[K.base], s = K.s, hk = K.headK || 1, zOff = o.zOff || 0;
+    const U = u => u0 + u * s, Z = z => z * s + zOff;
+    const parts = [], poly = (pts, role, lw) => ({ t: 'end', end: 0, x: 0, poly: pts.map(q => [U(q[0]), Z(q[1])]), role: r(role), bias: parts.length * 0.0001, lw: lw || 0.8 });
+    const sw = b.sw, sz = b.sz;
+    const handL = (o.hands && o.hands.L) ? [(o.hands.L[0] - u0) / s, (o.hands.L[1] - zOff) / s] : [-sw - 0.4, sz - 0.4];
+    const handR = (o.hands && o.hands.R) ? [(o.hands.R[0] - u0) / s, (o.hands.R[1] - zOff) / s] : [sw + 0.4, sz - 0.4];
+    const sleeve = flags.coat ? 'data' : 'paper'; // coat sleeves are part of the garment, so part of the data surface
+    parts.push(poly(arm([-sw + 0.02, sz - 0.05], handL, 0.1, 0.07), sleeve));
+    parts.push(poly(arm([sw - 0.02, sz - 0.05], handR, 0.1, 0.07), sleeve));
+    // legs
+    if (b.dress) {
+      parts.push(poly([[-0.12, b.wz], [-0.02, b.wz], [-0.03, 0], [-0.1, 0]], 'paper'));
+      parts.push(poly([[0.02, b.wz], [0.12, b.wz], [0.1, 0], [0.03, 0]], 'paper'));
+    } else {
+      const wz = flags.coat ? 0.6 : b.wz;
+      parts.push(poly([[-b.ww, wz], [-0.012, wz], [-0.04, 0], [-b.ww - 0.01, 0]], 'bottom'));
+      parts.push(poly([[0.012, wz], [b.ww, wz], [b.ww + 0.01, 0], [0.04, 0]], 'bottom'));
+    }
+    // garment (data surface)
+    if (b.dress) parts.push(poly([[-sw, sz], [sw, sz], [b.hem, b.wz], [-b.hem, b.wz]], 'data'));
+    else if (flags.coat) parts.push(poly([[-sw, sz], [sw, sz], [b.ww + 0.07, 0.6], [-b.ww - 0.07, 0.6]], 'data'));
+    else parts.push(poly([[-sw, sz], [sw, sz], [b.ww, b.wz], [-b.ww, b.wz]], 'data'));
+    if (flags.scarf) parts.push(poly([[-0.1, sz + 0.05], [0.1, sz + 0.05], [0.1, sz - 0.04], [-0.1, sz - 0.04]], 'accent'));
+    // head
+    const hr = b.hr * hk;
+    parts.push({ t: 'end', end: 0, x: 0, poly: circle(U(0), Z(b.hz) + (hk > 1 ? 0.02 : 0), hr * s, 16), role: r('paper'), bias: parts.length * 0.0001, lw: 0.8 });
+    const hzz = Z(b.hz) + (hk > 1 ? 0.02 : 0), hrr = hr * s;
+    if (flags.hat) {
+      const dome = [[U(0) - hrr * 1.05, hzz + hrr * 0.3], [U(0) - hrr * 0.8, hzz + hrr * 0.95], [U(0), hzz + hrr * 1.25], [U(0) + hrr * 0.8, hzz + hrr * 0.95], [U(0) + hrr * 1.05, hzz + hrr * 0.3]];
+      parts.push({ t: 'end', end: 0, x: 0, poly: dome, role: r('hat'), bias: parts.length * 0.0001, lw: 0.8 });
+      if (flags.hat === 'sunhat') parts.push({ t: 'end', end: 0, x: 0, poly: [[U(0) - hrr * 2.2, hzz + hrr * 0.45], [U(0) + hrr * 2.2, hzz + hrr * 0.45], [U(0) + hrr * 1.1, hzz + hrr * 0.8], [U(0) - hrr * 1.1, hzz + hrr * 0.8]], role: r('hat'), bias: parts.length * 0.0001, lw: 0.8 });
+    }
+    if (flags.bag) parts.push(poly([[-sw - 0.06, 0.86], [-sw + 0.1, 0.86], [-sw + 0.1, 0.62], [-sw - 0.06, 0.62]], 'accent'));
+    if (flags.umbrella) {
+      const hx = handR[0], top = b.hz + b.hr + 0.3;
+      parts.push(poly([[hx - 0.015, handR[1]], [hx + 0.015, handR[1]], [hx + 0.015, top], [hx - 0.015, top]], 'frame', 0.6));
+      parts.push(poly(halfEllipse(hx, top, 0.55, 0.3, 14), 'accent'));
+    }
+    return parts;
+  }
+
+  function addPerson(id, label, members, extra) {
+    DEFS.people[id] = Object.assign({ id: 'p:' + id, kind: id, group: 'people', label, members, network: 'pavement', sort: false }, extra || {});
+  }
+  addPerson('man', 'Man', [{ kind: 'man', u: 0 }]);
+  addPerson('woman', 'Woman', [{ kind: 'woman', u: 0 }]);
+  addPerson('boy', 'Boy', [{ kind: 'boy', u: 0 }]);
+  addPerson('girl', 'Girl', [{ kind: 'girl', u: 0 }]);
+  addPerson('couple', 'Couple', [{ kind: 'man', u: -0.46, hands: { R: [0.0, 1.0] } }, { kind: 'woman', u: 0.46, hands: { L: [0.0, 1.0] } }]);
+  addPerson('parent_child', 'Parent and child', [{ kind: 'girl', u: -0.62, hands: { R: [-0.27, 0.78] } }, { kind: 'woman', u: 0.2, hands: { L: [-0.27, 0.78] } }]);
+  addPerson('family', 'Family of four', [
+    { kind: 'girl', u: -1.3, hands: { R: [-0.92, 0.8] } },
+    { kind: 'man', u: -0.46, hands: { L: [-0.92, 0.8], R: [0.0, 1.05] } },
+    { kind: 'woman', u: 0.46, hands: { L: [0.0, 1.05], R: [0.9, 0.82] } },
+    { kind: 'boy', u: 1.3, hands: { L: [0.9, 0.82] } }
+  ]);
+  // wheelchair user: seated doll on a chair (wheels seen edge-on from the front)
+  addPerson('wheelchair', 'Wheelchair user', [{ kind: 'man', u: 0, seated: true }]);
+  // rider: doll on a two-wheeler, front view, legs at the pedals
+  addPerson('cyclist', 'Rider', [{ kind: 'man', u: 0, rider: true }], { network: 'cycle' });
+
+  function peopleDef(kind, flagSets) {
+    const d = DEFS.people[kind];
+    let parts = [];
+    d.members.forEach((m, i) => {
+      const suffix = i ? '@' + i : '';
+      const r = role => role + suffix;
+      const flags = flagSets[i] || {};
+      if (m.seated) {
+        parts.push({ t: 'end', end: 0, x: 0, poly: [[-0.34, 0], [-0.28, 0], [-0.28, 0.62], [-0.34, 0.62]], role: 'frame', bias: 0 });
+        parts.push({ t: 'end', end: 0, x: 0, poly: [[0.28, 0], [0.34, 0], [0.34, 0.62], [0.28, 0.62]], role: 'frame', bias: 0.0001 });
+        parts.push({ t: 'end', end: 0, x: 0, poly: [[-0.3, 0.48], [0.3, 0.48], [0.3, 0.56], [-0.3, 0.56]], role: 'frame', bias: 0.0002 });
+        const all = dollParts(m.kind, 0, flags, r, { zOff: -0.46 }).filter(p => p.role.indexOf('bottom') !== 0);
+        parts = parts.concat(all);
+        parts.push({ t: 'end', end: 0, x: 0, poly: [[-0.17, 0.5], [-0.01, 0.5], [-0.02, 0.2], [-0.16, 0.2]], role: r('bottom'), bias: 0.0003 });
+        parts.push({ t: 'end', end: 0, x: 0, poly: [[0.01, 0.5], [0.17, 0.5], [0.16, 0.2], [0.02, 0.2]], role: r('bottom'), bias: 0.0003 });
+      } else if (m.rider) {
+        const hands = { L: [-0.36, 1.02], R: [0.36, 1.02] };
+        const ps = dollParts(m.kind, 0, flags, r, { zOff: 0.0, hands }).filter(p => p.role.indexOf('bottom') !== 0);
+        parts = parts.concat(ps);
+        parts.push({ t: 'end', end: 0, x: 0, poly: [[-0.19, 0.92], [-0.02, 0.92], [-0.1, 0.3], [-0.22, 0.3]], role: r('bottom'), bias: 0.0003 });
+        parts.push({ t: 'end', end: 0, x: 0, poly: [[0.02, 0.92], [0.19, 0.92], [0.22, 0.3], [0.1, 0.3]], role: r('bottom'), bias: 0.0003 });
+      } else {
+        parts = parts.concat(dollParts(m.kind, m.u, flags, r, { hands: m.hands }));
+      }
+    });
+    return { id: d.id + '|' + JSON.stringify(flagSets), kind: kind, group: 'people', parts, sort: false };
+  }
+
+  // ---------- registry and access ----------
+  const built = new Map(), groupDefs = new Map(), GROUPS = {};
+  // registerGroup('buildings', (kind, extra) => ({ parts, ... })): extra is a plain object, part of the cache key
+  function registerGroup(name, factory) { GROUPS[name] = factory; }
+  function getAsset(group, kind, heading, flagSets) {
+    heading = ((heading % 4) + 4) % 4;
+    if (group === 'vehicles') {
+      const k = 'v:' + kind + ':' + heading;
+      let a = built.get(k);
+      if (!a) { const d = DEFS.vehicles[kind]; if (!d) throw new Error('unknown vehicle ' + kind); a = buildAsset(d, heading); built.set(k, a); }
+      return a;
+    }
+    if (group !== 'people') {
+      const gf = GROUPS[group]; if (!gf) throw new Error('unknown asset group ' + group);
+      const ex = JSON.stringify(flagSets || {}), gk = group + ':' + kind + ':' + ex, k = gk + ':' + heading;
+      let a = built.get(k);
+      if (!a) {
+        let d = groupDefs.get(gk);
+        if (!d) { if (groupDefs.size > 4000) groupDefs.clear(); d = Object.assign({ id: gk, kind, group }, gf(kind, flagSets || {})); groupDefs.set(gk, d); }
+        if (built.size > 12000) built.clear();
+        a = buildAsset(d, heading); built.set(k, a);
+      }
+      return a;
+    }
+    const fs = flagSets || [];
+    const k = 'p:' + kind + ':' + heading + ':' + JSON.stringify(fs);
+    let a = built.get(k);
+    if (!a) {
+      if (!DEFS.people[kind]) throw new Error('unknown person ' + kind);
+      if (built.size > 5000) built.clear();
+      a = buildAsset(peopleDef(kind, fs), heading); built.set(k, a);
+    }
+    return a;
+  }
+
+  // ---------- regions: fleets, climate, outfits (proposals, to be checked with local authors) ----------
+  // cold / sun / rain are 0..1 and drive coats, sun hats and umbrellas. drive: 'right' | 'left' | 'ask' (mixed region, ask at intake).
+  const REGIONS = {
+    nw: { drive: 'right', climate: { cold: 0.6, sun: 0.2, rain: 0.6 },
+          fleet: [['bicycle', 20], ['cargo_bike', 8], ['city_car', 22], ['hatchback', 18], ['van', 7], ['bus', 4], ['tram', 3], ['moped', 3]] },
+    uk: { drive: 'left', climate: { cold: 0.5, sun: 0.15, rain: 0.8 },
+          fleet: [['city_car', 22], ['hatchback', 24], ['sedan', 8], ['van', 10], ['double_decker', 6], ['bicycle', 8], ['suv', 6]] },
+    ws: { drive: 'right', climate: { cold: 0.4, sun: 0.4, rain: 0.3 },
+          fleet: [['moped', 18], ['city_car', 24], ['hatchback', 18], ['bus', 5], ['tram', 3], ['bicycle', 8], ['van', 6]] },
+    md: { drive: 'right', climate: { cold: 0.1, sun: 0.8, rain: 0.15 },
+          fleet: [['moped', 24], ['utility_three_wheeler', 8], ['city_car', 26], ['hatchback', 12], ['bus', 4], ['bicycle', 3], ['van', 6]] },
+    ce: { drive: 'right', climate: { cold: 0.7, sun: 0.25, rain: 0.35 },
+          fleet: [['city_car', 24], ['hatchback', 22], ['sedan', 10], ['tram', 6], ['bus', 5], ['bicycle', 5], ['van', 7]] },
+    sa: { drive: 'left', climate: { cold: 0.0, sun: 0.85, rain: 0.5 },
+          fleet: [['three_wheeler', 22], ['motorbike', 24], ['city_car', 14], ['minibus', 8], ['bus', 6], ['bicycle', 8], ['van', 6]] },
+    se: { drive: 'ask', climate: { cold: 0.0, sun: 0.85, rain: 0.6 },
+          fleet: [['motorbike', 34], ['three_wheeler', 10], ['pickup', 8], ['minibus', 8], ['city_car', 12], ['bicycle', 4], ['bus', 4]] },
+    ea: { drive: 'ask', climate: { cold: 0.5, sun: 0.3, rain: 0.5 },
+          fleet: [['kei_van', 12], ['city_car', 22], ['hatchback', 12], ['bicycle', 16], ['moped', 10], ['bus', 5], ['van', 6]] },
+    me: { drive: 'right', climate: { cold: 0.05, sun: 0.95, rain: 0.05 },
+          fleet: [['sedan', 26], ['city_car', 14], ['pickup', 14], ['minibus', 12], ['bus', 6], ['suv', 8], ['van', 6]] },
+    sb: { drive: 'ask', climate: { cold: 0.0, sun: 0.75, rain: 0.45 },
+          fleet: [['minibus', 24], ['motorbike', 20], ['pickup', 8], ['lorry', 6], ['three_wheeler', 8], ['bus', 5], ['city_car', 10]] },
+    la: { drive: 'right', climate: { cold: 0.15, sun: 0.6, rain: 0.4 },
+          fleet: [['minibus', 12], ['city_car', 24], ['hatchback', 14], ['motorbike', 14], ['pickup', 8], ['bus', 8], ['bicycle', 4]] },
+    na: { drive: 'right', climate: { cold: 0.5, sun: 0.4, rain: 0.35 },
+          fleet: [['pickup', 18], ['suv', 20], ['sedan', 20], ['van', 8], ['bus', 3], ['bicycle', 4], ['city_car', 6]] }
+  };
+  // people kinds, same everywhere (weights): the region changes clothes and accessories, not who is present
+  const PEOPLE_MIX = [['man', 22], ['woman', 22], ['boy', 5], ['girl', 5], ['couple', 10], ['parent_child', 8], ['family', 3], ['wheelchair', 2]];
+
+  function hashStr(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h | 0; }
+  function pickWeighted(list, u) { let tot = 0; list.forEach(e => tot += e[1]); let x = u * tot; for (const e of list) { x -= e[1]; if (x <= 0) return e[0]; } return list[list.length - 1][0]; }
+
+  function pick(arr, seed) { return arr[Math.floor(hash(seed) * arr.length) % arr.length]; }
+
+  // Outfit for one person: colours from the family palette, flags from climate.
+  function makeOutfit(regionId, fam, seed) {
+    const th = asTheme(fam), rg = REGIONS[regionId] || REGIONS.nw, c = rg.climate, pal = { tops: th.tops, bottoms: th.bottoms, accents: th.peopleAccents };
+    const flags = {};
+    if (hash(seed + 11) < c.cold * 0.8) flags.coat = true;
+    if (hash(seed + 12) < c.cold * 0.5) flags.scarf = true;
+    if (hash(seed + 13) < c.rain * 0.3) flags.umbrella = true;
+    else if (hash(seed + 14) < c.sun * 0.35) flags.hat = c.sun > 0.6 ? 'sunhat' : 'cap';
+    if (hash(seed + 15) < 0.25) flags.bag = true;
+    return { flags, top: pick(pal.tops, seed + 1), bottom: pick(pal.bottoms, seed + 2), accent: pick(pal.accents, seed + 3), hat: pick(pal.accents, seed + 4) };
+  }
+  function vehicleTint(fam, seed) { return pick(asTheme(fam).vehicles, seed + 7); }
+  function pickFleet(regionId, u) { return pickWeighted((REGIONS[regionId] || REGIONS.nw).fleet, u); }
+  function pickPerson(u) { return pickWeighted(PEOPLE_MIX, u); }
+
+  // ---------- colours for an asset ----------
+  function baseColours(reg) {
+    return { glass: reg.glass, wheel: '#2c2c31', hub: '#bdb8aa', frame: '#4b4b50', trim: '#d9d1bf', light: '#f6ebb8', paper: reg.paper, interior: '#3a352e', roof: '#4a4e58', cab: '#d9d1bf' };
+  }
+  // vehicle colours: tint is the default livery; data (optional) overrides it. roofColour darkens the tint for roofs.
+  function vehicleColours(kind, reg, tint, dataColour) {
+    const c = baseColours(reg), def = DEFS.vehicles[kind];
+    let t = tint;
+    if (def && def.coop) t = reg.coop;
+    if (kind === 'tram') t = reg.tram;
+    c.data = dataColour || t;
+    c.roof = shade(c.data, 0.55);
+    if (kind === 'lorry') c.cab = mix(tint, '#ffffff', 0.5);
+    return c;
+  }
+  // person colours; dataColours (optional) is one colour or an array per member
+  function personColours(kind, reg, outfits, dataColours) {
+    const c = baseColours(reg), n = DEFS.people[kind].members.length;
+    for (let i = 0; i < n; i++) {
+      const o = outfits[i] || outfits[0], sfx = i ? '@' + i : '';
+      const dc = Array.isArray(dataColours) ? dataColours[i] : dataColours;
+      c['data' + sfx] = dc || o.top; c['bottom' + sfx] = o.bottom; c['accent' + sfx] = o.accent; c['hat' + sfx] = o.hat;
+      c['paper' + sfx] = reg.paper; c['frame' + sfx] = '#4b4b50';
+    }
+    return c;
+  }
+  function flagsOf(outfits) { return outfits.map(o => o.flags); }
+
+  // ---------- data scales: map a simulation output to the data-surface colour ----------
+  const scales = {
+    categorical(map, fallback) { return { type: 'categorical', colour: v => map[v] || fallback || '#bbbbbb', legend: () => Object.keys(map).map(k => ({ label: k, colour: map[k] })) }; },
+    sequential(stops, domain, labels) {
+      const d0 = domain ? domain[0] : 0, d1 = domain ? domain[1] : 1;
+      return { type: 'sequential', colour: v => { const t = Math.max(0, Math.min(1, (v - d0) / ((d1 - d0) || 1))) * (stops.length - 1), i = Math.min(stops.length - 2, Math.floor(t)); return mix(stops[i], stops[i + 1], t - i); },
+               legend: () => stops.map((c, i) => ({ label: labels ? labels[i] : (d0 + (d1 - d0) * i / (stops.length - 1)).toFixed(1), colour: c })) };
+    },
+    retrofitStates(reg, base) { // the Great Retrofit's own classes
+      const s = reg.states;
+      return scales.categorical({ to_do: base || '#b9876f', queued: s.queued, in_progress: s.in_progress, finished: s.finished, investor: s.investor });
+    }
+  };
+
+  root.AssetLib = { DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, sprites, buildAsset,
+                    makeOutfit, vehicleTint, pickFleet, pickPerson, vehicleColours, personColours, flagsOf, scales, mix, shade, hash, hashStr, isData, faceOf,
+                    registerGroup, baseColours, pickWeighted,
+                    CARBON, theme, asTheme, resolveLook, snapTo, toGray };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* buildinglib.js: buildings as assets (v0.3). Extends AssetLib; load after assetlib.js.
+ *
+ * A building asset is built from a handful of parameters, pre-built for the four isometric headings, and shows only the
+ * faces turned toward the camera (left, right, top), exactly like vehicles and people.
+ *
+ *   parameters   kind (archetype), W (frontage width, m), D (depth, m), N (storeys), variant (facade seed), fs (regional
+ *                facade style), ov (overlays)
+ *   frame        local x along the frontage, y depth, z up. The front faces local +y.
+ *   data surface the walls (role "data"). A simulation recolours them to show an output. Roofs, doors, glass, trim keep
+ *                their own colours.
+ *   overlays     scaffold, solar, band, marker: discrete geometry a simulation switches on (retrofit story, ownership).
+ *
+ * fitFootprint() decides which real footprints can use these assets: near-rectangular, within 12 degrees of an axis. The
+ * rest are reported, and the scene renderer falls back to a generic extrusion. Nothing is silently approximated.
+ *
+ * Regional facade grammar (roofs, shutters, balconies, awnings, air-conditioning, window proportion) is a PROPOSAL to be
+ * checked with local authors. It follows climate and local building types, never identity.
+ */
+(function (root) {
+  'use strict';
+  const A = root.AssetLib;
+  if (!A) throw new Error('assetlib.js must be loaded before buildinglib.js');
+  const { mix, shade, hash } = A;
+  const EPS = 0.012;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  function rngSeed(seed) { let a = (seed | 0) >>> 0; return function () { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = (t + Math.imul(t ^ t >>> 7, 61 | t)) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  // ---------- archetypes ----------
+  // style: facade grammar. sides: what the left and right walls get ('blank', 'few', 'windows', 'ribbon').
+  const ARCH = {
+    terrace:   { label: 'Terraced house',    bayW: 2.4, storeyH: 3.0, groundH: 3.2, minBays: 2, maxBays: 3, style: 'house', sides: 'blank',   win: 0.5,  roof: 'pitch' },
+    shophouse: { label: 'Shophouse',         bayW: 3.2, storeyH: 3.2, groundH: 4.0, minBays: 2, maxBays: 4, style: 'shop',  sides: 'blank',   win: 0.5,  roof: 'flat' },
+    block:     { label: 'Apartment block',   bayW: 3.4, storeyH: 3.0, groundH: 3.6, minBays: 3, maxBays: 9, style: 'block', sides: 'few',     win: 0.5,  roof: 'flat' },
+    villa:     { label: 'Detached house',    bayW: 3.0, storeyH: 2.9, groundH: 3.0, minBays: 2, maxBays: 4, style: 'house', sides: 'windows', win: 0.4,  roof: 'hip' },
+    tower:     { label: 'Tower',             bayW: 4.0, storeyH: 3.3, groundH: 4.5, minBays: 2, maxBays: 8, style: 'tower', sides: 'ribbon',  win: 0.8,  roof: 'flat' },
+    shed:      { label: 'Shed / warehouse',  bayW: 5.0, storeyH: 6.0, groundH: 6.5, minBays: 2, maxBays: 8, style: 'shed',  sides: 'blank',   win: 0,    roof: 'pitchlow' }
+  };
+  function base(a, s) { return s === 0 ? 0 : a.groundH + (s - 1) * a.storeyH; }
+  function storeyH(a, s) { return s === 0 ? a.groundH : a.storeyH; }
+  function heightOf(kind, N) { const a = ARCH[kind]; return a.groundH + (Math.max(1, N) - 1) * a.storeyH; }
+
+  // ---------- the asset definition ----------
+  function buildingDef(kind, o) {
+    const a = ARCH[kind]; if (!a) throw new Error('unknown building ' + kind);
+    const W = o.W, D = o.D, N = o.N, hw = W / 2, hd = D / 2, H = heightOf(kind, N);
+    const fs = o.fs || {}, winK = fs.winK || 1, ov = o.ov || [];
+    const rnd = rngSeed((o.variant | 0) * 7919 + A.hashStr(kind));
+    const nbF = clamp(Math.round(W / a.bayW), a.minBays, a.maxBays), bwF = W / nbF;
+    const nbS = clamp(Math.round(D / a.bayW), 1, 10), bwS = D / nbS;
+    const SIDE = { front: { L: W, n: nbF, bay: bwF }, back: { L: W, n: nbF, bay: bwF }, right: { L: D, n: nbS, bay: bwS }, left: { L: D, n: nbS, bay: bwS } };
+    const parts = [];
+
+    // a panel on a wall, in (u, z): u runs along the wall from its centre
+    function panel(side, poly, role, extra) {
+      if (side === 'front') return Object.assign({ t: 'flat', side: 1, y: hd + EPS, poly, role }, extra);
+      if (side === 'back') return Object.assign({ t: 'flat', side: -1, y: hd + EPS, poly, role }, extra);
+      if (side === 'right') return Object.assign({ t: 'end', end: 1, x: hw + EPS, poly, role }, extra);
+      return Object.assign({ t: 'end', end: -1, x: -(hw + EPS), poly, role }, extra);
+    }
+    // a box standing proud of a wall: u0..u1 along it, d0..d1 outward, z0..z1 up
+    function protrude(side, u0, u1, d0, d1, z0, z1, role, layer) {
+      if (side === 'front') return { t: 'box', b: [u0, hd + d0, z0, u1, hd + d1, z1], role, layer, needs: [0, 1] };
+      if (side === 'back') return { t: 'box', b: [u0, -hd - d1, z0, u1, -hd - d0, z1], role, layer, needs: [0, -1] };
+      if (side === 'right') return { t: 'box', b: [hw + d0, u0, z0, hw + d1, u1, z1], role, layer, needs: [1, 0] };
+      return { t: 'box', b: [-hw - d1, u0, z0, -hw - d0, u1, z1], role, layer, needs: [-1, 0] };
+    }
+    const rect = (u0, u1, z0, z1) => [[u0, z0], [u1, z0], [u1, z1], [u0, z1]];
+
+    // ---- walls: the data surface ----
+    parts.push({ t: 'box', b: [-hw, -hd, 0, hw, hd, H], role: 'data', topRole: 'roofflat', layer: 0 });
+
+    // ---- facade modules ----
+    function windowAt(side, u, bay, s) {
+      const sh = storeyH(a, s), b0 = base(a, s);
+      const ww = bay * clamp(a.win * winK, 0.28, 0.72), z0 = b0 + sh * 0.3, z1 = b0 + sh * 0.84;
+      parts.push(panel(side, rect(u - ww / 2, u + ww / 2, z0, z1), 'glass'));
+      parts.push(panel(side, rect(u - 0.025, u + 0.025, z0, z1), 'trim', { ink: false, bias: 0.35 }));
+      parts.push(panel(side, rect(u - ww / 2 - 0.08, u + ww / 2 + 0.08, z0 - 0.09, z0), 'trim', { ink: false, bias: 0.35 }));
+      if (fs.shutters && ww / bay <= 0.52) for (const sg of [-1, 1]) { const c = u + sg * (ww / 2 + ww * 0.26); parts.push(panel(side, rect(c - ww * 0.22, c + ww * 0.22, z0 - 0.05, z1 + 0.05), 'shutter')); }
+      if (fs.ac && (side === 'front' || side === 'back') && rnd() < 0.3) parts.push(protrude(side, u + ww / 2 - 0.6, u + ww / 2 + 0.2, 0, 0.5, z0 - 0.55, z0 - 0.1, 'trim', 6));
+      return { ww, z0, z1, b0 };
+    }
+    function balconyAt(side, u, bay, s) {
+      const w = windowAt(side, u, bay, s), bw = Math.min(bay * 0.92, w.ww + 0.9);
+      parts.push(protrude(side, u - bw / 2, u + bw / 2, 0, 0.95, w.b0 - 0.02, w.b0 + 0.14, 'trim', 6));
+      parts.push(protrude(side, u - bw / 2, u + bw / 2, 0.9, 0.95, w.b0 + 0.14, w.b0 + 1.05, 'frame', 6));
+    }
+    function doorAt(side, u, bay) {
+      const dw = Math.min(1.05, bay * 0.7);
+      parts.push(panel(side, rect(u - dw / 2, u + dw / 2, 0, 2.15), 'door'));
+      parts.push(protrude(side, u - dw / 2 - 0.15, u + dw / 2 + 0.15, 0, 0.35, 0, 0.12, 'trim', 6));
+    }
+    function shopAt(side, u, bay) {
+      const gh = a.groundH, w = bay * 0.84, z1 = Math.min(2.7, gh - 0.9);
+      parts.push(panel(side, rect(u - w / 2, u + w / 2, 0.3, z1), 'glass'));
+      parts.push(panel(side, rect(u - bay / 2 + 0.04, u + bay / 2 - 0.04, gh - 0.85, gh - 0.2), 'trim'));
+      if (fs.awning && side === 'front') {
+        const u0 = u - bay / 2 + 0.05, u1 = u + bay / 2 - 0.05, zt = gh - 0.85, d = 1.2, drop = 0.45;
+        parts.push({ t: 'face', pts: [[u0, hd, zt], [u1, hd, zt], [u1, hd + d, zt - drop], [u0, hd + d, zt - drop]], n: [0, drop, d], role: 'awning', layer: 6, needs: [0, 1] });
+      }
+    }
+    function rollerAt(side, u, bay) { const w = Math.min(bay * 0.8, 5), h = Math.min(4.6, a.groundH - 1.2); parts.push(panel(side, rect(u - w / 2, u + w / 2, 0, h), 'door')); }
+    function highWinAt(side, u, bay) { const gh = a.groundH, w = bay * 0.7; parts.push(panel(side, rect(u - w / 2, u + w / 2, gh - 2.3, gh - 1.2), 'glass')); }
+    function ribbonAt(side, s) {
+      const L = SIDE[side].L, sh = storeyH(a, s), b0 = base(a, s);
+      parts.push(panel(side, rect(-L / 2 + 0.3, L / 2 - 0.3, b0 + 0.8, b0 + sh - 0.4), 'glass'));
+      const n = Math.max(2, Math.round(L / 6));
+      for (let i = 1; i < n; i++) { const u = -L / 2 + i * L / n; parts.push(panel(side, rect(u - 0.05, u + 0.05, b0 + 0.8, b0 + sh - 0.4), 'trim', { ink: false, bias: 0.35 })); }
+    }
+
+    // ---- facade grammar: a grid of modules per wall, with rules ----
+    // W window, B balcony window, D door, S shopfront, G ribbon glazing, R roller door, H high window, X blank
+    function fixRuns(row) { for (let i = 1; i + 1 < row.length; i++) if (row[i - 1] === 'X' && row[i] === 'X' && row[i + 1] === 'X') row[i] = 'W'; }
+    function grid(side) {
+      const S = SIDE[side], n = S.n, front = side === 'front', fb = front || side === 'back';
+      const g = []; for (let s = 0; s < N; s++) g.push(new Array(n).fill('X'));
+      if (!fb) {
+        if (a.sides === 'blank') return g;
+        for (let s = 0; s < N; s++) for (let i = 0; i < n; i++) {
+          if (a.sides === 'ribbon') g[s][i] = 'G';
+          else if (a.sides === 'few') g[s][i] = (s >= 1 && rnd() < 0.55) ? 'W' : 'X';
+          else g[s][i] = (s === 0 ? rnd() < 0.5 : rnd() < 0.85) ? 'W' : 'X';
+        }
+        g.forEach(fixRuns); return g;
+      }
+      const st = a.style, pBal = fs.balcony || 0;
+      if (st === 'shed') {
+        const nd = front ? (n >= 3 && rnd() < 0.5 ? 2 : 1) : 0, doors = new Set();
+        while (doors.size < nd) doors.add(Math.floor(rnd() * n));
+        for (let i = 0; i < n; i++) g[0][i] = doors.has(i) ? 'R' : (rnd() < 0.6 ? 'H' : 'X');
+        return g;
+      }
+      if (!front) {                                   // rear walls: windows, no doors or shops
+        for (let s = 0; s < N; s++) for (let i = 0; i < n; i++) g[s][i] = st === 'tower' ? 'G' : (s === 0 ? (rnd() < 0.5 ? 'W' : 'X') : (rnd() < 0.85 ? 'W' : 'X'));
+        if (st === 'tower') g[0].fill('W');
+        g.forEach(fixRuns); return g;
+      }
+      const di = Math.floor(rnd() * n), mid = n >> 1;
+      if (st === 'house') {                           // exactly one door
+        for (let i = 0; i < n; i++) g[0][i] = i === di ? 'D' : (rnd() < 0.8 ? 'W' : 'X');
+        for (let s = 1; s < N; s++) for (let i = 0; i < n; i++) g[s][i] = rnd() < pBal * 0.4 ? 'B' : (rnd() < 0.08 ? 'X' : 'W');
+      } else if (st === 'shop') {                     // at least one door, shopfront runs of at most three
+        for (let i = 0; i < n; i++) g[0][i] = rnd() < 0.85 ? 'S' : 'W';
+        g[0][di] = 'D';
+        let run = 0; for (let i = 0; i < n; i++) { run = g[0][i] === 'S' ? run + 1 : 0; if (run > 3) { g[0][i - 1] = 'D'; run = 0; } }
+        for (let s = 1; s < N; s++) for (let i = 0; i < n; i++) g[s][i] = rnd() < pBal ? 'B' : (rnd() < 0.08 ? 'X' : 'W');
+      } else if (st === 'block') {                    // lobby door in the middle, balconies stacked in columns
+        for (let i = 0; i < n; i++) g[0][i] = i === mid ? 'D' : (rnd() < 0.25 && n >= 5 ? 'S' : (rnd() < 0.7 ? 'W' : 'X'));
+        const cols = []; for (let i = 0; i < n; i++) cols.push(rnd() < pBal);
+        for (let s = 1; s < N; s++) for (let i = 0; i < n; i++) g[s][i] = (cols[i] && rnd() < 0.85) ? 'B' : (rnd() < 0.05 ? 'X' : 'W');
+      } else if (st === 'tower') {
+        for (let i = 0; i < n; i++) g[0][i] = i === mid ? 'D' : (rnd() < 0.6 ? 'S' : 'W');
+        for (let s = 1; s < N; s++) g[s].fill('G');
+      }
+      g.forEach(fixRuns);
+      for (let s = 0; s < N; s++) if (!g[s].some(m => 'WBDSG'.includes(m))) g[s][0] = 'W';   // never a storey with no openings on the front
+      return g;
+    }
+
+    for (const side of ['front', 'back', 'right', 'left']) {
+      const S = SIDE[side], g = grid(side);
+      for (let s = 0; s < N; s++) {
+        if (g[s][0] === 'G') { ribbonAt(side, s); continue; }
+        for (let i = 0; i < S.n; i++) {
+          const u = -S.L / 2 + (i + 0.5) * S.bay, m = g[s][i];
+          if (m === 'W') windowAt(side, u, S.bay, s);
+          else if (m === 'B') balconyAt(side, u, S.bay, s);
+          else if (m === 'D') doorAt(side, u, S.bay);
+          else if (m === 'S') shopAt(side, u, S.bay);
+          else if (m === 'R') rollerAt(side, u, S.bay);
+          else if (m === 'H') highWinAt(side, u, S.bay);
+        }
+      }
+    }
+
+    // ---- roof ----
+    let roofKind = a.style === 'shed' ? 'pitchlow' : (a.style === 'tower' ? 'flat' : (fs.roof || a.roof));
+    if (N >= 6 && a.style !== 'shed') roofKind = 'flat';
+    let top = H, rh = 0;
+    if (roofKind === 'flat') {
+      const t = 0.22, ph = 0.7;
+      parts.push({ t: 'box', b: [-hw, hd - t, H, hw, hd, H + ph], role: 'data', layer: 1 });
+      parts.push({ t: 'box', b: [-hw, -hd, H, hw, -hd + t, H + ph], role: 'data', layer: 1 });
+      parts.push({ t: 'box', b: [hw - t, -hd + t, H, hw, hd - t, H + ph], role: 'data', layer: 1 });
+      parts.push({ t: 'box', b: [-hw, -hd + t, H, -hw + t, hd - t, H + ph], role: 'data', layer: 1 });
+      if (a.style !== 'house') { const pw = Math.min(2.6, W * 0.3), pd = Math.min(2.6, D * 0.3), ph2 = a.style === 'tower' ? 3.2 : 2.3; parts.push({ t: 'box', b: [hw * 0.3 - pw / 2, -pd / 2, H, hw * 0.3 + pw / 2, pd / 2, H + ph2], role: 'chimney', layer: 2 }); }
+      top = H + ph;
+    } else if (roofKind === 'pitch' || roofKind === 'pitchlow') {
+      rh = clamp(D * (roofKind === 'pitchlow' ? 0.1 : 0.28), 1.0, 6.5); const oh = 0.35;
+      parts.push({ t: 'prism', axis: 'x', x: [-hw - 0.02, hw + 0.02], prof: [[-hd - oh, H], [hd + oh, H], [0, H + rh]], role: 'roof', capRole: 'data', layer: 1 });
+      if (fs.chimney && roofKind === 'pitch') { const cx = (rnd() < 0.5 ? -1 : 1) * hw * 0.55; parts.push({ t: 'box', b: [cx - 0.35, -0.35, H + rh * 0.4, cx + 0.35, 0.35, H + rh + 0.9], role: 'chimney', layer: 2 }); }
+      top = H + rh;
+    } else { // hip
+      rh = clamp(Math.min(D, W) * 0.3, 1.2, 5); const oh = 0.35, bx = hw + oh, by = hd + oh, rl = Math.max(0, W - D) / 2;
+      const rf = (pts, n) => parts.push({ t: 'face', pts, n, role: 'roof', layer: 1 });
+      rf([[-bx, by, H], [bx, by, H], [rl, 0, H + rh], [-rl, 0, H + rh]], [0, rh, by]);
+      rf([[bx, -by, H], [-bx, -by, H], [-rl, 0, H + rh], [rl, 0, H + rh]], [0, -rh, by]);
+      rf([[bx, by, H], [bx, -by, H], [rl, 0, H + rh]], [rh, 0, Math.max(bx - rl, 0.01)]);
+      rf([[-bx, -by, H], [-bx, by, H], [-rl, 0, H + rh]], [-rh, 0, Math.max(bx - rl, 0.01)]);
+      if (fs.chimney) { const cx = (rnd() < 0.5 ? -1 : 1) * Math.max(rl * 0.8, 0.8); parts.push({ t: 'box', b: [cx - 0.35, -0.35, H + rh * 0.3, cx + 0.35, 0.35, H + rh + 0.9], role: 'chimney', layer: 2 }); }
+      top = H + rh;
+    }
+    if ((a.style === 'shop' || a.style === 'block') && roofKind === 'flat') {      // cornice
+      parts.push({ t: 'box', b: [-hw - 0.1, hd, H - 0.4, hw + 0.1, hd + 0.22, H - 0.05], role: 'trim', layer: 6, needs: [0, 1] });
+      parts.push({ t: 'box', b: [-hw - 0.1, -hd - 0.22, H - 0.4, hw + 0.1, -hd, H - 0.05], role: 'trim', layer: 6, needs: [0, -1] });
+    }
+
+    // ---- overlays: discrete geometry a simulation can switch on ----
+    if (ov.includes('band')) for (const side of ['front', 'back', 'right', 'left']) parts.push(panel(side, rect(-SIDE[side].L / 2, SIDE[side].L / 2, 0, 0.55), 'band', { bias: 0.5 }));
+    if (ov.includes('scaffold')) for (const side of ['front', 'back', 'right', 'left']) {
+      const L = SIDE[side].L, np = Math.max(2, Math.round(L / 2.6) + 1);
+      for (let i = 0; i < np; i++) { const u = -L / 2 + i * L / (np - 1); parts.push(protrude(side, u - 0.04, u + 0.04, 0.82, 0.9, 0, H + 1.0, 'scaffold', 7)); }
+      for (let s = 0; s < N; s++) {
+        const z = base(a, s) + 1.2;
+        parts.push(protrude(side, -L / 2 - 0.2, L / 2 + 0.2, 0, 0.9, z, z + 0.08, 'scaffold', 7));
+        parts.push(protrude(side, -L / 2, L / 2, 0.86, 0.9, z + 0.95, z + 1.0, 'scaffold', 7));
+        parts.push(protrude(side, -L / 2, L / 2, 0.86, 0.9, z + 0.5, z + 0.54, 'scaffold', 7));
+      }
+    }
+    if (ov.includes('solar')) {
+      const quad = (pts) => { // outward normal (upwards) from the first three points
+        const u = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]], v = [pts[3][0] - pts[0][0], pts[3][1] - pts[0][1], pts[3][2] - pts[0][2]];
+        let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]; if (n[2] < 0) n = [-n[0], -n[1], -n[2]];
+        return { t: 'face', pts, n, role: 'solar', layer: 3 };
+      };
+      if (roofKind === 'flat') {
+        const rows = clamp(Math.floor((D - 2) / 2.4), 1, 4), cols = clamp(Math.floor((W - 2) / 2), 1, 6);
+        const cw = (W - 2) / cols, rd = (D - 2) / rows;
+        for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+          const x0 = -hw + 1 + c * cw + 0.12, x1 = -hw + 1 + (c + 1) * cw - 0.12, yb = -hd + 1 + r * rd + 0.1, yf = -hd + 1 + (r + 1) * rd - 0.1;
+          const z = H + 0.7;
+          parts.push(quad([[x0, yf, z + 0.2], [x1, yf, z + 0.2], [x1, yb, z + 0.7], [x0, yb, z + 0.7]]));
+        }
+      } else if (rh > 0) {
+        const by = hd + 0.35, n = clamp(Math.floor(W / 2.2), 1, 5), pw = (W * 0.8) / n;
+        for (const sg of [1, -1]) for (let c = 0; c < n; c++) {
+          const x0 = -W * 0.4 + c * pw + 0.1, x1 = -W * 0.4 + (c + 1) * pw - 0.1;
+          const pt = (x, t) => [x, sg * by * (1 - t), H + rh * t + 0.06];
+          parts.push(quad(sg > 0 ? [pt(x0, 0.22), pt(x1, 0.22), pt(x1, 0.78), pt(x0, 0.78)] : [pt(x0, 0.78), pt(x1, 0.78), pt(x1, 0.22), pt(x0, 0.22)]));
+        }
+      }
+    }
+    if (ov.includes('marker')) parts.push({ t: 'box', b: [-0.7, -0.7, top - (rh > 0 ? 0.2 : 0), 0.7, 0.7, top + 0.5], role: 'marker', layer: 4 });
+
+    return { parts, meta: { H, top, roof: roofKind, bays: nbF } };
+  }
+
+  A.registerGroup('buildings', buildingDef);
+
+  // ---------- placing assets on footprints ----------
+  function convexHull(pts) {
+    const p = pts.slice().sort((u, v) => u[0] - v[0] || u[1] - v[1]);
+    const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lo = []; for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+    const up = []; for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+    up.pop(); lo.pop(); return lo.concat(up);
+  }
+  function polyArea(p) { let s = 0; for (let i = 0; i < p.length; i++) { const q = p[(i + 1) % p.length]; s += p[i][0] * q[1] - q[0] * p[i][1]; } return Math.abs(s) / 2; }
+  function minRect(hull) {
+    let best = null;
+    for (let i = 0; i < hull.length; i++) {
+      const a = hull[i], b = hull[(i + 1) % hull.length], th = Math.atan2(b[1] - a[1], b[0] - a[0]), c = Math.cos(-th), s = Math.sin(-th);
+      let x0 = 1e18, x1 = -1e18, y0 = 1e18, y1 = -1e18;
+      for (const q of hull) { const x = q[0] * c - q[1] * s, y = q[0] * s + q[1] * c; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      const area = (x1 - x0) * (y1 - y0);
+      if (!best || area < best.area) best = { area, th, a: x1 - x0, b: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
+    }
+    const ct = Math.cos(best.th), st = Math.sin(best.th);
+    return { th: best.th, a: best.a, b: best.b, area: best.area, x: best.cx * ct - best.cy * st, y: best.cx * st + best.cy * ct };
+  }
+  const HEADING_OF = { '+y': 0, '-x': 1, '-y': 2, '+x': 3 };   // which heading puts the front (local +y) on this world axis
+  const FIT = { maxDevDeg: 12, minRectangularity: 0.82, minSide: 3 };
+
+  // A grid of road segments for 'nearest road to this point'. Cycle tracks and tram tracks are not building fronts.
+  function roadIndex(roads, cell) {
+    cell = cell || 40;
+    const g = new Map();
+    for (const rd of roads) {
+      if (rd.class === 'cycle' || rd.class === 'tramway') continue;
+      for (let i = 0; i < rd.pts.length - 1; i++) {
+        const p = rd.pts[i], q = rd.pts[i + 1], seg = [p[0], p[1], q[0], q[1]];
+        for (let cx = Math.floor(Math.min(p[0], q[0]) / cell); cx <= Math.floor(Math.max(p[0], q[0]) / cell); cx++) for (let cy = Math.floor(Math.min(p[1], q[1]) / cell); cy <= Math.floor(Math.max(p[1], q[1]) / cell); cy++) {
+          const k = cx + ',' + cy; let a = g.get(k); if (!a) g.set(k, a = []); a.push(seg);
+        }
+      }
+    }
+    return {
+      cell, size: g.size,
+      nearest(x, y) {
+        let best = Infinity, bp = null; const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+        for (let r = 0; r <= 14; r++) {
+          for (let i = cx - r; i <= cx + r; i++) for (let j = cy - r; j <= cy + r; j++) {
+            if (Math.max(Math.abs(i - cx), Math.abs(j - cy)) !== r) continue;           // only the new ring
+            const a = g.get(i + ',' + j); if (!a) continue;
+            for (const s of a) {
+              const dx = s[2] - s[0], dy = s[3] - s[1], L2 = dx * dx + dy * dy || 1, t = clamp(((x - s[0]) * dx + (y - s[1]) * dy) / L2, 0, 1), px = s[0] + dx * t, py = s[1] + dy * t, d = Math.hypot(px - x, py - y);
+              if (d < best) { best = d; bp = [px, py]; }
+            }
+          }
+          if (bp && best <= r * cell) break;
+        }
+        return bp;
+      }
+    };
+  }
+
+  // Fit a footprint polygon to an asset slot. Returns { ok, reason, cx, cy, W, D, heading, ... }.
+  function fitFootprint(fp, roads, opts) {
+    const T = Object.assign({}, FIT, opts || {});
+    const hull = convexHull(fp); const out = { ok: false, reason: '', cx: 0, cy: 0, W: 0, D: 0, heading: 0, dev: 0, rectangularity: 0 };
+    if (hull.length < 3) { out.reason = 'degenerate'; return out; }
+    const r = minRect(hull), area = polyArea(fp);
+    out.cx = r.x; out.cy = r.y; out.rectangularity = area / (r.a * r.b);
+    const thd = r.th * 180 / Math.PI, m = ((thd % 90) + 90) % 90; out.dev = Math.min(m, 90 - m);
+    if (r.a < T.minSide || r.b < T.minSide) out.reason = 'too small';
+    else if (out.rectangularity < T.minRectangularity) out.reason = 'not rectangular';
+    else if (out.dev > T.maxDevDeg) out.reason = 'rotated ' + out.dev.toFixed(0) + ' degrees off the axes';
+    const k = Math.round(r.th / (Math.PI / 2)), even = (((k % 2) + 2) % 2) === 0;
+    const wx = even ? r.a : r.b, wy = even ? r.b : r.a;
+    let nx = 0, ny = 1;                                   // default: front toward +y
+    if (roads && (roads.nearest || roads.length)) {
+      let bd = 1e18, bp = null;
+      if (roads.nearest) bp = roads.nearest(out.cx, out.cy);
+      else for (const rd of roads) { if (rd.class === 'cycle' || rd.class === 'tramway') continue; for (let i = 0; i < rd.pts.length - 1; i++) {
+        const p = rd.pts[i], q = rd.pts[i + 1], dx = q[0] - p[0], dy = q[1] - p[1], L2 = dx * dx + dy * dy || 1;
+        const t = clamp(((out.cx - p[0]) * dx + (out.cy - p[1]) * dy) / L2, 0, 1), px = p[0] + dx * t, py = p[1] + dy * t, d = Math.hypot(px - out.cx, py - out.cy);
+        if (d < bd) { bd = d; bp = [px, py]; } } }
+      if (bp) { const vx = bp[0] - out.cx, vy = bp[1] - out.cy; if (Math.abs(vx) > Math.abs(vy)) { nx = vx > 0 ? 1 : -1; ny = 0; } else { nx = 0; ny = vy > 0 ? 1 : -1; } }
+    }
+    out.heading = HEADING_OF[(nx ? (nx > 0 ? '+x' : '-x') : (ny > 0 ? '+y' : '-y'))];
+    if (nx) { out.D = wx; out.W = wy; } else { out.D = wy; out.W = wx; }
+    out.ok = out.reason === '';
+    return out;
+  }
+
+  // ---------- regions: archetype mix and facade grammar (proposals) ----------
+  // mult: archetype weight multipliers. roof: weights. shutters, awning, ac, chimney, balcony: probabilities. winK: window proportion.
+  const RB = {
+    nw: { mult: { terrace: 1.6, villa: 0.6, shophouse: 0.8 }, roof: { pitch: 0.9, flat: 0.1 }, shutters: 0, awning: 0.1, ac: 0, chimney: 0.5, balcony: 0.15, winK: 1.0 },
+    uk: { mult: { terrace: 1.8, villa: 1.0, shophouse: 0.7 }, roof: { pitch: 0.95, flat: 0.05 }, shutters: 0, awning: 0.1, ac: 0, chimney: 0.8, balcony: 0.05, winK: 1.0 },
+    ws: { mult: { block: 1.3, shophouse: 1.0, terrace: 1.0 }, roof: { flat: 0.35, pitch: 0.55, hip: 0.1 }, shutters: 0.45, awning: 0.3, ac: 0.05, chimney: 0.3, balcony: 0.5, winK: 1.1 },
+    md: { mult: { block: 1.4, shophouse: 1.0, terrace: 1.0, villa: 0.8 }, roof: { flat: 0.5, pitch: 0.5 }, shutters: 0.6, awning: 0.4, ac: 0.25, chimney: 0.1, balcony: 0.4, winK: 0.85 },
+    ce: { mult: { block: 1.6, terrace: 1.0, shophouse: 0.8, villa: 0.6 }, roof: { pitch: 0.5, hip: 0.2, flat: 0.3 }, shutters: 0.05, awning: 0.15, ac: 0.02, chimney: 0.3, balcony: 0.3, winK: 1.0 },
+    sa: { mult: { shophouse: 1.6, terrace: 1.0, block: 1.0, villa: 0.8 }, roof: { flat: 0.7, pitch: 0.3 }, shutters: 0.05, awning: 0.5, ac: 0.3, chimney: 0, balcony: 0.35, winK: 0.8 },
+    se: { mult: { shophouse: 2.0, terrace: 1.0, block: 1.0, villa: 0.5 }, roof: { flat: 0.6, pitch: 0.4 }, shutters: 0.05, awning: 0.6, ac: 0.5, chimney: 0, balcony: 0.3, winK: 0.8 },
+    ea: { mult: { block: 1.8, tower: 1.5, shophouse: 0.8, terrace: 0.4, villa: 0.3 }, roof: { flat: 0.85, pitch: 0.15 }, shutters: 0, awning: 0.15, ac: 0.5, chimney: 0, balcony: 0.5, winK: 0.9 },
+    me: { mult: { block: 1.4, villa: 1.0, shophouse: 0.8, terrace: 0.5 }, roof: { flat: 0.9, pitch: 0.1 }, shutters: 0.1, awning: 0.2, ac: 0.6, chimney: 0, balcony: 0.2, winK: 0.6 },
+    sb: { mult: { shophouse: 1.2, villa: 1.2, terrace: 0.6, block: 0.8, shed: 0.8 }, roof: { pitch: 0.6, flat: 0.4 }, shutters: 0.05, awning: 0.4, ac: 0.1, chimney: 0, balcony: 0.15, winK: 0.75 },
+    la: { mult: { block: 1.4, terrace: 1.0, villa: 1.0, shophouse: 1.0 }, roof: { flat: 0.6, pitch: 0.4 }, shutters: 0.1, awning: 0.3, ac: 0.2, chimney: 0, balcony: 0.4, winK: 0.9 },
+    na: { mult: { villa: 1.8, terrace: 0.5, block: 1.0, shophouse: 0.8, tower: 1.0, shed: 0.8 }, roof: { pitch: 0.6, hip: 0.1, flat: 0.3 }, shutters: 0.1, awning: 0.15, ac: 0.3, chimney: 0.6, balcony: 0.2, winK: 1.0 }
+  };
+  for (const id of Object.keys(RB)) if (A.REGIONS[id]) A.REGIONS[id].buildings = RB[id];
+  const RB_DEFAULT = RB.nw;
+  const BAND = [[1, [['villa', 3], ['shed', 1], ['terrace', 2]]], [3, [['terrace', 4], ['villa', 2], ['shophouse', 3]]], [6, [['block', 3], ['shophouse', 2], ['terrace', 1]]], [999, [['tower', 3], ['block', 2]]]];
+  function pickArchetype(regionId, levels, u) {
+    const rg = (A.REGIONS[regionId] && A.REGIONS[regionId].buildings) || RB_DEFAULT;
+    const band = BAND.find(b => levels <= b[0])[1];
+    return A.pickWeighted(band.map(e => [e[0], e[1] * ((rg.mult && rg.mult[e[0]]) || 1)]), u);
+  }
+
+  // Parameters for one building: a quantised size (so assets are shared), a facade variant, and the regional facade style.
+  function buildingParams(regionId, kind, levels, fit, seed) {
+    const rg = (A.REGIONS[regionId] && A.REGIONS[regionId].buildings) || RB_DEFAULT, r = rngSeed(seed ^ 0x5bd1e995);
+    let N = clamp(Math.round(levels), 1, 60); if (kind === 'shed') N = 1; if (kind === 'tower') N = Math.max(N, 6);
+    const roofs = Object.keys(rg.roof).map(k => [k, rg.roof[k]]);
+    const roof = A.pickWeighted(roofs, r());
+    return { kind, W: clamp(Math.round(fit.W), 3, 80), D: clamp(Math.round(fit.D / 2) * 2, 4, 60), N, variant: Math.floor(r() * 12),
+             fs: { shutters: r() < rg.shutters, awning: r() < rg.awning, ac: r() < rg.ac, chimney: r() < rg.chimney, balcony: Math.round(rg.balcony * 20) / 20, winK: Math.round(rg.winK * 20) / 20, roof } };
+  }
+  function buildingExtra(params, overlays) { return { W: params.W, D: params.D, N: params.N, variant: params.variant, fs: params.fs, ov: (overlays || []).slice().sort() }; }
+
+  // ---------- colours ----------
+  // wall colour for one building: a weighted pick from the look's four wall colours, with a slight tone variation
+  function wallFor(pal, seed) {
+    const w = pal.walls || [pal.wall, pal.wall2], u = hash(seed + 1), i = w.length > 2 ? (u < 0.4 ? 0 : (u < 0.7 ? 1 : (u < 0.9 ? 2 : 3))) : (u < 0.65 ? 0 : 1);
+    // five tone steps, not a continuous variation: buildings that share an asset and a tone share a cached sprite
+    return shade(w[i], [0.95, 0.975, 1.0, 1.025, 1.05][Math.floor(hash(seed + 2) * 5) % 5]);
+  }
+  // o: { wall, data (override for the data surface), awning, shutter }
+  // o: { wall, data, seed }: seed picks the roof and the accent (awnings, shutters) from the look
+  function buildingColours(reg, pal, o) {
+    const wall = o.wall || pal.wall, c = A.baseColours(reg), sd = o.seed || 0;
+    const roof = pal.roofs ? pal.roofs[hash(sd + 3) < 0.7 ? 0 : 1] : pal.roof, acc = pal.accents ? pal.accents[Math.floor(hash(sd + 4) * pal.accents.length) % pal.accents.length] : pal.accent;
+    return Object.assign(c, {
+      data: o.data || wall, roof, roofflat: pal.roofflat || mix(pal.ground, '#6e6e6e', 0.55), trim: mix(wall, '#ffffff', 0.5), door: reg.id === 'formal' ? shade(wall, 0.55) : shade(wall, 0.42),
+      shutter: o.shutter || acc, awning: o.awning || acc, chimney: shade(wall, 0.8), solar: reg.id === 'formal' ? A.CARBON.blue[80] : '#2e3c5c', scaffold: reg.id === 'formal' ? A.CARBON.gray[60] : '#9a8a64',
+      band: reg.states.queued, marker: reg.states.investor, frame: reg.id === 'formal' ? A.CARBON.gray[70] : '#4b4b50'
+    });
+  }
+
+  Object.assign(A, { ARCH, FIT, roadIndex, buildingParts: (kind, extra) => buildingDef(kind, extra).parts, fitFootprint, pickArchetype, buildingParams, buildingExtra, buildingColours, buildingHeight: heightOf, wallFor });
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* treelib.js: trees and greenery as assets (v0.1). Extends AssetLib; load after assetlib.js.
+ *
+ * Foliage is a low-poly solid: faceted ellipsoids, cones and fronds built from free faces, so it takes the register's three
+ * flat tones like everything else. A tree is built from { s: scale, v: variant } and a kind; the colours come from the look
+ * (canopies, bloom, trunk), so the same tree reads differently under each look and register.
+ *
+ *   kinds     broadleaf, oak, plane, columnar, conifer, umbrella, palm, blossom, shrub
+ *   data      the main foliage colour (role "data"): a simulation can recolour canopy, for example by condition or species
+ *   regions   each region has a species mix (REGIONS[id].trees): plane trees in Paris and Vienna, palms and umbrella trees in
+ *             the tropics, cypress and stone pine around the Mediterranean, and so on. These are PROPOSALS to be checked with
+ *             local authors, like every regional table.
+ *   blossom   only appears when the look has a bloom colour (cherry, jacaranda, flame tree, bougainvillea)
+ */
+(function (root) {
+  'use strict';
+  const A = root.AssetLib;
+  if (!A) throw new Error('assetlib.js must be loaded before treelib.js');
+  const { mix, shade, hash } = A;
+  function rngSeed(seed) { let a = (seed | 0) >>> 0; return function () { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = (t + Math.imul(t ^ t >>> 7, 61 | t)) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  const KINDS = {
+    broadleaf: { label: 'Broadleaf tree', h: 8 },
+    oak:       { label: 'Large spreading tree', h: 10 },
+    plane:     { label: 'Street plane tree', h: 9.5 },
+    columnar:  { label: 'Columnar tree (poplar, cypress)', h: 11 },
+    conifer:   { label: 'Conifer', h: 9 },
+    umbrella:  { label: 'Umbrella tree (acacia, pine)', h: 8 },
+    palm:      { label: 'Palm', h: 10 },
+    blossom:   { label: 'Flowering tree', h: 7.5 },
+    shrub:     { label: 'Shrub or hedge', h: 1.8 }
+  };
+
+  function cross(u, v) { return [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]; }
+  function normalUp(pts) { const u = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]], v = [pts[3][0] - pts[0][0], pts[3][1] - pts[0][1], pts[3][2] - pts[0][2]]; let n = cross(u, v); if (n[2] < 0) n = [-n[0], -n[1], -n[2]]; return n; }
+
+  // a faceted ellipsoid: rings of quads, jittered so every tree is its own. Returns face parts.
+  function blob(cx, cy, cz, rx, ry, rz, nSeg, nRing, jit, rnd, bloomP) {
+    const V = [];
+    for (let i = 0; i <= nRing; i++) {
+      V.push([]); const th = Math.PI * i / nRing, pole = i === 0 || i === nRing;
+      for (let j = 0; j < nSeg; j++) {
+        const ph = 2 * Math.PI * j / nSeg, k = pole ? 1 : 1 + jit * (rnd() - 0.5), kz = pole ? 1 : 1 + jit * 0.3 * (rnd() - 0.5);
+        V[i].push([cx + rx * Math.sin(th) * Math.cos(ph) * k, cy + ry * Math.sin(th) * Math.sin(ph) * k, cz + rz * Math.cos(th) * kz]);
+      }
+    }
+    const out = [];
+    for (let i = 0; i < nRing; i++) for (let j = 0; j < nSeg; j++) {
+      const p = [V[i][j], V[i][(j + 1) % nSeg], V[i + 1][(j + 1) % nSeg], V[i + 1][j]];
+      const mx = (p[0][0] + p[1][0] + p[2][0] + p[3][0]) / 4, my = (p[0][1] + p[1][1] + p[2][1] + p[3][1]) / 4, mz = (p[0][2] + p[1][2] + p[2][2] + p[3][2]) / 4;
+      const n = [(mx - cx) / (rx * rx), (my - cy) / (ry * ry), (mz - cz) / (rz * rz)], nl = Math.hypot(n[0], n[1], n[2]) || 1, u = rnd();
+      let role = 'data';
+      if (bloomP && u < bloomP) role = 'bloom';
+      else if (n[2] / nl > 0.55) role = 'leaf1';
+      else if (u > 0.78) role = 'leaf2';
+      out.push({ t: 'face', pts: p, n, role, layer: 1 });
+    }
+    return out;
+  }
+  function cone(cx, cy, zb, r, za, nSeg, role0, role1) {
+    const ring = []; for (let j = 0; j < nSeg; j++) { const ph = 2 * Math.PI * j / nSeg; ring.push([cx + r * Math.cos(ph), cy + r * Math.sin(ph), zb]); }
+    const out = [], slope = r / (za - zb);
+    for (let j = 0; j < nSeg; j++) {
+      const phm = 2 * Math.PI * (j + 0.5) / nSeg;
+      out.push({ t: 'face', pts: [ring[j], ring[(j + 1) % nSeg], [cx, cy, za]], n: [Math.cos(phm), Math.sin(phm), slope], role: j % 2 ? role1 : role0, layer: 1 });
+    }
+    return out;
+  }
+  function frond(phi, len, z0, droop, w, role) {
+    const b = [0, 0, z0], t = [len * Math.cos(phi), len * Math.sin(phi), z0 - droop], mid = [b[0] + (t[0] - b[0]) * 0.5, b[1] + (t[1] - b[1]) * 0.5, z0 + 0.45], sd = [-Math.sin(phi) * w, Math.cos(phi) * w, 0];
+    const pts = [b, [mid[0] + sd[0], mid[1] + sd[1], mid[2]], t, [mid[0] - sd[0], mid[1] - sd[1], mid[2]]];
+    return { t: 'face', pts, n: normalUp(pts), role, layer: 1 };
+  }
+  const trunkBox = (h, w) => ({ t: 'box', b: [-w, -w, 0, w, w, h], role: 'trunk', layer: 0 });
+
+  function treeDef(kind, o) {
+    const K = KINDS[kind]; if (!K) throw new Error('unknown tree ' + kind);
+    const s = o.s || 1, rnd = rngSeed((o.v | 0) * 977 + A.hashStr(kind)), parts = [];
+    if (kind === 'broadleaf') { parts.push(trunkBox(3.2, 0.18)); parts.push(...blob(0, 0, 5.4, 3.0, 3.0, 2.7, 8, 4, 0.22, rnd)); }
+    else if (kind === 'oak') { parts.push(trunkBox(3.8, 0.26)); parts.push(...blob(0, 0, 6.6, 4.4, 4.4, 3.4, 9, 4, 0.26, rnd)); parts.push(...blob(1.6, -1.2, 7.4, 2.6, 2.6, 2.2, 7, 3, 0.22, rnd)); }
+    else if (kind === 'plane') { parts.push(trunkBox(3.8, 0.22)); parts.push(...blob(0, 0, 6.6, 3.6, 3.6, 3.0, 8, 4, 0.18, rnd)); }
+    else if (kind === 'columnar') { parts.push(trunkBox(1.2, 0.16)); parts.push(...blob(0, 0, 6.6, 1.3, 1.3, 5.4, 6, 5, 0.14, rnd)); }
+    else if (kind === 'conifer') { parts.push(trunkBox(1.8, 0.2)); parts.push(...cone(0, 0, 1.8, 2.7, 5.0, 8, 'data', 'leaf2')); parts.push(...cone(0, 0, 3.6, 2.1, 7.2, 8, 'data', 'leaf2')); parts.push(...cone(0, 0, 5.4, 1.5, 9.2, 8, 'data', 'leaf2')); }
+    else if (kind === 'umbrella') { parts.push(trunkBox(5.6, 0.17)); parts.push(...blob(0, 0, 6.8, 5.2, 5.2, 1.3, 10, 3, 0.2, rnd)); parts.push(...blob(-1.5, 1.0, 7.5, 2.8, 2.8, 0.9, 7, 3, 0.2, rnd)); }
+    else if (kind === 'palm') {
+      parts.push({ t: 'prism', y: [-0.2, 0.2], role: 'trunk', prof: [[-0.24, 0], [0.24, 0], [0.15, 9], [-0.15, 9]], layer: 0 });
+      for (let k = 0; k < 9; k++) parts.push(frond(2 * Math.PI * k / 9 + rnd() * 0.3, 3.2 + rnd() * 0.5, 9.1, 0.5 + rnd() * 0.6, 0.55, k % 2 ? 'leaf1' : 'data'));
+    }
+    else if (kind === 'blossom') { parts.push(trunkBox(2.8, 0.18)); parts.push(...blob(0, 0, 5.0, 2.9, 2.9, 2.5, 8, 4, 0.26, rnd, 0.55)); }
+    else if (kind === 'shrub') parts.push(...blob(0, 0, 0.95, 1.5, 1.5, 0.9, 7, 3, 0.25, rnd));
+    if (s !== 1) for (const p of parts) { if (p.pts) p.pts = p.pts.map(q => [q[0] * s, q[1] * s, q[2] * s]); if (p.b) p.b = p.b.map(x => x * s); if (p.prof) p.prof = p.prof.map(q => [q[0] * s, q[1] * s]); if (p.y) p.y = p.y.map(x => x * s); }
+    return { parts, meta: { h: K.h * s } };
+  }
+  A.registerGroup('trees', treeDef);
+
+  // ---------- regional species mixes (proposals) ----------
+  const MIX = {
+    nw: [['broadleaf', 4], ['plane', 3], ['oak', 1], ['columnar', 1], ['conifer', 0.5], ['blossom', 0.5]],
+    uk: [['oak', 3], ['plane', 3], ['broadleaf', 3], ['conifer', 0.5], ['blossom', 0.4]],
+    ws: [['plane', 5], ['broadleaf', 2], ['columnar', 1], ['conifer', 0.5], ['blossom', 0.4]],
+    md: [['umbrella', 3], ['columnar', 3], ['broadleaf', 3], ['palm', 1], ['shrub', 2], ['blossom', 1]],
+    ce: [['broadleaf', 4], ['oak', 2], ['conifer', 1.5], ['columnar', 1], ['blossom', 0.4]],
+    sa: [['oak', 3], ['palm', 3], ['umbrella', 2], ['blossom', 1.5], ['broadleaf', 1]],
+    se: [['palm', 3], ['broadleaf', 3], ['umbrella', 2], ['blossom', 1.5], ['shrub', 1]],
+    ea: [['broadleaf', 4], ['blossom', 2], ['conifer', 1.5], ['columnar', 1], ['plane', 1]],
+    me: [['palm', 4], ['broadleaf', 2], ['umbrella', 1], ['shrub', 1.5], ['columnar', 1]],
+    sb: [['umbrella', 3], ['broadleaf', 3], ['palm', 1.5], ['blossom', 1.5], ['shrub', 1]],
+    la: [['broadleaf', 3], ['palm', 2], ['blossom', 2], ['umbrella', 1], ['oak', 1]],
+    na: [['oak', 3], ['broadleaf', 3], ['conifer', 2], ['plane', 1], ['columnar', 0.5]]
+  };
+  for (const id of Object.keys(MIX)) if (A.REGIONS[id]) A.REGIONS[id].trees = MIX[id];
+
+  // a flowering tree needs a bloom colour in the look; without one it becomes a plain broadleaf
+  function pickTree(regionId, u, th) {
+    const mixes = ((A.REGIONS[regionId] && A.REGIONS[regionId].trees) || MIX.nw).map(e => [(e[0] === 'blossom' && th && !th.bloom) ? 'broadleaf' : e[0], e[1]]);
+    return A.pickWeighted(mixes, u);
+  }
+  function treeParams(seed) { return { s: [0.8, 1, 1.2][Math.floor(hash(seed + 9) * 3) % 3], v: Math.floor(hash(seed + 10) * 6) }; }
+
+  // colours: foliage from the look's canopies, bloom and trunk from the look
+  function treeColours(reg, th, seed, kind, dataColour) {
+    const cs = th.canopies, base = cs[Math.floor(hash(seed + 3) * cs.length) % cs.length], dark = kind === 'conifer', c = A.baseColours(reg);
+    return Object.assign(c, {
+      data: dataColour || (dark ? shade(base, 0.72) : base), leaf1: dark ? shade(base, 0.88) : mix(base, '#ffffff', 0.2), leaf2: dark ? shade(base, 0.58) : shade(base, 0.78),
+      bloom: th.bloom || mix(base, '#ffffff', 0.2), trunk: th.trunk
+    });
+  }
+
+  Object.assign(A, { TREES: KINDS, pickTree, treeParams, treeColours, treeHeight: (kind, s) => KINDS[kind].h * (s || 1) });
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* vizlib.js: reusable isometric library for SimCity-style replays (mock, v0).
+ * Layers: scene schema -> network -> sim (agents) -> renderFrame(ctx, sim, view).
+ * All world units are metres. Everything is parametric: no sprite sheets.
+ * Public API is at the bottom: VizLib.
+ */
+(function (root) {
+  'use strict';
+
+  // ---------- small utilities ----------
+  function rng(seed) { // mulberry32
+    let a = seed >>> 0;
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function hexRgb(h) { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16)); }
+  function rgbStr(c) { return 'rgb(' + c.map(v => Math.max(0, Math.min(255, Math.round(v)))).join(',') + ')'; }
+  function shade(hex, k) { return rgbStr(hexRgb(hex).map(v => v * k)); }
+  function mixHex(a, b, t) { const A = hexRgb(a), B = hexRgb(b); return rgbStr(A.map((v, i) => v * (1 - t) + B[i] * t)); }
+  function key(x, y) { return Math.round(x * 10) + ',' + Math.round(y * 10); }
+
+  // Registers and themes live in AssetLib (REG, theme). The scene reads them from there.
+
+  // ---------- projection ----------
+  // View: { scale (px per metre), ox, oy } ; sx = ox + (x - y) * k * cos30 ; sy = oy + (x + y) * k * 0.5 - z * k
+  const C30 = 0.8660254;
+  function proj(view, x, y, z) {
+    const k = view.scale;
+    return [view.ox + (x - y) * k * C30, view.oy + (x + y) * k * 0.5 - z * k];
+  }
+  // view direction (toward the camera), used for face visibility
+  const VIEW = [1, 1, 1.2];
+
+  // ---------- library: buildings and roads (parametric). People and vehicles live in assetlib.js ----------
+  const LIB = {
+    buildings: {
+      // bayW: bay width (m); storeyH: storey height (m); win: window size fraction; roof: flat|pitch|none
+      terrace:  { bayW: 5.2, storeyH: 3.0, win: 0.42, roof: 'pitch', shopFloor: false },
+      shophouse:{ bayW: 6.0, storeyH: 3.6, win: 0.5,  roof: 'flat',  shopFloor: true },
+      block:    { bayW: 4.0, storeyH: 3.0, win: 0.4,  roof: 'flat',  shopFloor: false },
+      villa:    { bayW: 4.5, storeyH: 3.0, win: 0.3,  roof: 'pitch', shopFloor: false },
+      tower:    { bayW: 4.0, storeyH: 3.3, win: 0.8,  roof: 'flat',  shopFloor: false },
+      shed:     { bayW: 5.0, storeyH: 6.0, win: 0.15, roof: 'flat',  shopFloor: false }
+    },
+    roads: {
+      local:     { width: 6,  pavement: 2.6, centre: 'dash',   cycle: false, tram: false },
+      avenue:    { width: 10, pavement: 3.0, centre: 'dash',   cycle: true,  tram: false },
+      boulevard: { width: 16, pavement: 3.5, centre: 'median', cycle: true,  tram: true  },
+      cycle:     { width: 2.5, pavement: 0,  centre: 'none',   cycle: true,  tram: false },
+      pedestrian:{ width: 5,  pavement: 1.5, centre: 'none',   cycle: false, tram: false },   // people only: no vehicles
+      tramway:   { width: 6,  pavement: 0,   centre: 'none',   cycle: false, tram: true }     // a tram track with no road alongside
+    }
+  };
+  // A road's parameters: its class, with any per-road overrides from the scene (an OSM width, cycle lanes, a tram line).
+  function roadCls(r) {
+    const c = LIB.roads[r.class] || LIB.roads.local, o = {};
+    for (const k of ['width', 'pavement', 'centre', 'cycle', 'tram']) if (r[k] !== undefined && r[k] !== null) o[k] = r[k];
+    return Object.assign({}, c, o);
+  }
+
+  // ---------- drawing primitives ----------
+  function poly(ctx, pts, fill, stroke, lw) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
+  }
+  // Buildings: footprint extruded; windows drawn per visible wall, bay by bay.
+  // Generic extrusion of an arbitrary footprint. The fallback for footprints the asset slots cannot take (see fitFootprint).
+  function drawBuilding(ctx, view, reg, pal, b, shadowRgb, state, wallOverride) {
+    reg = Object.assign({}, reg, { lw: reg.lw * Math.max(0.3, Math.min(1, view.scale / 10)) });   // thinner ink when zoomed out
+    const arch = LIB.buildings[b.archetype] || LIB.buildings.terrace;
+    const H = b.levels * arch.storeyH;
+    const fp = b.footprint;
+    const n = fp.length;
+    // orientation: make the polygon counter-clockwise in world (x right, y down means screen-ccw; use signed area)
+    let area = 0; for (let i = 0; i < n; i++) { const p = fp[i], q = fp[(i + 1) % n]; area += p[0] * q[1] - q[0] * p[1]; }
+    const sgn = area > 0 ? 1 : -1;
+    const base = pal.wall, base2 = pal.wall2;
+    let wallFill = wallOverride || b.wallFill || base;
+    if (!wallOverride) {
+      if (state === 'finished') wallFill = reg.finished;
+      if (state === 'in_progress') wallFill = reg.inprog;
+      if (state === 'queued') wallFill = mixHex(base, reg.queued, 0.55);
+    }
+    // ink-outlined walls facing the viewer
+    for (let i = 0; i < n; i++) {
+      const p = fp[i], q = fp[(i + 1) % n];
+      const dx = q[0] - p[0], dy = q[1] - p[1];
+      const len = Math.hypot(dx, dy); if (len < 0.05) continue;
+      // outward normal for the chosen orientation
+      const nx = sgn * dy / len, ny = -sgn * dx / len;
+      const dot = nx * VIEW[0] + ny * VIEW[1];
+      if (dot <= 0) continue;
+      const k = (Math.abs(nx) > Math.abs(ny)) ? reg.tones[2] : reg.tones[1];
+      const wall = shade(wallFill, k);
+      const pts = [proj(view, p[0], p[1], 0), proj(view, q[0], q[1], 0), proj(view, q[0], q[1], H), proj(view, p[0], p[1], H)];
+      poly(ctx, pts, wall, reg.ink, reg.lw);
+      // windows, bay by bay
+      const bays = Math.max(1, Math.floor(len / arch.bayW));
+      const bayLen = len / bays;
+      const storeys = b.levels;
+      for (let bi = 0; bi < bays; bi++) {
+        for (let si = 0; si < storeys; si++) {
+          if (arch.shopFloor && si === 0) {
+            // shopfront band
+            const u0 = bi * bayLen + bayLen * 0.12, u1 = bi * bayLen + bayLen * 0.88;
+            const v0 = 0.2, v1 = arch.storeyH * 0.75;
+            const a = [p[0] + dx / len * u0, p[1] + dy / len * u0], bpt = [p[0] + dx / len * u1, p[1] + dy / len * u1];
+            poly(ctx, [proj(view, a[0], a[1], v0), proj(view, bpt[0], bpt[1], v0), proj(view, bpt[0], bpt[1], v1), proj(view, a[0], a[1], v1)],
+                 '#9fc1d4', reg.ink, reg.lw * 0.7);
+            continue;
+          }
+          const u0 = bi * bayLen + bayLen * (0.5 - arch.win / 2), u1 = bi * bayLen + bayLen * (0.5 + arch.win / 2);
+          const v0 = si * arch.storeyH + arch.storeyH * 0.3, v1 = si * arch.storeyH + arch.storeyH * 0.8;
+          const a = [p[0] + dx / len * u0, p[1] + dy / len * u0], bpt = [p[0] + dx / len * u1, p[1] + dy / len * u1];
+          const glass = state === 'finished' ? '#8fb8cc' : '#9fc1d4';
+          poly(ctx, [proj(view, a[0], a[1], v0), proj(view, bpt[0], bpt[1], v0), proj(view, bpt[0], bpt[1], v1), proj(view, a[0], a[1], v1)],
+               glass, reg.ink, reg.lw * 0.6);
+        }
+      }
+      if (state === 'in_progress') {
+        // scaffold band
+        const z = H * 0.55;
+        ctx.strokeStyle = reg.ink; ctx.lineWidth = reg.lw * 0.8;
+        const a = proj(view, p[0], p[1], z), bq = proj(view, q[0], q[1], z);
+        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(bq[0], bq[1]); ctx.stroke();
+      }
+    }
+    // roof: flat top polygon, drawn last among the faces
+    const top = fp.map(p => proj(view, p[0], p[1], H));
+    poly(ctx, top, shade(pal.roof || wallFill, reg.tones[0]), reg.ink, reg.lw);
+    if (state === 'finished') {
+      // solar panels on the roof: a small inset polygon near the centroid
+      let cx = 0, cy = 0; fp.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= n; cy /= n;
+      const s = 2.2;
+      const rp = [[cx - s, cy - s], [cx + s, cy - s], [cx + s, cy + s], [cx - s, cy + s]].map(p => proj(view, p[0], p[1], H + 0.05));
+      poly(ctx, rp, '#2e3c5c', reg.ink, reg.lw * 0.6);
+    }
+    if (b.investor) {
+      // investor-owned: purple roof stripe
+      let cx = 0, cy = 0; fp.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= n; cy /= n;
+      const s = 1.0;
+      const rp = [[cx - s, cy - s], [cx + s, cy - s], [cx + s, cy + s], [cx - s, cy + s]].map(p => proj(view, p[0], p[1], H + 0.06));
+      poly(ctx, rp, reg.investor, reg.ink, reg.lw * 0.6);
+    }
+  }
+
+  // ---------- scene: placeholder generator (same schema a real OSM extract would produce) ----------
+  // Schema (metres, local frame):
+  // { area:{name, source, osm_relation}, roads:[{id, class, pts:[[x,y],...], tram?}],
+  //   buildings:[{id, footprint:[[x,y],...], levels, archetype, state, investor}],
+  //   landuse:[{id, kind:'park'|'garden'|'square'|'water', footprint:[[x,y]...]}], trees:[[x,y] or [x,y,kind,scale], ...] }
+  function makePlaceholderScene(seed) {
+    const R = rng(seed || 7);
+    const xs = [0, 150, 300, 450, 600, 750], ys = [0, 130, 260, 390, 520];
+    const roads = [], buildings = [], landuse = [], trees = [];
+    let rid = 0;
+    // grid streets; y=260 is the boulevard with tram, x=450 is an avenue with a cycle lane
+    for (const y of ys) {
+      const cls = (y === 260) ? 'boulevard' : (y === 390 ? 'avenue' : 'local');
+      roads.push({ id: 'r' + (rid++), class: cls, tram: y === 260, pts: [[-60, y], [xs[xs.length - 1] + 60, y]] });
+    }
+    for (const x of xs) {
+      const cls = (x === 450) ? 'avenue' : 'local';
+      roads.push({ id: 'r' + (rid++), class: cls, pts: [[x, -60], [x, ys[ys.length - 1] + 60]] });
+    }
+    // a curved avenue to the north-east, to show non-grid geometry
+    roads.push({ id: 'r' + (rid++), class: 'avenue', pts: [[750, 390], [820, 330], [860, 240], [880, 130]] });
+    // cycle route along the local street at y=0
+    roads.push({ id: 'r' + (rid++), class: 'cycle', pts: [[0, -18], [600, -18]] });
+    // landuse: a square at the junction (300..450, 130..260) and a park (450..600, 0..130)
+    landuse.push({ id: 'sq', kind: 'square', footprint: [[318, 148], [432, 148], [432, 242], [318, 242]] });
+    landuse.push({ id: 'pk', kind: 'park', footprint: [[468, 12], [582, 12], [582, 118], [468, 118]] });
+    for (let i = 0; i < 16; i++) trees.push([476 + R() * 98, 18 + R() * 94]);                                    // the park
+    // buildings: fill each block with terrace rows along its four frontages
+    const inSq = (x, y) => x > 300 && x < 450 && y > 130 && y < 260;
+    const inPk = (x, y) => x > 450 && x < 600 && y > 0 && y < 130;
+    let bid = 0;
+    for (let i = 0; i < xs.length - 1; i++) for (let j = 0; j < ys.length - 1; j++) {
+      const x0 = xs[i] + 10, x1 = xs[i + 1] - 10, y0 = ys[j] + 8, y1 = ys[j + 1] - 8;
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      if (inSq(cx, cy) || inPk(cx, cy)) continue;
+      // row along the north and south frontages
+      const bandDepth = 16;
+      // the block's interior is a garden, with a few trees and shrubs
+      const gx0 = x0 + bandDepth + 3, gx1 = x1 - bandDepth - 3, gy0 = y0 + bandDepth + 3, gy1 = y1 - bandDepth - 3;
+      landuse.push({ id: 'g' + i + '_' + j, kind: 'garden', footprint: [[gx0, gy0], [gx1, gy0], [gx1, gy1], [gx0, gy1]] });
+      const nt = 5 + Math.floor(R() * 4);
+      for (let k = 0; k < nt; k++) trees.push([gx0 + 4 + R() * (gx1 - gx0 - 8), gy0 + 4 + R() * (gy1 - gy0 - 8), ...(R() < 0.25 ? ['shrub'] : [])]);
+      const rows = [
+        { a: [x0, y0], b: [x1, y0], d: [0, 1] },
+        { a: [x0, y1], b: [x1, y1], d: [0, -1] },
+        { a: [x0, y0], b: [x0, y1], d: [1, 0] },
+        { a: [x1, y0], b: [x1, y1], d: [-1, 0] }
+      ];
+      for (const row of rows) {
+        const L = Math.hypot(row.b[0] - row.a[0], row.b[1] - row.a[1]);
+        const ux = (row.b[0] - row.a[0]) / L, uy = (row.b[1] - row.a[1]) / L;
+        let s = 0;
+        while (s < L - 6) {
+          let levels = 2 + Math.floor(R() * 3), arch;
+          const u = R();
+          if (u < 0.04) { arch = 'tower'; levels = 8 + Math.floor(R() * 5); }
+          else if (u < 0.08) { arch = 'shed'; levels = 1; }
+          else if (u < 0.15) { arch = 'villa'; levels = 2; }
+          else arch = (levels >= 4) ? 'block' : (R() < 0.3 ? 'shophouse' : 'terrace');
+          const wMin = { tower: 13, shed: 15, villa: 9 }[arch] || 6, wMax = { tower: 16, shed: 20, villa: 11 }[arch] || 9;
+          const w = Math.min(wMin + R() * (wMax - wMin), L - s);
+          const p0 = [row.a[0] + ux * s, row.a[1] + uy * s];
+          const p1 = [row.a[0] + ux * (s + w), row.a[1] + uy * (s + w)];
+          const d = [row.d[0] * bandDepth, row.d[1] * bandDepth];
+          const fp = [p0, p1, [p1[0] + d[0], p1[1] + d[1]], [p0[0] + d[0], p0[1] + d[1]]];
+          const state = R() < 0.1 ? 'finished' : (R() < 0.12 ? 'in_progress' : (R() < 0.12 ? 'queued' : 'none'));
+          // a third of the buildings leave the archetype to the region ('auto'): the region's building mix decides
+          buildings.push({ id: 'b' + (bid++), footprint: fp, levels, archetype: R() < 0.33 ? 'auto' : arch, state, investor: R() < 0.15 });
+          s += w + 0.6;
+        }
+      }
+    }
+    // buildings along the curved avenue: rotated footprints that the asset slots cannot take (they use the extrusion fallback)
+    const curve = [[750, 390], [820, 330], [860, 240], [880, 130]];
+    for (let i = 0; i < curve.length - 1; i++) {
+      const [ax, ay] = curve[i], [bx, by] = curve[i + 1], L = Math.hypot(bx - ax, by - ay), ux = (bx - ax) / L, uy = (by - ay) / L;
+      for (const side of [1, -1]) for (let t = 6; t + 8 < L - 4; t += 9) {
+        const w = 8, dep = 12, off = 12;                       // off: gap from the road centre line to the near edge
+        const o = [ax + ux * t - uy * off * side, ay + uy * t + ux * off * side];
+        const dv = [-uy * dep * side, ux * dep * side];
+        const p0 = o, p1 = [o[0] + ux * w, o[1] + uy * w];
+        buildings.push({ id: 'c' + (bid++), footprint: [p0, p1, [p1[0] + dv[0], p1[1] + dv[1]], [p0[0] + dv[0], p0[1] + dv[1]]], levels: 2 + Math.floor(R() * 3), archetype: R() < 0.3 ? 'shophouse' : 'terrace', state: R() < 0.2 ? 'finished' : 'none', investor: R() < 0.15 });
+      }
+    }
+    // street trees on the pavements: both sides of avenues, one side of local streets, none on the tram boulevard (no room)
+    const isH = r => r.pts[0][1] === r.pts[r.pts.length - 1][1] && r.pts.length === 2, isV = r => r.pts[0][0] === r.pts[r.pts.length - 1][0] && r.pts.length === 2;
+    roads.forEach((r, ri) => {
+      if (r.class === 'boulevard' || r.class === 'cycle' || !(isH(r) || isV(r))) return;
+      const cls = { local: [6, 2.6], avenue: [10, 3] }[r.class] || [6, 2.6], off = cls[0] / 2 + cls[1] * 0.5, sides = r.class === 'avenue' ? [1, -1] : [ri % 2 ? 1 : -1];
+      const horiz = isH(r), lo = horiz ? -40 : -40, hi = horiz ? 790 : 560, cross = horiz ? xs : ys;
+      for (let t = lo; t <= hi; t += 24) {
+        const c = horiz ? [t, r.pts[0][1]] : [r.pts[0][0], t];
+        if (cross.some(v => Math.abs((horiz ? c[0] : c[1]) - v) < 13)) continue;                   // keep junctions clear
+        for (const sd of sides) { const px = horiz ? c[0] : c[0] + off * sd, py = horiz ? c[1] + off * sd : c[1]; if (!inSq(px, py) && !inPk(px, py)) trees.push([px, py]); }
+      }
+    });
+    for (let x = 326; x <= 424; x += 16) { trees.push([x, 154]); trees.push([x, 236]); }               // the square: a ring of trees
+    for (let y = 164; y <= 228; y += 16) { trees.push([324, y]); trees.push([426, y]); }
+    return { area: { name: 'Jette-style placeholder (not OSM)', source: 'synthetic', osm_relation: 58258 },
+             roads, buildings, landuse, trees };
+  }
+
+  // ---------- scene validation ----------
+  // Checks a scene before it is built, so a bad file fails with a clear message and not deep inside the renderer.
+  function validateScene(scene) {
+    const A = A_(), errors = [], warnings = [], num = x => typeof x === 'number' && isFinite(x), pt = p => Array.isArray(p) && p.length >= 2 && num(p[0]) && num(p[1]);
+    const bad = m => { if (errors.length < 40) errors.push(m); };
+    if (!scene || typeof scene !== 'object') return { ok: false, errors: ['scene must be an object'], warnings };
+    for (const k of ['roads', 'buildings', 'landuse', 'trees']) if (!Array.isArray(scene[k])) bad(k + ' must be an array');
+    if (errors.length) return { ok: false, errors, warnings };
+    scene.roads.forEach((r, i) => {
+      if (!r || !LIB.roads[r.class]) bad('road ' + i + ': unknown class ' + (r && r.class));
+      else if (!Array.isArray(r.pts) || r.pts.length < 2 || !r.pts.every(pt)) bad('road ' + i + ' (' + r.id + '): needs at least two [x, y] points');
+      else for (const k of ['width', 'pavement']) if (r[k] !== undefined && r[k] !== null && !(num(r[k]) && r[k] >= 0 && r[k] < 100)) bad('road ' + i + ': bad ' + k);
+    });
+    const ids = new Set();
+    scene.buildings.forEach((b, i) => {
+      if (!b || !Array.isArray(b.footprint) || b.footprint.length < 3 || !b.footprint.every(pt)) { bad('building ' + i + ': needs a footprint of at least three [x, y] points'); return; }
+      if (!(num(b.levels) && b.levels >= 1)) bad('building ' + i + ' (' + b.id + '): levels must be a number of at least 1');
+      if (b.archetype !== undefined && b.archetype !== 'auto' && !A.ARCH[b.archetype]) bad('building ' + i + ': unknown archetype ' + b.archetype);
+      if (b.id !== undefined) { if (ids.has(b.id)) bad('building id ' + b.id + ' appears twice'); ids.add(b.id); }
+    });
+    scene.landuse.forEach((l, i) => { if (!l || !['park', 'garden', 'square', 'water'].includes(l.kind)) bad('landuse ' + i + ': unknown kind ' + (l && l.kind)); else if (!Array.isArray(l.footprint) || l.footprint.length < 3 || !l.footprint.every(pt)) bad('landuse ' + i + ': needs a footprint'); });
+    scene.trees.forEach((t, i) => { if (!pt(t)) bad('tree ' + i + ': needs [x, y]'); else if (t[2] && !A.TREES[t[2]]) bad('tree ' + i + ': unknown kind ' + t[2]); else if (t[3] !== undefined && t[3] !== null && !(num(t[3]) && t[3] > 0)) bad('tree ' + i + ': bad scale'); });
+    const B = sceneBounds(scene);
+    if (B[2] - B[0] > 20000 || B[3] - B[1] > 20000) warnings.push('the scene is more than 20 km across: expect it to be slow');
+    if (scene.buildings.length > 30000) warnings.push(scene.buildings.length + ' buildings: expect it to be slow');
+    if (!scene.roads.length) warnings.push('no roads: nothing for vehicles and people to move on');
+    return { ok: errors.length === 0, errors, warnings };
+  }
+
+  // ---------- network ----------
+  function buildNetwork(scene) {
+    const nodes = new Map(), edges = [];
+    function node(x, y) {
+      const k = key(x, y);
+      if (!nodes.has(k)) nodes.set(k, { k, x, y, edges: [] });
+      return nodes.get(k);
+    }
+    for (const r of scene.roads) {
+      const cls = roadCls(r);
+      for (let i = 0; i < r.pts.length - 1; i++) {
+        const [ax, ay] = r.pts[i], [bx, by] = r.pts[i + 1];
+        const na = node(ax, ay), nb = node(bx, by);
+        const len = Math.hypot(bx - ax, by - ay);
+        if (len < 0.1) continue;
+        const e = { id: edges.length, a: na, b: nb, ax, ay, bx, by, len, cls: r.class, width: cls.width, pavement: cls.pavement,
+                    tram: !!cls.tram, cycle: !!cls.cycle, roadId: r.id, centre: cls.centre };
+        edges.push(e); na.edges.push(e); nb.edges.push(e);
+      }
+    }
+    return { nodes, edges };
+  }
+
+  // ---------- sim ----------
+  // Agents are classed: { group: 'vehicles' | 'people', kind, network, edge, dir, s, side, speed, seed, outfits?, tint?, rider?, motion? }.
+  // Motion is decorative by default (a random walk on the network). A class can be given non-decorative motion with setMotion().
+  function A_() { if (!root.AssetLib) throw new Error('assetlib.js must be loaded before vizlib.js'); return root.AssetLib; }
+  function edgeOk(e, network) {
+    if (network === 'rail') return e.tram;
+    if (network === 'cycle') return e.cycle;
+    if (network === 'pavement') return e.pavement > 0;
+    return e.cls !== 'cycle' && e.cls !== 'pedestrian' && e.cls !== 'tramway';   // roads: shared with trams where a tram runs along them
+  }
+  const SPEED = { bicycle: 3.5, cargo_bike: 3.2, moped: 8, motorbike: 8, tram: 9, bus: 7, double_decker: 7, lorry: 6 };
+
+  function createSim(scene, opts) {
+    const A = A_();
+    opts = Object.assign({ seed: 11, trafficScale: 1, peopleScale: 1, theme: null, family: null, look: undefined, region: 'nw', register: 'colorfigures', drive: null }, opts || {});
+    // the theme is every colour the scene needs: AssetLib.theme(family, look, register). A bare family record still works.
+    let th = opts.theme;
+    if (!th) { if (!opts.family) throw new Error('createSim needs opts.theme, from AssetLib.theme(family, look, register)'); th = A.theme(opts.family, opts.look, opts.register); }
+    opts.theme = th; opts.register = th.reg;
+    const rg = A.REGIONS[opts.region] || A.REGIONS.nw;
+    if (!opts.drive) opts.drive = rg.drive === 'left' ? 'left' : 'right';
+    const check = validateScene(scene);
+    if (!check.ok) throw new Error('invalid scene: ' + check.errors.slice(0, 3).join('; ') + (check.errors.length > 3 ? ' (and ' + (check.errors.length - 3) + ' more)' : ''));
+    const net = buildNetwork(scene);
+    const candBy = {}; for (const nw of ['road', 'cycle', 'rail', 'pavement']) candBy[nw] = net.edges.filter(e => edgeOk(e, nw));
+    const totalLen = net.edges.reduce((s, e) => s + e.len, 0), density = Math.max(1, totalLen / 7500);   // agents scale with the network: 7.5 km is the placeholder's size
+    const R = rng(opts.seed);
+    const agents = [];
+    const pick = arr => arr[Math.floor(R() * arr.length)];
+    function spawn(group, kind, def, extra) {
+      const cands = candBy[def.network] || [];
+      if (!cands.length) return null;
+      const edge = pick(cands), seed = (agents.length + 1) * 7919 + opts.seed;
+      const a = Object.assign({ group, kind, network: def.network, edge, dir: R() < 0.5 ? 1 : -1, s: R() * edge.len, side: R() < 0.5 ? 1 : -1,
+                                speed: (group === 'people' ? 1.3 : (SPEED[kind] || 8)) * (0.85 + R() * 0.3), seed }, extra || {});
+      agents.push(a); return a;
+    }
+    const nVeh = Math.min(1500, Math.round(60 * opts.trafficScale * density)), nPeople = Math.min(4000, Math.round(220 * opts.peopleScale * density));
+    for (let i = 0; i < nVeh; i++) {
+      const kind = A.pickFleet(opts.region, R()), def = A.DEFS.vehicles[kind];
+      const seed = (agents.length + 1) * 7919 + opts.seed;
+      const a = spawn('vehicles', kind, def, { tint: A.vehicleTint(th, seed), ts: seed });     // ts: the appearance seed, so a theme change can redress the agent
+      if (a && def.rider) a.rider = { outfit: A.makeOutfit(opts.region, th, seed + 99), lift: def.riderLift || 0 };
+    }
+    for (let i = 0; i < Math.round(opts.trafficScale * 3 * Math.sqrt(density)); i++) { const d = A.DEFS.vehicles.van_coop; spawn('vehicles', 'van_coop', d, { tint: th.accents[0], ts: 0 }); }
+    const trams = rg.fleet.some(f => f[0] === 'tram') ? Math.round(opts.trafficScale * 2 * Math.sqrt(density)) : 0;
+    for (let i = 0; i < trams; i++) spawn('vehicles', 'tram', A.DEFS.vehicles.tram, { tint: th.accents[0], ts: 0 });
+    for (let i = 0; i < nPeople; i++) {
+      const kind = A.pickPerson(R()), def = A.DEFS.people[kind];
+      const seed = (agents.length + 1) * 6151 + opts.seed;
+      const outfits = def.members.map((m, k) => A.makeOutfit(opts.region, th, seed + k * 31));
+      spawn('people', kind, def, { outfits, speed: 1.1 + R() * 0.4, ts: seed });
+    }
+    // Buildings are entities too: each carries its footprint fit and, when the footprint fits an asset slot, its asset parameters.
+    if (!A.fitFootprint) throw new Error('buildinglib.js must be loaded before vizlib.js');
+    const stats = { buildings: scene.buildings.length, assets: 0, extruded: 0, reasons: {} };
+    const rIdx = A.roadIndex(scene.roads);                       // a spatial index, so a city of tens of thousands of buildings stays fast
+    const buildings = scene.buildings.map(b => {
+      const fit = A.fitFootprint(b.footprint, rIdx), seed = A.hashStr(String(b.id)) ^ opts.seed;
+      const kind = (b.archetype && b.archetype !== 'auto' && A.ARCH[b.archetype]) ? b.archetype : A.pickArchetype(opts.region, b.levels, A.hash(seed + 5));
+      const e = { src: b, id: b.id, group: 'buildings', kind, seed, fit, params: fit.ok ? A.buildingParams(opts.region, kind, b.levels, fit, seed) : null,
+                  get state() { return b.state; }, get investor() { return b.investor; }, get levels() { return b.levels; } };
+      if (e.params) stats.assets++; else { stats.extruded++; stats.reasons[fit.reason] = (stats.reasons[fit.reason] || 0) + 1; }
+      return e;
+    });
+    // Trees are entities too. A tree in the scene is [x, y] or [x, y, kind, scale]; without a kind the region's species mix decides.
+    if (!A.pickTree) throw new Error('treelib.js must be loaded before vizlib.js');
+    const trees = scene.trees.map((t, i) => {
+      const seed = A.hashStr('t' + i) ^ opts.seed, tp = A.treeParams(seed), fixed = !!(t[2] && A.TREES[t[2]]);
+      return { id: 't' + i, group: 'trees', x: t[0], y: t[1], seed, v: tp.v, s: t[3] || tp.s, fixed, kind: fixed ? t[2] : A.pickTree(opts.region, A.hash(seed + 1), th) };
+    });
+    return { scene, net, agents, buildings, trees, stats, rng: R, time: 0, opts, theme: th, palette: th, bindings: [], buildingStyle: null, warnings: check.warnings, density };
+  }
+
+  // Swap the theme (register, look) on a running sim: agents are redressed from their stored seeds, so nothing respawns.
+  function setTheme(sim, th) {
+    const A = A_();
+    sim.theme = th; sim.palette = th; sim.opts.theme = th; sim.opts.register = th.reg;
+    for (const a of sim.agents) {
+      if (a.group === 'vehicles') {
+        if (a.ts) a.tint = A.vehicleTint(th, a.ts); else a.tint = th.accents[0];
+        if (a.rider) a.rider.outfit = A.makeOutfit(sim.opts.region, th, a.ts + 99);
+      } else a.outfits = A.DEFS.people[a.kind].members.map((m, k) => A.makeOutfit(sim.opts.region, th, a.ts + k * 31));
+      a._ck = null; a._rc = null;
+    }
+    for (const e of sim.buildings) { e._ck = null; e._fast = false; }
+    for (const t of sim.trees) { if (!t.fixed) t.kind = A.pickTree(sim.opts.region, A.hash(t.seed + 1), th); t._ck = null; t._asset = null; }
+  }
+
+  // Default building style: the Great Retrofit's own mapping from state to appearance.
+  // Replace it with sim.buildingStyle = (entity, reg, theme, wall) => ({ data: hex | null, overlays: ['scaffold'|'solar'|'band'|'marker', ...] }).
+  function retrofitStyle(e, reg, pal, wall) {
+    const A = A_(), s = e.state, ov = []; let data = null;
+    if (s === 'finished') { data = reg.states.finished; ov.push('solar'); }
+    else if (s === 'in_progress') { data = reg.states.in_progress; ov.push('scaffold'); }
+    else if (s === 'queued') { data = A.mix(wall, reg.states.queued, 0.55); ov.push('band'); }
+    if (e.investor) ov.push('marker');
+    return { data, overlays: ov };
+  }
+
+  function matcher(selector) {
+    if (typeof selector === 'function') return selector;
+    return a => a.kind === selector || a.group === selector;
+  }
+
+  // Non-decorative motion for a class of agents.
+  //   setMotion(sim, 'bus', { mode: 'static' })
+  //   setMotion(sim, 'bus', { mode: 'driven', update(agent, t, dt, sim) { return { x, y, heading } | { edge, s, dir } | null } })
+  //   setMotion(sim, 'tram', { mode: 'path', path: [[t, x, y], ...], loop: true })
+  //   setMotion(sim, 'bus', null)   // back to decorative
+  function setMotion(sim, selector, motion) {
+    const m = matcher(selector);
+    let n = 0;
+    for (const a of sim.agents) if (m(a)) { a.motion = motion || null; if (!motion) a.pose = null; n++; }
+    return n;
+  }
+
+  // Data binding: colour the data surface of a class from a simulation output.
+  //   bindData(sim, 'people', scale, agent => value)
+  // scale comes from AssetLib.scales (categorical, sequential, retrofitStates). Returns the legend.
+  function bindData(sim, selector, scale, valueFn) {
+    sim.bindings = sim.bindings.filter(b => b.key !== String(selector));
+    if (scale) sim.bindings.push({ key: String(selector), match: matcher(selector), scale, value: valueFn });
+    for (const a of sim.agents) a._ck = null;
+    for (const e of sim.buildings || []) { e._ck = null; e._fast = false; }
+    for (const e of sim.trees || []) e._ck = null;
+    return scale ? scale.legend() : [];
+  }
+
+  function stepSim(sim, dt) {
+    sim.time += dt;
+    for (const a of sim.agents) {
+      const mo = a.motion;
+      if (mo) {
+        if (mo.mode === 'static') continue;
+        if (mo.mode === 'driven') {
+          const r = mo.update(a, sim.time, dt, sim);
+          if (r && r.edge) { a.edge = r.edge; a.s = r.s; a.dir = r.dir; a.pose = null; }
+          else a.pose = r || null;
+          continue;
+        }
+        if (mo.mode === 'path') {
+          const P = mo.path, T = P[P.length - 1][0];
+          let t = mo.loop ? (sim.time % T) : Math.min(sim.time, T), i = 0;
+          while (i < P.length - 2 && P[i + 1][0] < t) i++;
+          const p0 = P[i], p1 = P[Math.min(i + 1, P.length - 1)], u = p1[0] > p0[0] ? Math.max(0, Math.min(1, (t - p0[0]) / (p1[0] - p0[0]))) : 0;
+          a.pose = { x: p0[1] + (p1[1] - p0[1]) * u, y: p0[2] + (p1[2] - p0[2]) * u, heading: Math.atan2(p1[2] - p0[2], p1[1] - p0[1]) };
+          continue;
+        }
+      }
+      a.s += a.speed * dt * a.dir;
+      const e = a.edge;
+      if (a.s < 0 || a.s > e.len) {
+        const atNode = a.s > e.len ? e.b : e.a;
+        let opts = atNode.edges.filter(x => x !== e && edgeOk(x, a.network));
+        if (!opts.length) opts = atNode.edges.filter(x => edgeOk(x, a.network));
+        if (!opts.length) opts = [e];
+        const ne = pick2(opts, sim.rng);
+        a.edge = ne;
+        a.dir = (ne.a === atNode) ? 1 : -1;
+        a.s = a.dir > 0 ? 0 : ne.len;
+      }
+    }
+  }
+  function pick2(arr, R) { return arr[Math.floor(R() * arr.length)]; }
+
+  // position and heading of an agent in world coordinates
+  function agentPose(a, sim) {
+    if (a.pose) return Object.assign({ dx: Math.cos(a.pose.heading), dy: Math.sin(a.pose.heading) }, a.pose);
+    const e = a.edge;
+    const t = Math.max(0, Math.min(1, a.s / e.len));
+    const x = e.ax + (e.bx - e.ax) * t, y = e.ay + (e.by - e.ay) * t;
+    const ux = (e.bx - e.ax) / e.len, uy = (e.by - e.ay) / e.len;
+    const dx = ux * a.dir, dy = uy * a.dir;
+    const heading = Math.atan2(dy, dx);
+    const driveSign = (sim && sim.opts.drive === 'left') ? -1 : 1;
+    let off;
+    if (a.group === 'people') off = (e.width / 2 + e.pavement * 0.5) * a.side;
+    else if (a.network === 'cycle') off = e.width * 0.3 * driveSign;
+    else if (a.network === 'rail') off = 0;
+    else off = e.width * 0.22 * driveSign;
+    return { x: x - dy * off, y: y + dx * off, heading, dx, dy };
+  }
+
+  // ---------- rendering ----------
+  function sceneBounds(scene) {
+    if (scene._bounds) return scene._bounds;
+    let x0 = 1e18, y0 = 1e18, x1 = -1e18, y1 = -1e18;
+    const add = p => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); };
+    for (const r of scene.roads) r.pts.forEach(add);
+    for (const b of scene.buildings) b.footprint.forEach(add);
+    return (scene._bounds = [x0 - 30, y0 - 30, x1 + 30, y1 + 30]);
+  }
+
+  // Ground: a base plane (plots and gardens), a faint grid in the formal register, landuse, then roads with a surface
+  // (asphalt, concrete joints, setts, earth tracks) and markings. Surface detail is drawn only when it can be seen.
+  function drawGround(ctx, view, scene, th, reg) {
+    const lod = view.scale >= 4, B = sceneBounds(scene), P = (x, y) => proj(view, x, y, 0);
+    poly(ctx, [[B[0], B[1]], [B[2], B[1]], [B[2], B[3]], [B[0], B[3]]].map(p => P(p[0], p[1])), th.ground, null, 0);
+    if (th.grid && view.scale >= 0.8) {
+      ctx.strokeStyle = th.grid; ctx.lineWidth = 0.6; const g = 20;
+      for (let x = Math.ceil(B[0] / g) * g; x <= B[2]; x += g) { const a = P(x, B[1]), b = P(x, B[3]); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+      for (let y = Math.ceil(B[1] / g) * g; y <= B[3]; y += g) { const a = P(B[0], y), b = P(B[2], y); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+    }
+    for (const l of scene.landuse) {
+      const fill = l.kind === 'park' ? th.grass : (l.kind === 'garden' ? mixHex(th.grass, th.ground, 0.3) : (l.kind === 'water' ? th.water : th.plaza));
+      poly(ctx, l.footprint.map(p => P(p[0], p[1])), fill, l.kind === 'garden' ? null : reg.ink, reg.lw * 0.5);
+    }
+    const cycleLane = th.reg === 'formal' ? A_().CARBON.blue[30] : mixHex(th.grass, '#4aa890', 0.5);
+    for (const r of scene.roads) {
+      const cls = roadCls(r);
+      for (let i = 0; i < r.pts.length - 1; i++) {
+        const [ax, ay] = r.pts[i], [bx, by] = r.pts[i + 1];
+        const L = Math.hypot(bx - ax, by - ay); if (L < 0.1) continue;
+        const ux = (bx - ax) / L, uy = (by - ay) / L, nx = -uy, ny = ux;
+        const hw = cls.width / 2 + cls.pavement, hr = cls.width / 2;
+        if (cls.pavement > 0) poly(ctx, [[ax + nx * hw, ay + ny * hw], [bx + nx * hw, by + ny * hw], [bx - nx * hw, by - ny * hw], [ax - nx * hw, ay - ny * hw]].map(p => P(p[0], p[1])), th.pave, null, 0);
+        const isTrack = r.class === 'cycle', ped = r.class === 'pedestrian';
+        const fill = isTrack ? cycleLane : (ped ? th.pave : (r.class === 'tramway' ? mixHex(th.road, th.grass, 0.35) : th.road));
+        poly(ctx, [[ax + nx * hr, ay + ny * hr], [bx + nx * hr, by + ny * hr], [bx - nx * hr, by - ny * hr], [ax - nx * hr, ay - ny * hr]].map(p => P(p[0], p[1])), fill, (cls.pavement > 0 && !ped) ? th.kerb : null, Math.max(0.5, view.scale * 0.1));
+        const line = (x0, y0, x1, y1, colour, w, dash, off) => {
+          const a = P(x0, y0), b = P(x1, y1); ctx.strokeStyle = colour; ctx.lineWidth = w;
+          if (dash) { ctx.setLineDash(dash); ctx.lineDashOffset = off || 0; }
+          ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); if (dash) ctx.setLineDash([]);
+        };
+        if (lod && !isTrack && !ped && r.class !== 'tramway') {        // surface texture
+          if (th.surface === 'concrete') for (let t = 4; t < L; t += 8) line(ax + ux * t - nx * hr, ay + uy * t - ny * hr, ax + ux * t + nx * hr, ay + uy * t + ny * hr, mixHex(th.road, '#000000', 0.12), 0.7);
+          else if (th.surface === 'cobble') { let row = 0; for (let o = -hr + 0.9; o < hr - 0.5; o += 1.3, row++) line(ax + nx * o, ay + ny * o, bx + nx * o, by + ny * o, mixHex(th.road, '#000000', 0.18), Math.max(1, view.scale * 0.5), [view.scale * 0.7, view.scale * 0.5], (row % 2) * view.scale * 0.6); }
+          else if (th.surface === 'earth') for (const o of [-hr * 0.4, hr * 0.4]) line(ax + nx * o, ay + ny * o, bx + nx * o, by + ny * o, mixHex(th.road, '#000000', 0.14), Math.max(1.5, view.scale * 0.9));
+        }
+        if (cls.centre === 'dash' && th.surface !== 'earth' && !ped) {
+          const n = Math.max(1, Math.floor(L / 5)), w = Math.max(1, view.scale * 0.12);
+          for (let k = 0; k < n; k += 2) line(ax + (bx - ax) * k / n, ay + (by - ay) * k / n, ax + (bx - ax) * Math.min(1, (k + 1) / n), ay + (by - ay) * Math.min(1, (k + 1) / n), th.mark, w);
+        }
+        if (cls.centre === 'median') poly(ctx, [[ax + nx, ay + ny], [bx + nx, by + ny], [bx - nx, by - ny], [ax - nx, ay - ny]].map(p => P(p[0], p[1])), th.median, null, 0);
+        if (cls.tram) for (const o of [-2.2, 2.2]) line(ax + nx * o, ay + ny * o, bx + nx * o, by + ny * o, th.rail, Math.max(1, view.scale * 0.2));
+        if (cls.cycle && !isTrack && hr >= 3) for (const o of [-hr + 1.2, hr - 1.2]) line(ax + nx * o, ay + ny * o, bx + nx * o, by + ny * o, cycleLane, Math.max(1, view.scale * 0.5));
+      }
+    }
+    // square paving: a light grid over each square
+    ctx.save(); ctx.globalAlpha = 0.7; ctx.strokeStyle = th.kerb; ctx.lineWidth = 1;
+    for (const l of scene.landuse) if (l.kind === 'square') {
+      const xs = l.footprint.map(p => p[0]), ys = l.footprint.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+      for (let x = x0 + 8; x < x1; x += 8) { const a = P(x, y0), b = P(x, y1); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+      for (let y = y0 + 8; y < y1; y += 8) { const a = P(x0, y), b = P(x1, y); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+    }
+    ctx.restore();
+  }
+
+  function buildingDepth(b) {
+    let cx = 0, cy = 0; b.footprint.forEach(p => { cx += p[0]; cy += p[1]; });
+    return (cx / b.footprint.length + cy / b.footprint.length);
+  }
+
+  // At most SPRITE_BUILDS_PER_FRAME sprites are rebuilt at the exact scale in one frame, so a settled view sharpens over a few frames
+  // instead of stalling on one.
+  const SPRITE_BUILDS_PER_FRAME = 150;
+  function renderFrame(ctx, sim, view, layers) {
+    const A = A_(); A.sprites.builds = 0; A.sprites.maxBuilds = SPRITE_BUILDS_PER_FRAME;
+    try { return renderFrameInner(ctx, sim, view, layers); } finally { A.sprites.maxBuilds = Infinity; }
+  }
+  function renderFrameInner(ctx, sim, view, layers) {
+    layers = Object.assign({ buildings: true, vehicles: true, people: true, trees: true }, layers || {});
+    const A = A_(), pal = sim.theme, reg = A.REG[pal.reg] || A.REG.colorfigures;
+    // once the zoom has held still for two frames, sprites are drawn at the exact scale (see AssetLib.sprites.exact)
+    const zs = sim._zoom || (sim._zoom = { scale: NaN, still: 0 });
+    if (zs.scale === view.scale) zs.still++; else { zs.scale = view.scale; zs.still = 0; }
+    A.sprites.exact = zs.still >= 2;
+    const shadow = mixHex(pal.shadow, pal.bg, 0.72);
+    const heightOfEntity = e => e.params ? A_().buildingHeight(e.kind, e.params.N) : e.levels * (LIB.buildings[e.kind] || LIB.buildings.terrace).storeyH;
+    // The ground and the building shadows do not change between frames, so they are drawn once per view and theme and blitted.
+    const drawStatic = c => {
+      c.fillStyle = pal.bg; c.fillRect(0, 0, view.w, view.h); c.lineJoin = 'round';
+      drawGround(c, view, sim.scene, pal, reg);
+      if (layers.buildings) for (const e of sim.buildings) {
+        const b = e.src, H = heightOfEntity(e), q = proj(view, b.footprint[0][0], b.footprint[0][1], 0);
+        if (q[0] < -view.w * 0.5 - H * view.scale || q[0] > view.w * 1.5 + H * view.scale || q[1] < -view.h * 0.5 - H * view.scale || q[1] > view.h * 1.5 + H * view.scale) continue;
+        poly(c, b.footprint.map(p => proj(view, p[0] - H * 0.35, p[1] + H * 0.12, 0)), shadow, null, 0);
+      }
+    };
+    const F = A.sprites.factory, gkey = [view.w, view.h, view.scale.toFixed(4), view.ox.toFixed(1), view.oy.toFixed(1), pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings].join('|');
+    if (F && sim.opts.cacheGround !== false) {
+      if (!sim._ground || sim._ground.key !== gkey) {
+        const q = A.sprites.dpr || 1, cv = F(Math.ceil(view.w * q), Math.ceil(view.h * q)), c2 = cv.getContext('2d');
+        c2.scale(q, q); drawStatic(c2); sim._ground = { key: gkey, cv };
+      }
+      ctx.drawImage(sim._ground.cv, 0, 0, view.w, view.h);
+    } else drawStatic(ctx);
+    // items sorted back to front
+    const items = [];
+    // viewport culling: skip anything whose screen bounds miss the canvas (cheap, and it is most of the scene)
+    const pad = view.scale * 12;
+    const onScreen = (x, y, z) => { const p = proj(view, x, y, z || 0); return p[0] > -pad && p[0] < view.w + pad && p[1] > -pad && p[1] < view.h + pad; };
+    if (layers.buildings) for (const e of sim.buildings) {
+      const H = heightOfEntity(e) * view.scale; let vis = false;
+      for (const p of e.src.footprint) { const q = proj(view, p[0], p[1], 0); if (q[0] > -pad && q[0] < view.w + pad && q[1] > -pad && q[1] < view.h + pad + H) { vis = true; break; } }
+      if (vis) items.push({ d: e.fit.cx + e.fit.cy, kind: 'b', o: e });
+    }
+    if (layers.trees) for (const t of sim.trees) {
+      const q = proj(view, t.x, t.y, 0), H = A.treeHeight(t.kind, t.s) * view.scale;
+      if (q[0] > -pad && q[0] < view.w + pad && q[1] > -pad && q[1] < view.h + pad + H) items.push({ d: t.x + t.y + 0.5, kind: 't', o: t });
+    }
+    for (const l of sim.scene.landuse) if (l.kind === 'square') {
+      let cx = 0, cy = 0; l.footprint.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= l.footprint.length; cy /= l.footprint.length;
+      items.push({ d: cx + cy, kind: 'fountain', o: [cx, cy] });
+    }
+    for (const a of sim.agents) {
+      if (a.group === 'people' ? !layers.people : !layers.vehicles) continue;
+      const pose = agentPose(a, sim);
+      if (!onScreen(pose.x, pose.y, 0)) continue;
+      items.push({ d: pose.x + pose.y, kind: 'a', o: a, pose });
+    }
+    items.sort((p, q) => p.d - q.d);
+    const drawItems = (target, list) => {
+      for (const it of list) {
+        if (it.kind === 'b') drawBuildingEntity(target, view, reg, pal, shadow, sim, it.o);
+        else if (it.kind === 'fountain') drawFountain(target, view, pal, reg, it.o[0], it.o[1]);
+        else if (it.kind === 't') drawTreeEntity(target, view, sim, it.o, pal, reg, shadow);
+        else drawAgent(target, view, reg, shadow, sim, it.o, it.pose, layers);
+      }
+    };
+    // Zoomed far out nothing in the buildings and trees changes from frame to frame, so they are drawn once into a layer and
+    // blitted; only vehicles (dots at this zoom) are drawn on top. The layer is redrawn when the view, the theme or any
+    // building's state changes. A binding or a custom building style can change colours at any moment, so they switch it off.
+    const far = view.scale < 1.0 && F && sim.opts.cacheGround !== false && !sim.bindings.length && !sim.buildingStyle;
+    if (far) {
+      let h = 0; for (const e of sim.buildings) h = (h * 31 + (e.state ? e.state.charCodeAt(0) : 0) * 2 + (e.investor ? 1 : 0)) | 0;
+      const fkey = gkey + '|' + h + '|' + layers.trees;
+      if (!sim._far || sim._far.key !== fkey) {
+        const q = A.sprites.dpr || 1, cv = F(Math.ceil(view.w * q), Math.ceil(view.h * q)), c3 = cv.getContext('2d');
+        c3.scale(q, q); c3.lineJoin = 'round'; drawItems(c3, items.filter(it => it.kind !== 'a')); sim._far = { key: fkey, cv };
+      }
+      ctx.drawImage(sim._far.cv, 0, 0, view.w, view.h);
+      drawItems(ctx, items.filter(it => it.kind === 'a'));
+    } else drawItems(ctx, items);
+  }
+
+  // A building: an asset sprite when its footprint fits a slot, otherwise the generic extrusion.
+  function drawBuildingEntity(ctx, view, reg, pal, shadowCol, sim, e) {
+    const A = A_(), areg = A.REG[pal.reg] || A.REG.colorfigures;
+    // Fast path: with the default style and no binding, a building only changes when its state, owner or the theme does.
+    let bound = false;
+    for (const b of sim.bindings) if (b.match(e)) { bound = true; break; }
+    const fastOk = !sim.buildingStyle && !bound;
+    if (fastOk && e._fast && e._th === pal && e._st === e.state && e._inv === e.investor) { drawBuildingSprite(ctx, view, A, areg, e); return; }
+    const wall = A.wallFor(pal, e.seed);
+    const style = (sim.buildingStyle || retrofitStyle)(e, areg, pal, wall) || {};
+    let data = style.data || null;
+    for (const b of sim.bindings) if (b.match(e)) { data = b.scale.colour(b.value(e)); break; }   // a data binding wins over the style
+    if (!e.params) { drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, data || wall); return; }
+    const ov = style.overlays || [], key = pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + wall + '|' + data + '|' + ov.join(',');
+    if (e._ck !== key) {
+      e._cols = A.buildingColours(areg, pal, { wall, data, seed: e.seed });
+      e._asset = A.getAsset('buildings', e.kind, e.fit.heading, A.buildingExtra(e.params, ov));
+      e._ck = key;
+    }
+    e._fast = fastOk; e._th = pal; e._st = e.state; e._inv = e.investor;
+    drawBuildingSprite(ctx, view, A, areg, e);
+  }
+  function drawBuildingSprite(ctx, view, A, areg, e) {
+    const p = proj(view, e.fit.cx, e.fit.cy, 0);
+    A.drawSprite(ctx, e._asset, e._cols, areg, p[0], p[1], view.scale);
+  }
+
+  // A tree: a cached asset sprite, coloured from the look, with a ground shadow. A binding can recolour the foliage.
+  function drawTreeEntity(ctx, view, sim, e, th, areg, shadowCol) {
+    const A = A_(); let data = null;
+    for (const b of sim.bindings) if (b.match(e)) { data = b.scale.colour(b.value(e)); break; }
+    const key = th.famId + '/' + th.lookId + '/' + th.reg + '|' + e.kind + '|' + data;
+    if (e._ck !== key) { e._cols = A.treeColours(areg, th, e.seed, e.kind, data); e._asset = A.getAsset('trees', e.kind, e.seed & 3, { s: e.s, v: e.v }); e._ck = key; }
+    const p = proj(view, e.x, e.y, 0), bb = e._asset.bbox, w = (bb.maxX - bb.minX) * view.scale;
+    ctx.beginPath(); ctx.ellipse(p[0], p[1], Math.max(2, w * 0.36), Math.max(1, w * 0.13), 0, 0, Math.PI * 2); ctx.fillStyle = shadowCol; ctx.fill();
+    A.drawSprite(ctx, e._asset, e._cols, areg, p[0], p[1], view.scale);
+  }
+
+  // Colours for an agent: defaults from its outfit or tint, data surface from any matching binding.
+  function agentColours(sim, a, reg) {
+    const A = A_();
+    let data = null;
+    for (const b of sim.bindings) if (b.match(a)) {
+      const v = b.value(a);
+      data = Array.isArray(v) ? v.map(x => b.scale.colour(x)) : b.scale.colour(v);
+      break;
+    }
+    const key = reg.id + '|' + JSON.stringify(data);
+    if (a._ck !== key) {
+      a._cols = a.group === 'vehicles' ? A.vehicleColours(a.kind, reg, a.tint, Array.isArray(data) ? data[0] : data) : A.personColours(a.kind, reg, a.outfits, data);
+      a._ck = key;
+    }
+    return a._cols;
+  }
+
+  function drawAgent(ctx, view, reg, shadowCol, sim, a, pose, layers) {
+    const A = A_(), areg = A.REG[sim.opts.register] || A.REG.colorfigures;
+    // level of detail: zoomed far out a person is under two pixels and a vehicle is a dot
+    if (a.group === 'people' && view.scale < 1.6) return;
+    const h = A.snapHeading(pose.heading), p = proj(view, pose.x, pose.y, 0);
+    if (a.group === 'vehicles' && view.scale < 0.9) {
+      const col = agentColours(sim, a, areg), d = Math.max(1.5, view.scale * 3.2);
+      ctx.fillStyle = col.data; ctx.fillRect(p[0] - d / 2, p[1] - d, d, d);
+      return;
+    }
+    const sc = view.scale * (a.group === 'people' ? A.STYLE.person : A.STYLE.vehicle);
+    const asset = a.group === 'vehicles' ? A.getAsset('vehicles', a.kind, h) : A.getAsset('people', a.kind, h, A.flagsOf(a.outfits));
+    const bb = asset.bbox, w = (bb.maxX - bb.minX) * sc;
+    ctx.beginPath(); ctx.ellipse(p[0], p[1], Math.max(2, w * 0.42), Math.max(1, w * 0.15), 0, 0, Math.PI * 2); ctx.fillStyle = shadowCol; ctx.fill();
+    A.drawSprite(ctx, asset, agentColours(sim, a, areg), areg, p[0], p[1], sc);
+    if (a.rider && layers.people) {
+      const ra = A.getAsset('people', 'cyclist', h, [a.rider.outfit.flags]);
+      if (!a._rc || a._rcReg !== areg.id) { a._rc = A.personColours('cyclist', areg, [a.rider.outfit]); a._rcReg = areg.id; }
+      A.drawSprite(ctx, ra, a._rc, areg, p[0], p[1] - a.rider.lift * sc, sc);
+    }
+  }
+  // Fountain: a stepped basin with water and a central jet, all in world units.
+  function drawFountain(ctx, view, th, reg, cx, cy) {
+    const R = 6.5, N = 18;
+    const ring = (r, z) => { const out = []; for (let i = 0; i < N; i++) { const a = i / N * Math.PI * 2; out.push(proj(view, cx + Math.cos(a) * r, cy + Math.sin(a) * r, z)); } return out; };
+    poly(ctx, ring(R, 0.9), th.kerb, reg.ink, reg.lw);
+    poly(ctx, ring(R - 1.2, 1.0), th.water, reg.ink, reg.lw * 0.8);
+    const top = proj(view, cx, cy, 2.6), base = proj(view, cx, cy, 1.0), jet = mixHex(th.water, '#ffffff', 0.45);
+    ctx.beginPath(); ctx.moveTo(base[0], base[1]); ctx.lineTo(top[0], top[1]); ctx.strokeStyle = jet; ctx.lineWidth = Math.max(1, view.scale * 0.35); ctx.stroke();
+    ctx.beginPath(); ctx.arc(top[0], top[1], Math.max(1.5, view.scale * 0.6), 0, Math.PI * 2); ctx.fillStyle = mixHex(th.water, '#ffffff', 0.65); ctx.fill(); ctx.strokeStyle = reg.ink; ctx.lineWidth = reg.lw; ctx.stroke();
+  }
+  // view fit: centre the scene in a w x h canvas
+  function fitView(scene, w, h, margin) {
+    const B = sceneBounds(scene), dx = B[2] - B[0], dy = B[3] - B[1], S = dx + dy;        // an iso box is (dx + dy) * cos30 wide and (dx + dy) / 2 tall
+    const scale = Math.min((w * (1 - margin)) / (S * C30 + 1), (h * (1 - margin)) / (S * 0.5 + 1));
+    const cx = (B[0] + B[2]) / 2, cy = (B[1] + B[3]) / 2;
+    return { w, h, scale, ox: w / 2 - (cx - cy) * scale * C30, oy: h / 2 - (cx + cy) * scale * 0.5 };
+  }
+
+  root.VizLib = { LIB, rng, validateScene, roadCls, sceneBounds, makePlaceholderScene, buildNetwork, createSim, setTheme, stepSim, setMotion, bindData, retrofitStyle, renderFrame, fitView, proj, agentPose };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* camera.js: the viewer's camera. No DOM, so it can be tested in Node.
+ *
+ * The camera looks at a point (cx, cy) on the ground plane, in metres, at `scale` pixels per metre. The isometric projection is
+ *   screen x = ox + (x - y) * scale * cos30     screen y = oy + (x + y) * scale * 0.5 - z * scale
+ * with ox and oy chosen so that (cx, cy) sits at the middle of the canvas.
+ *
+ * Every method that moves the view keeps the camera inside its limits: the scale stays between minScale and maxScale, and the centre
+ * stays near the scene, so the map cannot be lost off screen.
+ */
+(function (root) {
+  'use strict';
+  const C30 = 0.8660254;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  function create(opts) {
+    opts = Object.assign({ bounds: [0, 0, 100, 100], width: 1200, height: 700, maxScale: 32, margin: 0.2, fitMargin: 0.06, minFactor: 0.85 }, opts || {});
+    const cam = { cx: 0, cy: 0, scale: 1, w: opts.width, h: opts.height, fit: 1, minScale: 1, maxScale: opts.maxScale, bounds: opts.bounds.slice() };
+
+    // The scale that shows the whole scene. An isometric box of ground (dx by dy metres) is (dx + dy) * cos30 wide and (dx + dy) / 2 tall.
+    function computeFit() {
+      const B = cam.bounds, S = (B[2] - B[0]) + (B[3] - B[1]);
+      cam.fit = Math.max(1e-4, Math.min((cam.w * (1 - opts.fitMargin)) / (S * C30 + 1), (cam.h * (1 - opts.fitMargin)) / (S * 0.5 + 1)));
+      cam.minScale = cam.fit * opts.minFactor;
+      if (cam.maxScale < cam.minScale * 2) cam.maxScale = cam.minScale * 2;
+    }
+    function clampCentre() {
+      const B = cam.bounds, mx = (B[2] - B[0]) * opts.margin, my = (B[3] - B[1]) * opts.margin;
+      cam.cx = clamp(cam.cx, B[0] - mx, B[2] + mx); cam.cy = clamp(cam.cy, B[1] - my, B[3] + my);
+    }
+
+    // The projection origin that puts the centre in the middle of the canvas.
+    cam.view = function () { return { w: cam.w, h: cam.h, scale: cam.scale, ox: cam.w / 2 - (cam.cx - cam.cy) * cam.scale * C30, oy: cam.h / 2 - (cam.cx + cam.cy) * cam.scale * 0.5 }; };
+
+    // The ground point under a canvas pixel.
+    cam.screenToWorld = function (px, py) {
+      const v = cam.view(), a = (px - v.ox) / (cam.scale * C30), b = (py - v.oy) * 2 / cam.scale;
+      return [(a + b) / 2, (b - a) / 2];
+    };
+
+    // Drag: the map follows the pointer, so a drag of (dx, dy) pixels moves the centre the opposite way on the ground.
+    cam.panScreen = function (dx, dy) {
+      const a = dx / (cam.scale * C30), b = 2 * dy / cam.scale;
+      cam.cx -= (a + b) / 2; cam.cy -= (b - a) / 2; clampCentre(); return cam;
+    };
+
+    // Keys: move the VIEW by (dx, dy) pixels. Moving the view left makes the map slide right, the same as dragging right.
+    cam.panView = function (dx, dy) { return cam.panScreen(-dx, -dy); };
+
+    // Zoom by a factor, keeping the ground point under pixel (px, py) where it is. Defaults to the middle of the canvas.
+    cam.zoomAt = function (factor, px, py) {
+      if (px === undefined) px = cam.w / 2;
+      if (py === undefined) py = cam.h / 2;
+      const [wx, wy] = cam.screenToWorld(px, py), k2 = clamp(cam.scale * factor, cam.minScale, cam.maxScale);
+      const ox2 = px - (wx - wy) * k2 * C30, oy2 = py - (wx + wy) * k2 * 0.5;
+      const A = (cam.w / 2 - ox2) / (k2 * C30), B = (cam.h / 2 - oy2) * 2 / k2;
+      cam.scale = k2; cam.cx = (A + B) / 2; cam.cy = (B - A) / 2; clampCentre(); return cam;
+    };
+    cam.zoomTo = function (scale, px, py) { return cam.zoomAt(scale / cam.scale, px, py); };
+
+    // The zoom as a fraction 0..1 on a logarithmic scale between the smallest and largest scale, for a slider.
+    cam.zoomFraction = function () { return Math.log(cam.scale / cam.minScale) / Math.log(cam.maxScale / cam.minScale); };
+    cam.setZoomFraction = function (t) { return cam.zoomTo(cam.minScale * Math.pow(cam.maxScale / cam.minScale, clamp(t, 0, 1))); };
+
+    cam.fitAll = function () { const B = cam.bounds; cam.cx = (B[0] + B[2]) / 2; cam.cy = (B[1] + B[3]) / 2; cam.scale = cam.fit; return cam; };
+    cam.setBounds = function (bounds) { cam.bounds = bounds.slice(); computeFit(); return cam.fitAll(); };
+    // The canvas changed size: keep the same ground point at the middle, and keep the scale unless it now falls outside the limits.
+    cam.resize = function (w, h) { cam.w = w; cam.h = h; computeFit(); cam.scale = clamp(cam.scale, cam.minScale, cam.maxScale); clampCentre(); return cam; };
+
+    computeFit(); cam.fitAll();
+    return cam;
+  }
+
+  root.LabCamera = { create, C30 };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* controls.js: mouse, touch and keyboard input for a LabCamera.
+ *
+ *   drag            pan (mouse button 1 or 2, or one finger)
+ *   mouse wheel     zoom, anchored on the cursor (a trackpad pinch also arrives as a wheel event)
+ *   pinch           zoom and pan (two fingers)
+ *   A and D         pan left and right (hold to keep moving)
+ *   W and S         zoom in and out (hold to keep zooming)
+ *
+ * Keys are ignored while a text field, a menu or a text area has the focus, when Ctrl, Alt or Meta is down, and after the window
+ * loses focus. Motion is time based, so it runs at the same speed at any frame rate.
+ *
+ *   const controls = LabControls.attach(canvas, camera, { onChange: redraw });
+ *   controls.destroy();
+ *
+ * `opts.raf: false` turns off the animation loop; call `controls.tick(seconds)` yourself, which is how the tests drive it.
+ */
+(function (root) {
+  'use strict';
+  const KEYS = { a: 'left', d: 'right', w: 'in', s: 'out' };
+  const TYPING = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number', 'date', 'datetime-local', 'month', 'time', 'week']);
+
+  // true when the key press belongs to a form field and not to the viewer
+  function isTyping(el) {
+    if (!el || !el.tagName) return false;
+    const tag = el.tagName.toUpperCase();
+    if (tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable) return true;
+    return tag === 'INPUT' && TYPING.has((el.type || 'text').toLowerCase());
+  }
+
+  function attach(canvas, cam, opts) {
+    const doc = canvas.ownerDocument, win = doc.defaultView || root;
+    opts = Object.assign({ onChange() {}, panSpeed: 520, zoomRate: 0.9, raf: true, keys: true }, opts || {});
+    const held = new Set(), pointers = new Map();
+    let pinch = null, rafId = 0, last = 0;
+    const rect = () => canvas.getBoundingClientRect();
+
+    // ---- pointer: drag to pan, two fingers to pinch ----
+    function down(e) {
+      if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 1) return;
+      pointers.set(e.pointerId, [e.clientX, e.clientY]);
+      if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* a synthetic pointer has nothing to capture */ } }
+      canvas.classList.add('dragging');
+      if (pointers.size === 2) { const p = [...pointers.values()]; pinch = Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]); }
+    }
+    function move(e) {
+      if (!pointers.has(e.pointerId)) return;
+      const prev = pointers.get(e.pointerId), cur = [e.clientX, e.clientY];
+      pointers.set(e.pointerId, cur);
+      if (pointers.size === 1) cam.panScreen(cur[0] - prev[0], cur[1] - prev[1]);
+      else if (pointers.size === 2) {
+        const p = [...pointers.values()], d = Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]), r = rect();
+        cam.panScreen((cur[0] - prev[0]) / 2, (cur[1] - prev[1]) / 2);                  // each finger carries half of the midpoint's movement
+        if (pinch && d > 0) cam.zoomAt(d / pinch, (p[0][0] + p[1][0]) / 2 - r.left, (p[0][1] + p[1][1]) / 2 - r.top);
+        pinch = d;
+      } else return;
+      opts.onChange();
+    }
+    function up(e) { pointers.delete(e.pointerId); pinch = null; if (!pointers.size) canvas.classList.remove('dragging'); }
+
+    // ---- wheel: zoom about the cursor ----
+    function wheel(e) {
+      e.preventDefault();
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) dy *= 16; else if (e.deltaMode === 2) dy *= canvas.clientHeight || 700;     // lines and pages to pixels
+      const r = rect();
+      cam.zoomAt(Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0016)), e.clientX - r.left, e.clientY - r.top);   // a pinch on a trackpad sets ctrlKey and sends small steps
+      opts.onChange();
+    }
+
+    // ---- keys: A and D pan, W and S zoom ----
+    function keydown(e) {
+      if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
+      const k = (e.key || '').toLowerCase();
+      if (!(k in KEYS)) return;
+      held.add(KEYS[k]);
+      startLoop();
+    }
+    function keyup(e) { const k = (e.key || '').toLowerCase(); if (k in KEYS) held.delete(KEYS[k]); }
+    const release = () => { held.clear(); pointers.clear(); pinch = null; canvas.classList.remove('dragging'); };
+
+    // Move the camera for `dt` seconds with whatever keys are held. Returns true when the view changed.
+    function tick(dt) {
+      let moved = false;
+      const px = opts.panSpeed * dt;
+      if (held.has('left')) { cam.panView(-px, 0); moved = true; }           // A: the view moves left, so the map slides right
+      if (held.has('right')) { cam.panView(px, 0); moved = true; }           // D
+      if (held.has('in')) { cam.zoomAt(Math.exp(opts.zoomRate * dt)); moved = true; }     // W: about the middle of the canvas
+      if (held.has('out')) { cam.zoomAt(Math.exp(-opts.zoomRate * dt)); moved = true; }   // S
+      if (moved) opts.onChange();
+      return moved;
+    }
+    function loop(now) {
+      rafId = 0;
+      if (!held.size) { last = 0; return; }
+      const dt = last ? Math.min(0.05, (now - last) / 1000) : 1 / 60;       // a long pause must not make the view jump
+      last = now; tick(dt);
+      rafId = win.requestAnimationFrame(loop);
+    }
+    function startLoop() { if (opts.raf && !rafId) { last = 0; rafId = win.requestAnimationFrame(loop); } }
+
+    canvas.addEventListener('pointerdown', down);
+    canvas.addEventListener('pointermove', move);
+    for (const t of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) canvas.addEventListener(t, up);
+    canvas.addEventListener('wheel', wheel, { passive: false });
+    if (opts.keys) { doc.addEventListener('keydown', keydown); doc.addEventListener('keyup', keyup); win.addEventListener('blur', release); }
+
+    return {
+      tick, held: () => [...held].sort(),
+      destroy() {
+        canvas.removeEventListener('pointerdown', down); canvas.removeEventListener('pointermove', move);
+        for (const t of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) canvas.removeEventListener(t, up);
+        canvas.removeEventListener('wheel', wheel);
+        doc.removeEventListener('keydown', keydown); doc.removeEventListener('keyup', keyup); win.removeEventListener('blur', release);
+        if (rafId) win.cancelAnimationFrame(rafId);
+        release();
+      }
+    };
+  }
+
+  root.LabControls = { attach, isTyping };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+(function () {
+  const V = window.VizLib, A = window.AssetLib;
+  A.sprites.factory = (w, hh) => { const c = document.createElement('canvas'); c.width = w; c.height = hh; return c; };
+  A.sprites.dpr = window.devicePixelRatio || 1;
+  const FAMS = {"status":"proposed_starting_values","version":2,"note":"Proposals, not sampled from photographs. Replace with measured colours and check with local authors before policy use. A region owns several looks (named by materials and light, not by who lives there). The top-level wall, wall2, roof, ground, accent and shadow of each family repeat its first look for older code.","families":[{"id":"nw","name":"Northern European","places":"Brussels, Hamburg, Copenhagen","wall":"#9c543e","wall2":"#b4684b","roof":"#484c54","ground":"#dedad0","accent":"#78a078","shadow":"#6e7886","looks":[{"id":"brick","name":"Red brick and slate","note":"Dark red brick, slate roofs, wet grey asphalt.","surface":"asphalt","walls":["#9c543e","#b4684b","#86452f","#c98f68"],"roofs":["#484c54","#5d5a60"],"accents":["#78a078","#466078","#c9a24a"],"ground":"#dedad0","road":"#6a6e75","pave":"#cdc7ba","grass":"#86a064","canopies":["#66925a","#4a7a4e","#9cb260"],"bloom":null,"water":"#8fb7c8","shadow":"#6e7886"},{"id":"render","name":"Cream render and zinc","note":"Pale render and zinc roofs over setts, as in older city centres.","surface":"cobble","walls":["#e3d3a8","#d4bf8f","#eadfc6","#c9b184"],"roofs":["#6f7479","#8a5a48"],"accents":["#4f7c8c","#a0584a","#7a9a6a"],"ground":"#e0dccf","road":"#74777c","pave":"#d5cfbf","grass":"#94ac6e","canopies":["#7ea25f","#5c8a55","#b3c06a"],"bloom":null,"water":"#93b9c9","shadow":"#74798a"},{"id":"modern","name":"Concrete, glass and timber","note":"Recent building: pale concrete, glass, timber cladding.","surface":"asphalt","walls":["#b9bcbf","#d6d8da","#a1a6ab","#c7b79a"],"roofs":["#4e535a","#8c9096"],"accents":["#3f7f9b","#d1873a","#6f9a78"],"ground":"#e4e4e2","road":"#5f6368","pave":"#d9d9d6","grass":"#8aa879","canopies":["#5f9a6a","#3f7a58","#a2bf72"],"bloom":null,"water":"#8dbccd","shadow":"#6c7480"}]},{"id":"uk","name":"British and Irish","places":"London, Dublin","wall":"#b08a62","wall2":"#9a5a46","roof":"#4a4d55","ground":"#dcd8cc","accent":"#3f5f7a","shadow":"#6a7280","looks":[{"id":"stock","name":"London stock and slate","note":"Yellow stock brick with red accents and slate.","surface":"asphalt","walls":["#b08a62","#9a5a46","#a8725a","#c0a27c"],"roofs":["#4a4d55","#63564f"],"accents":["#3f5f7a","#7a2f2f","#d0b04e"],"ground":"#dcd8cc","road":"#5e6167","pave":"#c9c3b5","grass":"#7f9d5e","canopies":["#5f8a52","#456f46","#8fa95a"],"bloom":null,"water":"#8ea9b8","shadow":"#6a7280"},{"id":"stucco","name":"White stucco and stone","note":"Painted stucco terraces in stone and cream.","surface":"asphalt","walls":["#ece6d8","#d9d0bc","#c9bfa6","#e1d9c8"],"roofs":["#5a5f66","#7a746c"],"accents":["#2f4a6a","#7a8a6a","#b35a4a"],"ground":"#dedacc","road":"#666a70","pave":"#d3cdbf","grass":"#86a566","canopies":["#6a9358","#4f7b4c","#98b05c"],"bloom":null,"water":"#93aebd","shadow":"#707684"},{"id":"terracotta","name":"Red brick and terracotta","note":"Deep red brick with terracotta and dark roofs.","surface":"asphalt","walls":["#a24a3a","#b85a45","#8c3f32","#c9a98a"],"roofs":["#41454d","#7a3f30"],"accents":["#2e5a4a","#c99a3a","#40607f"],"ground":"#d9d4c8","road":"#5a5d63","pave":"#c5bfb1","grass":"#7a9a58","canopies":["#5c8650","#436c42","#869f52"],"bloom":null,"water":"#8aa6b6","shadow":"#686e7a"}]},{"id":"ws","name":"Western European stone","places":"Paris, Vienna","wall":"#d9ccae","wall2":"#e6dcc2","roof":"#6b6f76","ground":"#e2ded2","accent":"#4a6a8a","shadow":"#787c88","looks":[{"id":"limestone","name":"Cream limestone and zinc","note":"Cream limestone, zinc roofs, slim balconies.","surface":"asphalt","walls":["#d9ccae","#e6dcc2","#cdbd9c","#bfb298"],"roofs":["#6b6f76","#575b62"],"accents":["#4a6a8a","#8a6a4a","#6a8a6a"],"ground":"#e2ded2","road":"#707378","pave":"#d6d0c2","grass":"#90ab70","canopies":["#6f9a58","#53804c","#aebf68"],"bloom":null,"water":"#93b9c9","shadow":"#787c88"},{"id":"ochre","name":"Imperial ochre and white","note":"Ochre-yellow render with white dressings.","surface":"asphalt","walls":["#e3c36a","#f0e6c8","#d6b058","#e8d9a8"],"roofs":["#7a4a3a","#5e5e66"],"accents":["#6a8a7a","#a04a3a","#4a5f7a"],"ground":"#e0dac8","road":"#6e7176","pave":"#d8d1c0","grass":"#8fa86a","canopies":["#709a55","#53804a","#a8b862"],"bloom":null,"water":"#98bccb","shadow":"#7a7c86"},{"id":"sandstone","name":"Warm sandstone and slate","note":"Warm sandstone with mansard slate and setts.","surface":"cobble","walls":["#c9a98a","#b89878","#d6bd9e","#a98a6c"],"roofs":["#4e5259","#6a5a54"],"accents":["#5a6a8a","#9a5a3a","#7a8f6a"],"ground":"#ddd5c6","road":"#6a6d72","pave":"#d0c8b8","grass":"#8ba468","canopies":["#6a9455","#4e7a4a","#a4b560"],"bloom":null,"water":"#90b4c4","shadow":"#74747e"}]},{"id":"md","name":"Mediterranean","places":"Messina, Naples, Athens","wall":"#f2eadb","wall2":"#e8dcc4","roof":"#b0583c","ground":"#eadcbe","accent":"#3c6e78","shadow":"#96785f","looks":[{"id":"whitewash","name":"Whitewash and terracotta","note":"Whitewashed walls, terracotta roofs, olive greens.","surface":"asphalt","walls":["#f2eadb","#e8dcc4","#f6f1e6","#dccdb0"],"roofs":["#b0583c","#c87050"],"accents":["#3c6e78","#2f5f8a","#c8a03c"],"ground":"#eadcbe","road":"#8a847a","pave":"#e2d6bc","grass":"#a2a566","canopies":["#7c9a58","#8aa070","#5a7a4a"],"bloom":"#d65a9a","water":"#5aa0b8","shadow":"#96785f"},{"id":"ochre","name":"Ochre, umber and sienna","note":"Warm earth-coloured plaster over setts.","surface":"cobble","walls":["#d49a58","#c8794a","#e3b878","#b86a4a"],"roofs":["#a8503a","#b86848"],"accents":["#3a6a6a","#6a3a2a","#d8b048"],"ground":"#e0cfaa","road":"#7e776c","pave":"#d6c6a2","grass":"#a8a468","canopies":["#7a9456","#8aa468","#5c7a4a"],"bloom":"#d65a9a","water":"#5aa0b4","shadow":"#92705a"},{"id":"aegean","name":"Blue and white","note":"White walls with blue roofs and shutters.","surface":"asphalt","walls":["#f4f1ea","#e6e3da","#dfe6ee","#f0e4d0"],"roofs":["#2f5f9a","#a8503a"],"accents":["#2f6fb0","#e0a83a","#3a8a8a"],"ground":"#e8e2d2","road":"#8e8a82","pave":"#e6e0d0","grass":"#a8ae70","canopies":["#7a9a5c","#9aae78","#5a8050"],"bloom":"#c8508a","water":"#3a8ac0","shadow":"#8a8478"}]},{"id":"ce","name":"Central and Eastern European","places":"Prague, Warsaw, Budapest","wall":"#e8cfa8","wall2":"#bcd0c4","roof":"#a14a3a","ground":"#e0dccf","accent":"#5a7aa0","shadow":"#74788a","looks":[{"id":"pastel","name":"Pastel render and tile","note":"Soft yellow, green, pink and blue render, red tile.","surface":"cobble","walls":["#e8cfa8","#bcd0c4","#e6b8b0","#c9d4e2"],"roofs":["#a14a3a","#8a4a3c"],"accents":["#5a7aa0","#c89a4a","#6a8a6a"],"ground":"#e0dccf","road":"#6f7278","pave":"#d4cec0","grass":"#8fae6e","canopies":["#6f9a58","#4f7e4c","#a8bc66"],"bloom":null,"water":"#94b8c8","shadow":"#74788a"},{"id":"panel","name":"Panel concrete and brown tile","note":"Post-war estates: pale panels, brown tile roofs.","surface":"asphalt","walls":["#bcb8ae","#a8a49a","#cfc9bc","#9a9a94"],"roofs":["#6a4a3c","#5a5a60"],"accents":["#4a6a8a","#c8742a","#6a8a4a"],"ground":"#d8d6cc","road":"#5e6166","pave":"#c8c6bc","grass":"#86a266","canopies":["#5f8a50","#46704a","#8aa55a"],"bloom":null,"water":"#8cafbf","shadow":"#6c7078"},{"id":"brick","name":"Red brick and plaster","note":"Red brick with plaster bands and tile.","surface":"asphalt","walls":["#a45038","#c4906a","#d8c3a0","#8c4430"],"roofs":["#7a3a2c","#4e4e56"],"accents":["#3a5a7a","#b08a3a","#6a8a5a"],"ground":"#dcd6c8","road":"#646870","pave":"#cdc7b8","grass":"#86a464","canopies":["#62904e","#487648","#92ac58"],"bloom":null,"water":"#8eb2c2","shadow":"#6e727a"}]},{"id":"sa","name":"South Asian tropical","places":"Colombo, Chennai, Dhaka","wall":"#eee8da","wall2":"#e2d8c0","roof":"#96604a","ground":"#dad6c4","accent":"#408c60","shadow":"#6e7864","looks":[{"id":"whitewash","name":"Whitewash and clay tile","note":"Limewashed walls, clay tile, flame-tree red.","surface":"asphalt","walls":["#eee8da","#e2d8c0","#f4f0e6","#d8c8a8"],"roofs":["#96604a","#a8705a"],"accents":["#408c60","#c87850","#d8b04a"],"ground":"#dad6c4","road":"#6a6c68","pave":"#d2cdbb","grass":"#7aa860","canopies":["#4e8a46","#6aa04e","#2f6a3e"],"bloom":"#e0703a","water":"#6aa8a0","shadow":"#6e7864"},{"id":"painted","name":"Painted concrete, bright","note":"Bright painted concrete: turquoise, pink, yellow, blue.","surface":"asphalt","walls":["#4aa8a0","#e07a8a","#e8c050","#6a9ad0"],"roofs":["#7a4a3a","#5a5a5a"],"accents":["#d8503a","#2f7a5a","#e0a030"],"ground":"#d8d2c0","road":"#62646a","pave":"#cfc9b6","grass":"#78a65a","canopies":["#4a8c44","#68a24c","#2e6a3c"],"bloom":"#d85a3a","water":"#62a8a4","shadow":"#6a7664"},{"id":"laterite","name":"Laterite and plaster","note":"Red laterite earth tones with plaster, earth roads.","surface":"earth","walls":["#b0643e","#c98a62","#d8b890","#9a5a3a"],"roofs":["#8a4a32","#6a4a3a"],"accents":["#3a7a5a","#d0a040","#7a5a8a"],"ground":"#d6c4a4","road":"#7a6a58","pave":"#d0bc9a","grass":"#8aa060","canopies":["#55883e","#72a04a","#3a6a38"],"bloom":"#e0703a","water":"#6aa09a","shadow":"#6e6650"}]},{"id":"se","name":"Southeast Asian","places":"Bangkok, Hanoi","wall":"#d8c8b0","wall2":"#a8c4c0","roof":"#6e786e","ground":"#d6d2c0","accent":"#c84646","shadow":"#646e64","looks":[{"id":"shophouse","name":"Pastel shophouse","note":"Pastel shophouse fronts: blue, pink, yellow, sand.","surface":"asphalt","walls":["#d8c8b0","#a8c4c0","#e8b8b0","#e8d890"],"roofs":["#6e786e","#8a5a48"],"accents":["#c84646","#2f7a8a","#e0a040"],"ground":"#d6d2c0","road":"#66696a","pave":"#ccc6b4","grass":"#72a85e","canopies":["#4a8a48","#66a24e","#2f6a42"],"bloom":"#e8508a","water":"#62a8a0","shadow":"#646e64"},{"id":"tin","name":"Concrete, tin and green shutters","note":"Weathered concrete with tin roofs and green shutters.","surface":"asphalt","walls":["#bdb09c","#a8a090","#cfc5b0","#9a9484"],"roofs":["#7c8a8a","#6a7478"],"accents":["#3a7a4a","#c86a2a","#2f5a8a"],"ground":"#d4cfbc","road":"#5e6064","pave":"#c8c2b0","grass":"#6ea05a","canopies":["#468844","#62a04a","#2f6640"],"bloom":"#e8508a","water":"#5ea49c","shadow":"#606a60"},{"id":"timber","name":"Timber and dark tile","note":"Timber walls and dark tile or thatch-brown roofs.","surface":"earth","walls":["#a8744a","#8a5a3a","#c09a6a","#706050"],"roofs":["#6a4a32","#4e5a4a"],"accents":["#3a7a5a","#c8502a","#d8a83a"],"ground":"#d2c8aa","road":"#6a6258","pave":"#c8bc9c","grass":"#6a9a54","canopies":["#428042","#5e9a48","#2e6a3a"],"bloom":"#e8508a","water":"#5ea098","shadow":"#645a48"}]},{"id":"ea","name":"East Asian dense","places":"Tokyo, Seoul, Shanghai","wall":"#c4c4c0","wall2":"#d6d6d2","roof":"#545860","ground":"#d6d6d2","accent":"#c85a50","shadow":"#60646e","looks":[{"id":"concrete","name":"Concrete and white tile","note":"Pale concrete and tile, grey roofs, dense signage.","surface":"asphalt","walls":["#c4c4c0","#d6d6d2","#a8aaae","#e6e4de"],"roofs":["#545860","#7a7e84"],"accents":["#c85a50","#3a6a9a","#7a9a7a"],"ground":"#d6d6d2","road":"#55585e","pave":"#cac9c4","grass":"#8aa874","canopies":["#5c8c60","#3f7050","#9db870"],"bloom":null,"water":"#8cb4c4","shadow":"#60646e"},{"id":"glass","name":"Glass, steel and signage","note":"Curtain wall and steel: cool blues and greys.","surface":"asphalt","walls":["#8a98a8","#b0bcc8","#6a7888","#d0d8e0"],"roofs":["#4a5058","#6a7078"],"accents":["#e0503a","#2f8ac8","#e8b030"],"ground":"#dcdcdc","road":"#4e5258","pave":"#d0d0d0","grass":"#86a880","canopies":["#58906a","#3e7458","#96b878"],"bloom":null,"water":"#7fb0c8","shadow":"#5c6470"},{"id":"warm","name":"Warm brick, tile and blossom","note":"Warm brick and tile with cherry blossom.","surface":"asphalt","walls":["#b8896a","#d2b090","#c8785a","#e0cdb0"],"roofs":["#4a4e54","#6a5048"],"accents":["#7a9a7a","#c85a5a","#d8a850"],"ground":"#ddd3c2","road":"#5e6064","pave":"#d0c6b4","grass":"#8aa870","canopies":["#6a9a5c","#4e8052","#a2b868"],"bloom":"#f0a0b8","water":"#8cb2c0","shadow":"#6e6a6a"}]},{"id":"me","name":"Middle Eastern and North African","places":"Cairo, Tunis, Amman","wall":"#e2cea8","wall2":"#d6bc90","roof":"#ba8c60","ground":"#e8d8ba","accent":"#3c7896","shadow":"#967e60","looks":[{"id":"sand","name":"Sand-coloured limestone","note":"Sand and limestone tones, flat roofs, date palms.","surface":"asphalt","walls":["#e2cea8","#d6bc90","#ead9b8","#c9ae82"],"roofs":["#ba8c60","#a8825a"],"accents":["#3c7896","#8a5a3a","#5a8a6a"],"ground":"#e8d8ba","road":"#82796c","pave":"#e0d0b0","grass":"#a8a468","canopies":["#7a9a50","#8aa468","#5c7a44"],"bloom":null,"water":"#4a96b0","shadow":"#967e60"},{"id":"blue","name":"Whitewash with blue doors","note":"Whitewashed walls, blue doors and shutters, setts.","surface":"cobble","walls":["#f4efe4","#e8e0d0","#dde6ee","#f0e6d4"],"roofs":["#c8b898","#b0a080"],"accents":["#2f6aa8","#3a8aa0","#d8a840"],"ground":"#e8e0cc","road":"#8a8478","pave":"#e6dec8","grass":"#a6a86c","canopies":["#789850","#8aa264","#5a7a46"],"bloom":"#c8508a","water":"#3a96b4","shadow":"#8c8478"},{"id":"rose","name":"Rose stone and mud-brick","note":"Rose-coloured stone and mud-brick, earth streets.","surface":"earth","walls":["#c8a090","#b88870","#d6b8a0","#a87a62"],"roofs":["#a07a60","#8a6a54"],"accents":["#4a7a8a","#8a4a3a","#c8a050"],"ground":"#dccdb0","road":"#7a7064","pave":"#d4c4a6","grass":"#a0a266","canopies":["#72904c","#86a060","#566f40"],"bloom":null,"water":"#5a9cb0","shadow":"#8a7662"}]},{"id":"sb","name":"Sub-Saharan African","places":"Nairobi, Lagos, Accra","wall":"#b8744a","wall2":"#c89870","roof":"#8a8e92","ground":"#d8c4a0","accent":"#3a7a5a","shadow":"#786046","looks":[{"id":"earth","name":"Red earth and corrugated iron","note":"Red earth walls, corrugated iron roofs, earth roads.","surface":"earth","walls":["#b8744a","#c89870","#a8643e","#d8b894"],"roofs":["#8a8e92","#9a5a46"],"accents":["#3a7a5a","#d0a030","#4a6a9a"],"ground":"#d8c4a0","road":"#8a6a52","pave":"#d2bc98","grass":"#8a9c58","canopies":["#5e8a40","#7a9c4c","#3e6a38"],"bloom":"#e0503a","water":"#6a9aa0","shadow":"#786046"},{"id":"plaster","name":"Painted plaster, rusted roofs","note":"Painted plaster in blue, pink, cream with rusted roofs.","surface":"asphalt","walls":["#e0c8a0","#a8c0b0","#d89a8a","#e8e0c8"],"roofs":["#8a5a42","#6a6e70"],"accents":["#d84a6a","#2f7a8a","#e0b040"],"ground":"#d6c8a8","road":"#6a625a","pave":"#cdbf9f","grass":"#8a9c5a","canopies":["#5a8a42","#76a04e","#3c6a3a"],"bloom":"#c870b0","water":"#6a9ca2","shadow":"#706450"},{"id":"concrete","name":"Concrete and bright commercial paint","note":"Concrete with bright commercial paint.","surface":"asphalt","walls":["#bcb8ae","#d8d0b8","#4a90b8","#e0c040"],"roofs":["#70787c","#5a6064"],"accents":["#d8503a","#2f7a5a","#e8a030"],"ground":"#d4cdb8","road":"#5c5f62","pave":"#c8c1ab","grass":"#82985a","canopies":["#588a42","#72a04c","#3a683a"],"bloom":"#e0503a","water":"#68989e","shadow":"#6c6858"}]},{"id":"la","name":"Latin American","places":"Mexico City, Bogota, Sao Paulo","wall":"#e27858","wall2":"#f4c850","roof":"#aa4a3c","ground":"#e2dac8","accent":"#3c82aa","shadow":"#826e64","looks":[{"id":"saturated","name":"Saturated render","note":"Strongly coloured render: red, yellow, blue, magenta.","surface":"asphalt","walls":["#e27858","#f4c850","#5a9ac8","#d8508a"],"roofs":["#aa4a3c","#8a4a3a"],"accents":["#3c82aa","#e8b030","#5a9a5a"],"ground":"#e2dac8","road":"#66686c","pave":"#d6cebb","grass":"#7ca85a","canopies":["#4a8a48","#68a44e","#2f6a42"],"bloom":"#9a6ad0","water":"#5aa0c0","shadow":"#826e64"},{"id":"colonial","name":"Colonial pastel and clay tile","note":"Cream and pastel walls, clay tile, setts.","surface":"cobble","walls":["#ecd9b0","#d9b890","#c8d4c0","#e8c8b0"],"roofs":["#b0583c","#9a4a34"],"accents":["#3a6a8a","#a0452a","#d0a848"],"ground":"#dfd5bd","road":"#706c68","pave":"#d5c9ae","grass":"#86a45e","canopies":["#5a9048","#74a452","#3e7040"],"bloom":"#9a6ad0","water":"#5c9eb8","shadow":"#7e6c62"},{"id":"brick","name":"Exposed brick and concrete","note":"Exposed brick and raw concrete, muted.","surface":"asphalt","walls":["#a85a40","#c08060","#b8b0a0","#8a7a6a"],"roofs":["#6a6a6e","#8a4a38"],"accents":["#2f6a7a","#d09a3a","#5a8a5a"],"ground":"#d8d0be","road":"#5f6266","pave":"#cbc3ae","grass":"#7ea45c","canopies":["#58884a","#70a050","#3c6a42"],"bloom":"#9a6ad0","water":"#5c9ab4","shadow":"#706a62"}]},{"id":"na","name":"North American","places":"Chicago, Toronto","wall":"#965040","wall2":"#d6cebe","roof":"#54565c","ground":"#e0ded8","accent":"#5a7896","shadow":"#7a7c80","looks":[{"id":"brick","name":"Brick and clapboard","note":"Brick and painted clapboard, slate and shingle roofs.","surface":"asphalt","walls":["#965040","#d6cebe","#b8a888","#7a8aa0"],"roofs":["#54565c","#6a4a40"],"accents":["#5a7896","#a8402a","#d8b04a"],"ground":"#e0ded8","road":"#5a5d62","pave":"#d0cdc4","grass":"#7ea45e","canopies":["#5a8a48","#487040","#8aa850"],"bloom":null,"water":"#7aa8c0","shadow":"#7a7c80"},{"id":"siding","name":"Suburban siding","note":"Vinyl siding in beige, grey-blue and sage; concrete roads.","surface":"concrete","walls":["#d8d0b8","#b8c4cc","#e4e0d4","#a8b4a0"],"roofs":["#4a4e54","#5a524a"],"accents":["#3a5a7a","#8a3a32","#6a8a5a"],"ground":"#dedcd2","road":"#8c8f93","pave":"#cecbc0","grass":"#78a85a","canopies":["#548a46","#427040","#8cab52"],"bloom":null,"water":"#7eaac2","shadow":"#78787c"},{"id":"autumn","name":"Autumn brick and glass","note":"Brick and glass under autumn foliage.","surface":"asphalt","walls":["#9a5444","#b8b4aa","#d0c0a0","#7c8896"],"roofs":["#4e5258","#66544a"],"accents":["#b8402a","#d89a2a","#4a6a8a"],"ground":"#ded8cc","road":"#5c5f64","pave":"#cdc8bc","grass":"#98a460","canopies":["#c8602a","#d89a2a","#a8482a"],"bloom":null,"water":"#82a8be","shadow":"#7a7a7e"}]}]};
+  const canvas = document.getElementById('stage');
+  const ctx = canvas.getContext('2d');
+  const regSel = document.getElementById('region'), lookSel = document.getElementById('look');
+  FAMS.families.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.name + ' (' + f.places + ')'; regSel.appendChild(o); });
+  const INITIAL = {};                      // { region, look, reg, drive }, set when a page is built for a specific place
+  const EMBEDDED_SCENE = null;                // a scene object, or null for the placeholder
+  let state = Object.assign({ region: 'nw', look: 'brick', reg: 'colorfigures', seed: 11, playing: true }, INITIAL);
+  const famOf = () => FAMS.families.find(x => x.id === state.region);
+  const themeNow = () => A.theme(famOf(), state.look, state.reg);
+  function fillLooks() {
+    lookSel.innerHTML = ''; famOf().looks.forEach(k => { const o = document.createElement('option'); o.value = k.id; o.textContent = k.name; lookSel.appendChild(o); });
+    lookSel.value = state.look;
+  }
+  function showLook() { const t = themeNow(); document.getElementById('looknote').textContent = t.name + ': ' + t.note + ' Road surface: ' + t.surface + '. ' + (t.reg === 'formal' ? 'Formal register: Carbon neutral tokens, colour reserved for data.' : ''); }
+  // Camera and input: drag or A and D to pan, wheel or W and S to zoom. See camera.js and controls.js.
+  let scene = EMBEDDED_SCENE || V.makePlaceholderScene(7);
+  let sim = null;
+  const zoomEl = document.getElementById('zoom');
+  const cam = LabCamera.create({ bounds: V.sceneBounds(scene), width: canvas.clientWidth || 1200, height: canvas.clientHeight || 700 });
+  let sliderHeld = false;
+  const syncZoom = () => { if (!sliderHeld) zoomEl.value = cam.zoomFraction(); };       // the slider follows the camera, except while it is being dragged
+  const controls = LabControls.attach(canvas, cam, { onChange: syncZoom });
+  zoomEl.addEventListener('pointerdown', () => { sliderHeld = true; });
+  window.addEventListener('pointerup', () => { sliderHeld = false; });
+  zoomEl.oninput = () => cam.setZoomFraction(+zoomEl.value);
+  document.getElementById('fit').onclick = () => { cam.fitAll(); syncZoom(); };
+  window.labViewer = { camera: cam, controls };                                         // a handle for tests and for the browser console
+  function focusScene() { cam.setBounds(V.sceneBounds(scene)); syncZoom(); }
+  function showScene() {
+    const a = scene.area || {}, el = document.getElementById('attrib');
+    el.textContent = a.source === 'osm' ? (a.name + ': ' + a.attribution + '. The frame is rotated ' + a.rotation_deg + ' degrees so most buildings sit on the isometric axes; north points ' + a.north_on_screen_deg + ' degrees clockwise from the top of the screen. Drag or A and D to pan; wheel or W and S to zoom.') : 'Placeholder scene: synthetic, not a real place. Drag or A and D to pan; wheel or W and S to zoom.';
+  }
+  function loadScene(text) {
+    let s; const msg = document.getElementById('bstats');
+    try { s = JSON.parse(text); } catch (e) { msg.className = 'note err'; msg.textContent = 'Not a scene file: ' + e.message; return; }
+    const chk = V.validateScene(s);
+    if (!chk.ok) { msg.className = 'note err'; msg.textContent = 'Invalid scene: ' + chk.errors.slice(0, 3).join('; ') + (chk.errors.length > 3 ? ' (and ' + (chk.errors.length - 3) + ' more)' : ''); return; }
+    scene = s; msg.className = 'note'; rebuild(); focusScene(); showScene();
+    if (chk.warnings.length) msg.textContent += ' Warnings: ' + chk.warnings.join('; ') + '.';
+  }
+  document.getElementById('sceneFile').onchange = e => { const f = e.target.files && e.target.files[0]; if (f) { const r = new FileReader(); r.onload = () => loadScene(r.result); r.readAsText(f); } };
+  document.getElementById('scenePlaceholder').onclick = () => { scene = V.makePlaceholderScene(7); rebuild(); focusScene(); showScene(); };
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvas.clientWidth * dpr; canvas.height = canvas.clientHeight * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cam.resize(canvas.clientWidth || 1200, canvas.clientHeight || 700); syncZoom();
+  }
+  function rebuild() {
+    const drive = document.getElementById('drive').value;
+    sim = V.createSim(scene, { seed: state.seed, trafficScale: +document.getElementById('traffic').value,
+                               peopleScale: +document.getElementById('people').value, theme: themeNow(), region: state.region, drive: drive === 'auto' ? null : drive });
+    applyHooks();
+    const st2 = sim.stats, why = Object.keys(st2.reasons).map(k => k + ': ' + st2.reasons[k]).join('; ');
+    const kinds = {}; sim.trees.forEach(t => kinds[t.kind] = (kinds[t.kind] || 0) + 1);
+    document.getElementById('bstats').textContent = (scene.area && scene.area.source === 'osm' ? 'OSM scene. ' : '') + 'Buildings: ' + st2.assets + ' drawn from assets, ' + st2.extruded + ' as generic extrusions' + (why ? ' (' + why + ')' : '') + '. Trees: ' + sim.trees.length + ' (' + Object.keys(kinds).map(k => k + ' ' + kinds[k]).join(', ') + '). Overlays follow the Great Retrofit mapping on invented states.';
+    showLook();
+    resize();
+  }
+  // Illustrative data and motion. In a real replay these come from the model export, not from the agent seed.
+  function applyHooks() {
+    const mode = document.getElementById('bind').value, reg = A.REG[state.reg];
+    const states = ['to_do', 'queued', 'in_progress', 'finished', 'investor'];
+    if (mode === 'retrofit') {
+      const sc = A.scales.retrofitStates(reg);
+      V.bindData(sim, 'people', sc, a => a.outfits.map((o, i) => states[(a.seed + i * 3) % 5]));
+      V.bindData(sim, 'vehicles', sc, a => states[a.seed % 5]);
+    } else if (mode === 'seq') {
+      const sc = A.scales.sequential(['#f4e9c8', '#e9b44c', '#c8452f', '#6b1d3a'], [0, 1]);
+      V.bindData(sim, 'people', sc, a => a.outfits.map((o, i) => A.hash(a.seed + i) ));
+      V.bindData(sim, 'vehicles', sc, a => A.hash(a.seed));
+    } else { V.bindData(sim, 'people', null); V.bindData(sim, 'vehicles', null); }
+    // buildings: retrofit state (default style), a numeric output on the walls, or plain walls
+    const bm = document.getElementById('bbind').value;
+    if (bm === 'seq') { sim.buildingStyle = null; V.bindData(sim, 'buildings', A.scales.sequential(['#f4e9c8', '#e9b44c', '#c8452f', '#6b1d3a'], [0, 1]), e => A.hash(e.seed)); }
+    else if (bm === 'plain') { V.bindData(sim, 'buildings', null); sim.buildingStyle = () => ({ data: null, overlays: [] }); }
+    else { V.bindData(sim, 'buildings', null); sim.buildingStyle = null; }
+    if (document.getElementById('timetable').checked) {
+      // trams run a fixed out-and-back timetable along the boulevard: motion driven by a schedule, not a random walk
+      V.setMotion(sim, 'tram', { mode: 'path', loop: true, path: [[0, -40, 258], [70, 790, 258], [80, 790, 262], [150, -40, 262], [160, -40, 258]] });
+    } else V.setMotion(sim, 'tram', null);
+  }
+  function layers() { return { buildings: document.getElementById('lBuild').checked, vehicles: document.getElementById('lVeh').checked, people: document.getElementById('lPeople').checked }; }
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (state.playing) V.stepSim(sim, dt);
+    V.renderFrame(ctx, sim, cam.view(), layers());
+    requestAnimationFrame(frame);
+  }
+  regSel.onchange = e => { state.region = e.target.value; state.look = famOf().looks[0].id; fillLooks(); rebuild(); };
+  lookSel.onchange = e => { state.look = e.target.value; V.setTheme(sim, themeNow()); showLook(); applyHooks(); };
+  document.getElementById('drive').onchange = rebuild;
+  document.getElementById('bind').onchange = () => { applyHooks(); };
+  document.getElementById('timetable').onchange = () => { applyHooks(); };
+  document.getElementById('bbind').onchange = () => { applyHooks(); };
+  document.getElementById('rC').onclick = () => { state.reg = 'colorfigures'; V.setTheme(sim, themeNow()); setBtn(); showLook(); applyHooks(); };
+  document.getElementById('rF').onclick = () => { state.reg = 'formal'; V.setTheme(sim, themeNow()); setBtn(); showLook(); applyHooks(); };
+  function setBtn() { document.getElementById('rC').classList.toggle('on', state.reg === 'colorfigures'); document.getElementById('rF').classList.toggle('on', state.reg === 'formal'); }
+  document.getElementById('traffic').oninput = rebuild;
+  document.getElementById('people').oninput = rebuild;
+  document.getElementById('play').onclick = e => { state.playing = !state.playing; e.target.textContent = state.playing ? 'Pause' : 'Play'; e.target.classList.toggle('on', state.playing); };
+  document.getElementById('reseed').onclick = () => { state.seed = (Math.random() * 1e6) | 0; rebuild(); };
+  window.addEventListener('resize', resize);
+  regSel.value = state.region; fillLooks(); document.getElementById('drive').value = INITIAL.drive || 'auto'; setBtn();
+  focusScene(); showScene();
+  rebuild();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body></html>

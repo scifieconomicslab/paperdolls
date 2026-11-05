@@ -1,0 +1,273 @@
+# The intake question bank. `lab-render intake` reads this file; docs/intake-questions.md is generated from it.
+#
+# Fields
+#   id           Dotted path into the project file (render.yaml). "look.region" is stored as look: {region: ...}.
+#   group        Section heading, for the decision table.
+#   label        Short name for the decision table.
+#   type         choice | text | int | ints | floats4 | path | kv
+#   ask          The sentence to say to the user, as written.
+#   why          One line that explains why the question is asked. Say it after the question, or when the user asks.
+#   note         An instruction for the model. Never read it to the user.
+#   when         Ask only if every listed answer matches. A value can be one option or a list.
+#   always_ask   Ask even when a default exists. The default is offered as a suggestion.
+#   default      Applied silently when the question is not always_ask. The decision table lists every default so the user can change it.
+#   options_from regions | looks | registers: the options come from assets/palettes.json or from earlier answers.
+#   min, max     Bounds for int, and for the length of text.
+#   example      A valid answer, for the model to copy the shape of.
+version: 1
+
+groups:
+  goal: What to make
+  model: The model
+  place: The place
+  look: The look
+  output: Output
+
+questions:
+  - id: goal
+    label: Goal
+    group: goal
+    type: choice
+    always_ask: true
+    ask: "What do you want to make?"
+    why: "The answer decides which questions come next."
+    note: "If the user wants a simulation drawn on a real map, say that this is not built yet (the model's buildings are not linked to real footprints) and ask which of the two they want first."
+    options:
+      - {value: model_replay, label: "A replay of one simulation run", detail: "Keyframes and a single replay page. Buildings sit on a generated grid, not on a real map."}
+      - {value: place_scene, label: "A scene of a real place", detail: "Built from OpenStreetMap and opened in the viewer. It does not show model output yet."}
+
+  - id: name
+    label: Project name
+    group: goal
+    type: text
+    always_ask: true
+    min: 3
+    max: 80
+    ask: "What should the project be called?"
+    why: "The name goes in page titles and file names."
+    example: "Jette retrofit, base case"
+
+  - id: audience
+    label: Audience
+    group: goal
+    type: choice
+    always_ask: true
+    ask: "Who will look at the result?"
+    why: "It sets the suggested style: formal for planning documents, colorfigures for explainers."
+    options:
+      - {value: policymakers, label: "Policymakers", detail: "Print, briefings and planning documents."}
+      - {value: researchers, label: "Researchers", detail: "Colleagues who will read the method as well as the picture."}
+      - {value: public, label: "The general public", detail: "Explainers and talks."}
+
+  # ---------------- the model ----------------
+  - id: model.source
+    label: Model
+    group: model
+    type: choice
+    when: {goal: model_replay}
+    always_ask: true
+    ask: "Which model should be replayed?"
+    why: "The replay is a picture of exported model state. It never recomputes the economics."
+    note: "Choose vendored only if `lab-render doctor` reports the Great Retrofit model as present."
+    options:
+      - {value: vendored, label: "The Great Retrofit v2 model that ships with the plugin", detail: "Needs vendor/greatretrofit_v2/model.py. See the licence note in that folder."}
+      - {value: file, label: "Another model file", detail: "It must follow docs/model-interface.md."}
+
+  - id: model.path
+    label: Model file
+    group: model
+    type: path
+    when: {goal: model_replay, model.source: file}
+    always_ask: true
+    suffix: .py
+    ask: "What is the path to the model file?"
+    why: "The plugin loads this file and calls run_simulation with a read-only hook."
+    example: "models/my_model.py"
+
+  - id: model.params.n
+    label: Buildings (n)
+    group: model
+    type: int
+    when: {goal: model_replay}
+    always_ask: true
+    min: 1
+    max: 20000
+    ask: "How many buildings need retrofit (the model parameter n)?"
+    why: "It sets how many buildings are drawn. Runs with more than 2,000 take noticeably longer."
+    example: "120"
+
+  - id: model.params.n_households
+    label: Households
+    group: model
+    type: int
+    when: {goal: model_replay, model.source: vendored}
+    default_from: n
+    min: 1
+    max: 20000
+    ask: "How many households own those buildings (n_households)?"
+    why: "The Great Retrofit model gives each building to a household. It defaults to the number of buildings."
+
+  - id: model.params.run_time
+    label: Weeks in the run
+    group: model
+    type: int
+    when: {goal: model_replay}
+    always_ask: true
+    min: 2
+    max: 5200
+    ask: "How many weeks should the run last (run_time)?"
+    why: "One step of the model is one week. 520 weeks is ten years."
+    note: "Rough cost: 500 households for 520 weeks takes about 3 seconds. 2,000 households for 1,040 weeks takes about 18 seconds."
+    example: "260"
+
+  - id: model.params.seed
+    label: Random seed
+    group: model
+    type: int
+    when: {goal: model_replay}
+    default: 42
+    min: 0
+    max: 2147483647
+    ask: "Which random seed should the run use?"
+    why: "The same seed gives the same run, so the picture can be reproduced."
+
+  - id: model.params.overrides
+    label: Other parameters
+    group: model
+    type: kv
+    when: {goal: model_replay}
+    default: none
+    ask: "Is there any other model parameter to change from its default? Give name=value pairs, or say none."
+    why: "Parameter names are checked against the model before they are saved."
+    example: "enable_investors=false, build_cost=180000"
+
+  - id: replay.weeks
+    label: Keyframe weeks
+    group: model
+    type: ints
+    when: {goal: model_replay}
+    always_ask: true
+    min: 2
+    max: 8
+    ask: "Which weeks should be shown as keyframes?"
+    why: "Each keyframe becomes a frame in the replay. Two to eight is the useful range."
+    note: "Offer the suggested weeks first. Weeks count from 0 to run_time minus 1."
+    example: "0, 26, 78, 259"
+
+  # ---------------- the place ----------------
+  - id: place.kind
+    label: How the place is found
+    group: place
+    type: choice
+    when: {goal: place_scene}
+    always_ask: true
+    ask: "How should the place be found?"
+    why: "Each choice needs different details, and a named area clips most cleanly."
+    options:
+      - {value: osm_relation, label: "A named area, by OpenStreetMap relation id", detail: "Cleanest: the map is cut to the boundary."}
+      - {value: bbox, label: "A box on the map", detail: "South, west, north and east, in degrees."}
+      - {value: extract_file, label: "An OpenStreetMap file I already have", detail: "Overpass JSON, OSM XML or GeoJSON."}
+      - {value: scene_file, label: "A scene.json made by lab-render earlier", detail: "Skips the ingest."}
+      - {value: placeholder, label: "No place yet", detail: "Uses the synthetic placeholder scene."}
+
+  - id: place.relation
+    label: OSM relation id
+    group: place
+    type: int
+    when: {goal: place_scene, place.kind: osm_relation}
+    always_ask: true
+    min: 1
+    max: 99999999999
+    ask: "What is the OpenStreetMap relation id?"
+    why: "It names the boundary to cut the map to."
+    note: "The id is the number in the address of the place's page on openstreetmap.org, for example .../relation/58258 for Jette. Offer to help find it if the user does not know."
+    example: "58258"
+
+  - id: place.bbox
+    label: Box (S, W, N, E)
+    group: place
+    type: floats4
+    when: {goal: place_scene, place.kind: bbox}
+    always_ask: true
+    ask: "What are the south, west, north and east edges of the box, in degrees?"
+    why: "The ingest keeps what lies inside the box."
+    note: "Latitude runs from -90 to 90 and longitude from -180 to 180. Keep the box under about 5 km on a side, or the scene gets slow."
+    example: "50.870, 4.310, 50.900, 4.360"
+
+  - id: place.extract_path
+    label: OSM file
+    group: place
+    type: path
+    when: {goal: place_scene, place.kind: extract_file}
+    always_ask: true
+    ask: "What is the path to the OpenStreetMap file?"
+    why: "The ingest reads it and writes the scene."
+    example: "data/jette.json"
+
+  - id: place.scene_path
+    label: Scene file
+    group: place
+    type: path
+    when: {goal: place_scene, place.kind: scene_file}
+    always_ask: true
+    suffix: .json
+    ask: "What is the path to the scene file?"
+    why: "The viewer loads it directly."
+    example: "out/scene.json"
+
+  # ---------------- the look ----------------
+  - id: look.region
+    label: Region
+    group: look
+    type: choice
+    options_from: regions
+    always_ask: true
+    ask: "Which region fits the place best?"
+    why: "A region sets the vehicles, trees, building styles and drive side. It is the only place choice; there is no separate palette choice."
+    note: "There are twelve options. Print them as a numbered list and ask for the number. Every regional detail is a proposal that local people should check."
+
+  - id: look.look
+    label: Look
+    group: look
+    type: choice
+    options_from: looks
+    when: {goal: place_scene}
+    always_ask: true
+    ask: "Which look should the buildings and streets have?"
+    why: "A look is a colour scheme within the region, named for its materials and light."
+    note: "The colours were chosen by eye, not sampled from photographs."
+
+  - id: look.register
+    label: Style
+    group: look
+    type: choice
+    options_from: registers
+    always_ask: true
+    ask: "Which drawing style?"
+    why: "Colorfigures keeps the region's colours with hand-inked lines. Formal is a grey technical drawing where colour is reserved for data."
+    note: "Offer the suggested style first. Formal uses Carbon grey tokens, and some of them are still to be checked against IBM's documentation."
+
+  - id: look.drive
+    label: Drive side
+    group: look
+    type: choice
+    when: {goal: place_scene}
+    default: auto
+    always_ask_when: {look.region: [se, ea, sb]}
+    ask: "Which side of the road does traffic drive on?"
+    why: "Countries in this region differ, so the plugin does not guess."
+    options:
+      - {value: auto, label: "Use the region's default", detail: "Right-hand traffic for most regions."}
+      - {value: right, label: "Right", detail: ""}
+      - {value: left, label: "Left", detail: ""}
+
+  # ---------------- output ----------------
+  - id: output.dir
+    label: Output folder
+    group: output
+    type: text
+    default: lab-render-out
+    min: 1
+    max: 120
+    ask: "Which folder should the results go in?"
+    why: "Every file the plugin writes goes there."
