@@ -126,7 +126,7 @@ test('data scales map outputs to colours and produce a legend', () => {
 
 // ---- scene tests ----
 const scene = V.makePlaceholderScene(7);
-function sim(region, drive, regId, look) { return V.createSim(scene, { seed: 5, trafficScale: 1, peopleScale: 1, theme: A.theme(pal.families.find(f => f.id === region), look, regId || 'colorfigures'), region, drive, buildMs: Infinity }); }      // tests count builds; the time budget has its own test
+function sim(region, drive, regId, look) { return V.createSim(scene, { seed: 5, trafficScale: 1, peopleScale: 1, theme: A.theme(pal.families.find(f => f.id === region), look, regId || 'colorfigures'), region, drive, buildMs: Infinity, layerMs: Infinity, prewarmMs: Infinity }); }      // tests count builds; the time budget has its own test
 
 test('sim classes agents by group and network, and keeps them on suitable edges', () => {
   const s = sim('nw', null);
@@ -202,7 +202,7 @@ test('occlusion culling draws the same picture pixel for pixel, skips hidden ite
   const scene = V.makePlaceholderScene(7); let seed = 12345;
   scene.buildings.forEach(b => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; b.levels = 4 + (seed % 5); if (['shed', 'villa', 'terrace'].includes(b.archetype)) b.archetype = 'block'; });
   const W = 1200, H = 700, B = V.sceneBounds(scene), cx = (B[0] + B[2]) / 2, cy = (B[1] + B[3]) / 2, theme = A.theme(fam, undefined, 'colorfigures');
-  const mk = occ => { const s = V.createSim(scene, { seed: 5, theme, region: fam.id, occlusion: occ, buildMs: Infinity }); for (let i = 0; i < 40; i++) V.stepSim(s, 0.1); return s; };
+  const mk = occ => { const s = V.createSim(scene, { seed: 5, theme, region: fam.id, occlusion: occ, buildMs: Infinity, layerMs: Infinity, prewarmMs: Infinity }); for (let i = 0; i < 40; i++) V.stepSim(s, 0.1); return s; };
   assert.strictEqual(V.createSim(scene, { seed: 5, theme, region: fam.id }).opts.occlusion, undefined, 'occlusion must be opt-in');
   let culled = 0;
   for (const k of [1.7, 3]) {
@@ -222,7 +222,7 @@ test('panning blits world-anchored layers: no repaint inside the margin, and the
   let createCanvas; try { createCanvas = require(process.env.NODE_CANVAS || 'canvas').createCanvas; } catch (e) { console.log('SKIP panning (node canvas not installed)'); return; }
   A.sprites.factory = (w, h) => createCanvas(w, h);
   const scene = V.makePlaceholderScene(7), W = 900, H = 600, B = V.sceneBounds(scene), cx = (B[0] + B[2]) / 2, cy = (B[1] + B[3]) / 2, theme = A.theme(fam, undefined, 'colorfigures');
-  const mk = () => { const s = V.createSim(scene, { seed: 5, theme, region: fam.id, buildMs: Infinity }); for (let i = 0; i < 40; i++) V.stepSim(s, 0.1); return s; };
+  const mk = () => { const s = V.createSim(scene, { seed: 5, theme, region: fam.id, buildMs: Infinity, layerMs: Infinity, prewarmMs: Infinity }); for (let i = 0; i < 40; i++) V.stepSim(s, 0.1); return s; };
   const view = (k, dx, dy) => ({ w: W, h: H, scale: k, ox: W / 2 - (cx - cy) * k * 0.8660254 + dx, oy: H / 2 - (cx + cy) * k * 0.5 + dy });
   const frame = (s, v, n) => { const c = createCanvas(W, H).getContext('2d'); for (let i = 0; i < n; i++) V.renderFrame(c, s, v, {}); return c.getImageData(0, 0, W, H).data; };
   const same = (a, b, what) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) assert.fail(what + ': pixel ' + (i >> 2) + ' differs'); };
@@ -246,7 +246,7 @@ test('a view that has stopped is exact after a fractional pan or a zoom', () => 
   let createCanvas; try { createCanvas = require(process.env.NODE_CANVAS || 'canvas').createCanvas; } catch (e) { console.log('SKIP settling (node canvas not installed)'); return; }
   A.sprites.factory = (w, h) => createCanvas(w, h);
   const scene = V.makePlaceholderScene(7), W = 900, H = 600, B = V.sceneBounds(scene), cx = (B[0] + B[2]) / 2, cy = (B[1] + B[3]) / 2, theme = A.theme(fam, undefined, 'colorfigures');
-  const mk = () => { const s = V.createSim(scene, { seed: 5, theme, region: fam.id, buildMs: Infinity }); for (let i = 0; i < 40; i++) V.stepSim(s, 0.1); return s; };
+  const mk = () => { const s = V.createSim(scene, { seed: 5, theme, region: fam.id, buildMs: Infinity, layerMs: Infinity, prewarmMs: Infinity }); for (let i = 0; i < 40; i++) V.stepSim(s, 0.1); return s; };
   const view = (k, dx, dy) => ({ w: W, h: H, scale: k, ox: W / 2 - (cx - cy) * k * 0.8660254 + dx, oy: H / 2 - (cx + cy) * k * 0.5 + dy });
   const settle = (s, c, v) => { for (let i = 0; i < 40; i++) V.renderFrame(c, s, v, {}); return c.getImageData(0, 0, W, H).data; };
   for (const k of [0.7, 1.7]) {

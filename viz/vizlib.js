@@ -726,7 +726,7 @@
       if (finish && o.fog) drawFog(ctx, sim.theme, view);
       const warm = sim._warm;
       A.sprites.warmBuilds = 0;
-      if (A.sprites.collect && A.sprites.builds === 0 && ps === 1) { A.sprites.warmBuilds = A.prewarm(view.scale, PREWARM_PER_FRAME, PREWARM_MS); warm.done = A.sprites.warmBuilds === 0; }
+      if (A.sprites.collect && A.sprites.builds === 0 && ps === 1) { A.sprites.warmBuilds = A.prewarm(view.scale, PREWARM_PER_FRAME, sim.opts.prewarmMs === undefined ? PREWARM_MS : sim.opts.prewarmMs); warm.done = A.sprites.warmBuilds === 0; }
       A.sprites.collect = null;
     } finally { A.sprites.maxBuilds = Infinity; A.sprites.maxZoomBuilds = Infinity; A.sprites.maxBuildMs = Infinity; }
   }
