@@ -754,4 +754,21 @@ test('layer canvases are reused: repainting the ground again and again allocates
   });
 })();
 
+test('pre-rendering never builds a huge sprite, and does not run while the view is moving', () => {
+  let createCanvas; try { createCanvas = require(process.env.NODE_CANVAS || 'canvas').createCanvas; } catch (e) { console.log('SKIP (node canvas not installed)'); return; }
+  A.sprites.factory = (w, h) => createCanvas(w, h); A.sprites.cache.clear(); A.sprites.pixels = 0; A.sprites.index.clear();
+  const W = 900, H = 600, mk = (k, dx) => ({ w: W, h: H, scale: k, ox: W / 2 - (330 - 262) * k * 0.8660254 + (dx || 0), oy: H / 2 - (330 + 262) * k * 0.5 });
+  const s = sim('nw'), c = createCanvas(W, H).getContext('2d'); s.opts.prewarm = true;
+  for (let i = 0; i < 120; i++) V.renderFrame(c, s, mk(11), {});                           // sharp and still at 11 px per metre: the next level up is 32 px per metre
+  const warmed = [...A.sprites.cache.values()].filter(sp => sp.warm);
+  assert(A.PREWARM_MAX_PX > 0, 'the cap is exported'); assert(warmed.every(sp => sp.px <= A.PREWARM_MAX_PX), 'the biggest pre-rendered sprite is ' + Math.max(0, ...warmed.map(sp => sp.px)) + ' pixels, the cap is ' + A.PREWARM_MAX_PX);
+  // while the view is panning, nothing is pre-rendered
+  A.sprites.cache.clear(); A.sprites.index.clear(); A.sprites.pixels = 0; const s2 = sim('nw'), c2 = createCanvas(W, H).getContext('2d'); s2.opts.prewarm = true;
+  for (let i = 0; i < 60; i++) V.renderFrame(c2, s2, mk(1.5), {});
+  const during = []; for (let i = 0; i < 40; i++) { V.renderFrame(c2, s2, mk(1.5, 7 * (i + 1)), {}); during.push(A.sprites.warmBuilds || 0); }
+  assert.strictEqual(Math.max(...during), 0, 'sprites pre-rendered while panning: ' + Math.max(...during));
+  const after = []; for (let i = 0; i < 40; i++) { V.renderFrame(c2, s2, mk(1.5, 7 * 40), {}); after.push(A.sprites.warmBuilds || 0); }
+  assert(Math.max(...after) > 0, 'and it starts again once the view has been still for a few frames'); A.sprites.exact = false;
+});
+
 console.log(passed + ' passed' + (process.exitCode ? ', with failures' : ''));

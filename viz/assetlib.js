@@ -366,15 +366,19 @@
   // Pre-render and hold: while the view is still, build the sprites for the zoom levels either side of the current one (whole octaves, the same
   // ones a zoom draws), for the sprites seen in this frame, a few per frame. A zoom then finds them ready and only downscales. Returns how many it
   // built, so 0 means nothing is missing. sprites.collect is the map of sprites the frame drew (set by the renderer while this is wanted).
+  // A build costs in proportion to its pixels: at 11 px per metre on a 2x screen the next level up is 64 device px per metre and one building sprite is over a
+  // million pixels, 100 ms or more, and a frame always builds at least one. Pre-rendering skips anything over this many pixels.
+  const PREWARM_MAX_PX = 500000;
   function prewarm(scale, budget, budgetMs) {
     if (!sprites.collect || !sprites.factory) return 0;
     const q = sprites.dpr || 1, lev = Math.pow(2, Math.ceil(Math.log2(Math.max(1, scale * q)))), levels = [lev, lev * 2, lev / 2].filter(l => l >= 1 && l <= 64);
     let n = 0; const t0 = clock();
     for (const [asset, colours, reg] of sprites.collect.values()) for (const L of levels) {
+      const bb = asset.bbox; if ((Math.ceil((bb.maxX - bb.minX) * L) + 4) * (Math.ceil((bb.maxY - bb.minY) * L) + 4) > PREWARM_MAX_PX) continue;      // too big to build in the background
       const kk = keysFor(asset, colours, reg, L);
       if (sprites.cache.has(kk.key)) continue;
       if (n >= budget || (n > 0 && clock() - t0 >= budgetMs)) return n;
-      buildSprite(asset, colours, reg, L, L / q, kk); n++;
+      buildSprite(asset, colours, reg, L, L / q, kk).warm = true; n++;
     }
     return n;
   }
@@ -847,7 +851,7 @@
     }
   };
 
-  root.AssetLib = { quantise, prewarm, DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, spritePlacement, sprites, buildAsset,
+  root.AssetLib = { quantise, prewarm, PREWARM_MAX_PX, DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, spritePlacement, sprites, buildAsset,
                     makeOutfit, vehicleTint, pickFleet, pickPerson, vehicleColours, personColours, flagsOf, scales, mix, shade, hash, hashStr, isData, faceOf,
                     registerGroup, baseColours, pickWeighted,
                     CARBON, theme, asTheme, resolveLook, snapTo, toGray };

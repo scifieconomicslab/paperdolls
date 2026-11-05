@@ -699,6 +699,7 @@
   const SPRITE_BUILDS_PER_FRAME = 60;
   const BUILD_MS_PER_FRAME = 8;                      // wall time a frame may spend building sprites (at least one is always built)
   const PREWARM_MS = 4;                              // and pre-rendering neighbouring levels while the view is still
+  const PREWARM_STILL_FRAMES = 8;                    // frames the view must not have moved before neighbouring levels are pre-rendered
   const PREWARM_PER_FRAME = 12;                      // while the view is still and fully sharp: sprites pre-rendered for the neighbouring zoom levels, per frame
   const ZOOM_BUILDS_PER_FRAME = 16;                  // while the zoom is changing: about 6 ms of sprite building, then scaled sprites are used
   const OCCLUSION_MIN_ITEMS = 300;
@@ -754,7 +755,9 @@
     // pre-render and hold: once this scale is sharp, the frame notes the sprites it draws and renderFrame builds the neighbouring levels for them
     const warm = sim._warm || (sim._warm = {});
     if (warm.scale !== view.scale) { warm.scale = view.scale; warm.done = false; }
-    A.sprites.collect = (A.sprites.exact && !warm.done && sim.opts.prewarm !== false) ? new Map() : null;
+    // only a view that is truly still is pre-rendered for: a pan costs enough already, and the sprites it reveals are a new set to look at once it stops
+    if (warm.ox !== view.ox || warm.oy !== view.oy) { warm.ox = view.ox; warm.oy = view.oy; warm.still = 0; warm.done = false; } else warm.still = (warm.still || 0) + 1;
+    A.sprites.collect = (A.sprites.exact && !warm.done && warm.still >= PREWARM_STILL_FRAMES && sim.opts.prewarm !== false) ? new Map() : null;
     // the whole view (scale and offset) unchanged for a few frames: cached layers are then repainted exactly if they are off by a fraction of a pixel
     if (zs.ox === view.ox && zs.oy === view.oy && zs.vscale === view.scale) zs.stillView = (zs.stillView || 0) + 1; else { zs.ox = view.ox; zs.oy = view.oy; zs.vscale = view.scale; zs.stillView = 0; }
     const detail = sim.opts.detail === true && pal.reg !== 'formal';
