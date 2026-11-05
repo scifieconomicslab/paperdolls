@@ -1,10 +1,8 @@
 # paperdolls
 
-<video src="docs/images/tour.mp4" poster="docs/images/tour-poster.jpg" width="100%" controls muted loop autoplay playsinline>
-<a href="docs/images/tour.mp4"><img src="docs/images/tour-poster.jpg" alt="A 28-second tour of the viewer: zooming from the whole synthetic city to street level and back, with the detail pass and fog on"></a>
-</video>
+![A 28-second tour of the viewer: zooming from the whole synthetic city to street level and back, with the detail pass and fog on](docs/images/tour.webp)
 
-*A 28-second tour of the viewer on the synthetic placeholder area (South Asian tropical region, Whitewash and clay tile look) with the detail pass and fog on. It was drawn frame by frame at full quality by [viz/record_tour.js](viz/record_tour.js), not screen-recorded, so it is a steady 30 frames a second; the live viewer's speed is a separate matter (see [viz/README.md](viz/README.md)).*
+*A 28-second tour of the viewer on the synthetic placeholder area (South Asian tropical region, Whitewash and clay tile look) with the detail pass and fog on. It was drawn frame by frame at full quality by [viz/record_tour.js](viz/record_tour.js), not screen-recorded, so it is a steady 30 frames a second ([full-quality 1280 by 720 mp4](docs/images/tour.mp4)); the live viewer's speed is a separate matter (see [viz/README.md](viz/README.md)).*
 
 A Claude plugin from the Sci-Fi Economics Lab. It draws agent-based economic simulations and real places as isometric pictures, in a hand-inked style (colorfigures) or a grey technical style (formal), for policy audiences.
 
