@@ -713,4 +713,45 @@ test('layer canvases are reused: repainting the ground again and again allocates
   assert.strictEqual(diff, 0, 'a reused canvas gives the same picture as a fresh one: ' + diff + ' bytes differ'); A.sprites.exact = false;
 });
 
+// ---- people stay off the buildings ----
+(function () {
+  const inPoly = (x, y, f) => { let ins = false; for (let i = 0, j = f.length - 1; i < f.length; j = i++) { const a = f[i], b = f[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) ins = !ins; } return ins; };
+  const rectP = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+  const road = (id, pts, cls) => ({ id, class: cls || 'local', pts });
+  const walkScene = (roads, buildings) => ({ roads, buildings: buildings.map((f, i) => ({ id: i, footprint: f, levels: 3 })), landuse: [], trees: [] });
+  const walk = (scene, steps) => {
+    const s = V.createSim(scene, { seed: 5, theme: A.theme(pal.families.find(f => f.id === 'nw'), undefined, 'colorfigures'), region: 'nw', peopleScale: 6 });
+    const people = s.agents.filter(a => a.group === 'people'), pts = [];
+    for (let i = 0; i < steps; i++) { V.stepSim(s, 0.25); for (const a of people) { const p = V.agentPose(a, s); pts.push({ x: p.x, y: p.y, edge: a.edge }); } }
+    return { s, people, pts };
+  };
+  test('people walk on the side of the road where the pavement is clear of buildings', () => {
+    // a local street along y = 0 (6 m wide, pavement 2.6 m): buildings on the north side stand on the pavement strip, the south side is clear
+    const sc = walkScene([road('a', [[0, 0], [300, 0]])], [rectP(5, -30, 295, -3.2), rectP(5, 12, 295, 40)]);
+    const { people, pts } = walk(sc, 200);
+    assert(people.length > 10, 'there are people: ' + people.length);
+    const bad = pts.filter(p => sc.buildings.some(b => inPoly(p.x, p.y, b.footprint)));
+    assert.strictEqual(bad.length, 0, bad.length + ' of ' + pts.length + ' positions are inside a building');
+    assert(pts.every(p => p.y > 0), 'all on the clear (south) side of the street');
+  });
+  test('a road whose pavements are blocked on both sides is not walked when there is another way', () => {
+    const blocked = road('b', [[0, 0], [300, 0]]), clear = road('c', [[0, 80], [300, 80]]), link = road('l', [[0, 0], [0, 80]]);
+    const sc = walkScene([blocked, clear, link], [rectP(8, -30, 295, -3.2), rectP(8, 3.2, 295, 30)]);
+    const { pts } = walk(sc, 300);
+    const onBlocked = pts.filter(p => p.edge.roadId === 'b');
+    assert.strictEqual(onBlocked.length, 0, onBlocked.length + ' of ' + pts.length + ' positions are on the blocked street');
+    assert(pts.filter(p => p.edge.roadId === 'c').length > 100, 'and they use the clear one');
+  });
+  test('on the synthetic placeholder and on a street with a clear pavement nobody is moved from the middle of it', () => {
+    const sc = walkScene([road('a', [[0, 0], [300, 0]])], [rectP(5, -40, 295, -14), rectP(5, 14, 295, 40)]);
+    const { s, people } = walk(sc, 5); const p = V.agentPose(people[0], s), e = people[0].edge, off = Math.abs(p.y - e.ay);
+    assert(Math.abs(off - (3 + 2.6 / 2)) < 1e-9, 'clear pavement: the middle of it, as before: ' + off);
+  });
+  test('the placeholder scene: people are inside a building less than half of one percent of the time', () => {
+    const sc = V.makePlaceholderScene(7), { pts } = walk(sc, 120);
+    const bad = pts.filter(p => sc.buildings.some(b => { const f = b.footprint; return Math.abs(p.x - f[0][0]) < 80 && inPoly(p.x, p.y, f); }));
+    assert(bad.length / pts.length < 0.005, (100 * bad.length / pts.length).toFixed(2) + '% of positions are inside a building');
+  });
+})();
+
 console.log(passed + ' passed' + (process.exitCode ? ', with failures' : ''));

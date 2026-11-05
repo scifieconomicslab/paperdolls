@@ -1788,6 +1788,48 @@
     return { nodes, edges };
   }
 
+  // ---------- where people may walk ----------
+  // A person is drawn on the pavement, at a fixed offset from the road's centre line. Nothing says the pavement is free: in a dense scene (and in the
+  // synthetic placeholder, on the tram boulevard) buildings stand on it, and people were drawn walking through or along the walls. So each pavement edge
+  // is checked against the building footprints, per side and at three offsets across the pavement: a person takes the clearest side and offset, and an
+  // edge that is blocked on both sides is not walked at all while there is another way.
+  const WALK_MARGIN = 0.4, WALK_OK = 0.7;            // metres a person keeps from a wall; the share of an edge that must be clear to use it
+  function buildingIndex(scene) {
+    const cell = 25, grid = new Map(), boxes = [];
+    for (const b of scene.buildings) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const p of b.footprint) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+      x0 -= WALK_MARGIN; y0 -= WALK_MARGIN; x1 += WALK_MARGIN; y1 += WALK_MARGIN;
+      const bx = { f: b.footprint, x0, y0, x1, y1 };
+      for (let cx = Math.floor(x0 / cell); cx <= Math.floor(x1 / cell); cx++) for (let cy = Math.floor(y0 / cell); cy <= Math.floor(y1 / cell); cy++) {
+        const k = cx + ',' + cy, l = grid.get(k); if (l) l.push(bx); else grid.set(k, [bx]);
+      }
+    }
+    const inside = (x, y, f) => { let ins = false; for (let i = 0, j = f.length - 1; i < f.length; j = i++) { const a = f[i], c = f[j]; if ((a[1] > y) !== (c[1] > y) && x < (c[0] - a[0]) * (y - a[1]) / (c[1] - a[1]) + a[0]) ins = !ins; } return ins; };
+    const near = (x, y, f) => { for (let i = 0; i < f.length; i++) { const a = f[i], c = f[(i + 1) % f.length], dx = c[0] - a[0], dy = c[1] - a[1], L = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / L)); if (Math.hypot(x - (a[0] + t * dx), y - (a[1] + t * dy)) < WALK_MARGIN) return true; } return false; };
+    return { blocked(x, y) { const l = grid.get(Math.floor(x / cell) + ',' + Math.floor(y / cell)); if (!l) return false; for (const b of l) if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1 && (inside(x, y, b.f) || near(x, y, b.f))) return true; return false; } };
+  }
+  // For an edge: clear[0] and clear[1] are the shares of it that are free of buildings on the left (+) and right (-) of its direction, at the best of
+  // three offsets; off[0] and off[1] are those offsets from the centre line; best is the larger share.
+  function walkInfo(e, idx) {
+    const kerb = e.width / 2, pav = e.pavement, ux = (e.bx - e.ax) / e.len, uy = (e.by - e.ay) / e.len, n = Math.max(2, Math.ceil(e.len / 2));
+    const offs = pav > 1.4 ? [kerb + pav * 0.5, kerb + 0.5, kerb + pav - 0.5] : [kerb + pav * 0.5], w = { clear: [0, 0], off: [offs[0], offs[0]], best: 0 };
+    for (const [i, sg] of [[0, 1], [1, -1]]) {
+      for (const o of offs) {
+        let ok = 0; for (let k = 0; k <= n; k++) { const t = k / n; if (!idx.blocked(e.ax + (e.bx - e.ax) * t - uy * sg * o, e.ay + (e.by - e.ay) * t + ux * sg * o)) ok++; }
+        const f = ok / (n + 1); if (f > w.clear[i] + 1e-9) { w.clear[i] = f; w.off[i] = o; }          // ties keep the earlier offset, so the middle of a clear pavement as before
+      }
+    }
+    w.best = Math.max(w.clear[0], w.clear[1]); return w;
+  }
+  const isWalkable = e => !e.walk || e.walk.best >= WALK_OK;
+  // a person walks on the side of the road (a.side, as seen from the direction of travel) that is clearer on this edge
+  function settleSide(a) {
+    const w = a.edge.walk; if (!w) return;
+    const i = a.dir * a.side > 0 ? 0 : 1;
+    if (w.clear[i] < WALK_OK && w.clear[1 - i] > w.clear[i]) a.side = -a.side;
+  }
+
   // ---------- sim ----------
   // Agents are classed: { group: 'vehicles' | 'people', kind, network, edge, dir, s, side, speed, seed, outfits?, tint?, rider?, motion? }.
   // Motion is decorative by default (a random walk on the network). A class can be given non-decorative motion with setMotion().
@@ -1812,7 +1854,9 @@
     const check = validateScene(scene);
     if (!check.ok) throw new Error('invalid scene: ' + check.errors.slice(0, 3).join('; ') + (check.errors.length > 3 ? ' (and ' + (check.errors.length - 3) + ' more)' : ''));
     const net = buildNetwork(scene);
+    const bidx = buildingIndex(scene); for (const e of net.edges) if (e.pavement > 0) e.walk = walkInfo(e, bidx);
     const candBy = {}; for (const nw of ['road', 'cycle', 'rail', 'pavement']) candBy[nw] = net.edges.filter(e => edgeOk(e, nw));
+    { const ok = candBy.pavement.filter(isWalkable); if (ok.length) candBy.pavement = ok; }      // people start only where a pavement is clear (all of them if none is)
     const totalLen = net.edges.reduce((s, e) => s + e.len, 0), density = Math.max(1, totalLen / 7500);   // agents scale with the network: 7.5 km is the placeholder's size
     const R = rng(opts.seed);
     const agents = [];
@@ -1823,6 +1867,7 @@
       const edge = pick(cands), seed = (agents.length + 1) * 7919 + opts.seed;
       const a = Object.assign({ group, kind, network: def.network, edge, dir: R() < 0.5 ? 1 : -1, s: R() * edge.len, side: R() < 0.5 ? 1 : -1,
                                 speed: (group === 'people' ? 1.3 : (SPEED[kind] || 8)) * (0.85 + R() * 0.3), seed }, extra || {});
+      if (group === 'people') settleSide(a);
       agents.push(a); return a;
     }
     const nVeh = Math.min(1500, Math.round(60 * opts.trafficScale * density)), nPeople = Math.min(4000, Math.round(220 * opts.peopleScale * density));
@@ -1943,13 +1988,17 @@
       const e = a.edge;
       if (a.s < 0 || a.s > e.len) {
         const atNode = a.s > e.len ? e.b : e.a;
-        let opts = atNode.edges.filter(x => x !== e && edgeOk(x, a.network));
+        const walker = a.group === 'people';
+        let opts = atNode.edges.filter(x => x !== e && edgeOk(x, a.network) && (!walker || isWalkable(x)));
+        if (!opts.length && walker && isWalkable(e)) opts = [e];                         // turn round rather than step onto a street whose pavements are blocked
+        if (!opts.length && walker) opts = atNode.edges.filter(x => edgeOk(x, a.network) && isWalkable(x));
         if (!opts.length) opts = atNode.edges.filter(x => edgeOk(x, a.network));
         if (!opts.length) opts = [e];
         const ne = pick2(opts, sim.rng);
         a.edge = ne;
         a.dir = (ne.a === atNode) ? 1 : -1;
         a.s = a.dir > 0 ? 0 : ne.len;
+        if (walker) settleSide(a);
       }
     }
   }
@@ -1966,7 +2015,7 @@
     const heading = Math.atan2(dy, dx);
     const driveSign = (sim && sim.opts.drive === 'left') ? -1 : 1;
     let off;
-    if (a.group === 'people') off = (e.width / 2 + e.pavement * 0.5) * a.side;
+    if (a.group === 'people') off = (e.walk ? e.walk.off[a.dir * a.side > 0 ? 0 : 1] : e.width / 2 + e.pavement * 0.5) * a.side;
     else if (a.network === 'cycle') off = e.width * 0.3 * driveSign;
     else if (a.network === 'rail') off = 0;
     else off = e.width * 0.22 * driveSign;
@@ -2302,6 +2351,13 @@
     u0 = Math.max(0, u0); v0 = Math.max(0, v0); u1 = Math.min(cw, u1); v1 = Math.min(ch, v1);
     if (u1 > u0 && v1 > v0) ctx.drawImage(L.cv, u0 * q, v0 * q, (u1 - u0) * q, (v1 - v0) * q, view.ox + (u0 - L.mw - L.ox) * r, view.oy + (v0 - L.mh - L.oy) * r, (u1 - u0) * r, (v1 - v0) * r);
   }
+  // A layer canvas is 40 to 50 MB on a large screen. Allocating one for every repaint churns memory (and the garbage collector is slow to give it back),
+  // so the canvas of the layer that was just replaced is kept as a spare and reused for the next, when the size is the same.
+  function layerCanvas(sim, slot, w, h) {
+    const sp = sim[slot + 'Spare']; sim[slot + 'Spare'] = null;
+    if (sp && sp.width === w && sp.height === h) { const c = sp.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); return sp; }
+    return A_().sprites.factory(w, h);
+  }
   const LAYER_STAND_IN = [0.15, 8];                  // the old layer, scaled, may stand in for a new one this far either way: no blurrier than the zoom just before it
   const LAYER_MS = 6;                                // wall time a frame may spend painting a layer in slices
   const layerClock = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -2325,13 +2381,15 @@
         let p = sim[slot + 'P'];
         if (!p || p.sc !== sc || p.skey !== skey) {
           const mw = Math.ceil(view.w * LAYER_MARGIN), mh = Math.ceil(view.h * LAYER_MARGIN);
-          const cv = A.sprites.factory(Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d'); c.scale(q, q);
+          if (p) sim[slot + 'Spare'] = p.cv;               // an abandoned repaint: its canvas is free again
+          const cv = layerCanvas(sim, slot, Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d'); c.scale(q, q);
           p = sim[slot + 'P'] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh, gen: steps(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh }), done: false };
         }
         const budget = sim.opts.layerMs === undefined ? LAYER_MS : sim.opts.layerMs, t0 = layerClock();
         do { if (p.gen.next().done) { p.done = true; break; } } while (layerClock() - t0 < budget);
         if (p.done) {
           if (A.sprites.posterize) A.quantise(p.cv, A.sprites.posterize);
+          if (L && L.cv !== p.cv) sim[slot + 'Spare'] = L.cv;
           L = sim[slot] = { skey, sc, scale: p.scale, cv: p.cv, ox: p.ox, oy: p.oy, mw: p.mw, mh: p.mh }; sim[slot + 'P'] = null;
           sim.layerRepaints = (sim.layerRepaints || 0) + 1;
         } else if (L) { blitScaled(ctx, view, L, q, bg); return true; }
@@ -2347,7 +2405,8 @@
     } else L = null;
     if (!L) {
       const mw = Math.ceil(view.w * LAYER_MARGIN), mh = Math.ceil(view.h * LAYER_MARGIN);
-      const cv = A.sprites.factory(Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d');
+      if (sim[slot]) sim[slot + 'Spare'] = sim[slot].cv;
+      const cv = layerCanvas(sim, slot, Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d');
       c.scale(q, q); paint(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh });
       if (A.sprites.posterize) A.quantise(cv, A.sprites.posterize);
       L = sim[slot] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh }; sx = mw * q; sy = mh * q;
@@ -2571,22 +2630,29 @@
 (function (root) {
   'use strict';
   function create(canvas, opts) {
-    opts = Object.assign({ settleMs: 120, minRatio: 0.3, maxRatio: 8 }, opts || {});
+    opts = Object.assign({ settleMs: 120, minRatio: 0.3, maxRatio: 8, creep: 0.0015 }, opts || {});
     let el = canvas, drawn = null, prevScale = NaN, lastChange = -Infinity, stretch = 1, stretched = false;
     const clear = () => { el.style.transform = 'none'; stretch = 1; stretched = false; };
+    function place(view) {
+      if (!drawn) return;
+      const r = view.scale / drawn.scale; stretch = r; stretched = true;
+      el.style.transformOrigin = '0 0';
+      el.style.transform = 'translate(' + (view.ox - drawn.ox * r) + 'px, ' + (view.oy - drawn.oy * r) + 'px) scale(' + r + ')';
+    }
     return {
       // true when the caller should draw a real frame now; false when the canvas has been stretched to match the view instead
       shouldRender(view, now) {
         if (!drawn || drawn.w !== view.w || drawn.h !== view.h) return true;
-        if (view.scale !== prevScale) { if (prevScale === prevScale) lastChange = now; prevScale = view.scale; }
+        // a zoom is a scale that moves by more than `creep` (0.15 percent) a frame; the tail of an eased zoom creeps for half a second and must not hold the picture
+        if (view.scale !== prevScale) { if (prevScale === prevScale && Math.abs(view.scale / prevScale - 1) > opts.creep) lastChange = now; prevScale = view.scale; }
         if (now - lastChange >= opts.settleMs) return true;
         const r = view.scale / drawn.scale;
         if (r < opts.minRatio || r > opts.maxRatio) return true;
-        stretch = r; stretched = true;
-        el.style.transformOrigin = '0 0';
-        el.style.transform = 'translate(' + (view.ox - drawn.ox * r) + 'px, ' + (view.oy - drawn.oy * r) + 'px) scale(' + r + ')';
+        place(view);
         return false;
       },
+      // move and scale the stretched picture to match this view (a pan, or a little scale, while the sharp frame is being made), without ending the zoom
+      place,
       // the caller drew a real frame at this view: it is now the base, and the canvas shows it as it is
       rendered(view) { drawn = { w: view.w, h: view.h, scale: view.scale, ox: view.ox, oy: view.oy }; prevScale = view.scale; clear(); },
       // how far the drawn picture is stretched now (1 when it is not), and whether it is
@@ -2646,10 +2712,11 @@
     function startFade(view, now) {
       if (!(o.fadeMs > 0)) { finish(view, now); return; }
       back.style.transition = 'opacity ' + o.fadeMs + 'ms ease-out'; back.style.opacity = '1';
-      fadeEnd = now + o.fadeMs; state = 'fade';
+      fadeEnd = now + o.fadeMs + 40; state = 'fade';              // 40 ms over: the CSS fade runs on the compositor's clock and may be a few percent short at the frame it was due
       if (reticle) cue('fx lock');
     }
     function refine(view, now, render) {
+      hold.place(view);                                       // the stretched picture follows a pan (or a little scale) while the sharp frame is made
       render(back);
       if (o.isDone() || now - since >= o.maxWaitMs) startFade(view, now);
     }
@@ -2671,7 +2738,7 @@
           if (!want) { hideBack(); state = 'zoom'; seek(); applyBlur(); } else refine(view, now, render);
         } else {                                              // fade
           if (!want) { hideBack(); state = 'zoom'; seek(); applyBlur(); }
-          else { render(back); if (now >= fadeEnd) finish(view, now); }
+          else { hold.place(view); render(back); if (now >= fadeEnd) finish(view, now); }
         }
       }
     };
@@ -2852,7 +2919,7 @@
       if (held.has('in')) { cam.zoomAt(Math.exp(opts.zoomRate * dt)); moved = true; }     // W: about the middle of the canvas
       if (held.has('out')) { cam.zoomAt(Math.exp(-opts.zoomRate * dt)); moved = true; }   // S
       if (pend !== 0) {                  // an eased wheel zoom: a fraction of what is left each frame (ease-out), whatever the frame rate
-        const part = Math.abs(pend) < 1e-4 ? pend : pend * (1 - Math.exp(-opts.zoomEase * dt)), before = cam.scale;
+        const part = Math.abs(pend) < 3e-3 ? pend : pend * (1 - Math.exp(-opts.zoomEase * dt)), before = cam.scale;      // the last 0.3 percent is applied at once: an exponential tail takes half a second to reach 0.01 percent
         cam.zoomAt(Math.exp(part), pendX, pendY); pend -= part; moved = true;
         if (Math.abs(Math.log(cam.scale / before)) < Math.abs(part) * 0.5) pend = 0;      // the camera's limit: nothing more to chase
         if (Math.abs(pend) < 1e-9) pend = 0;
@@ -2932,7 +2999,7 @@
   window.addEventListener('pointerup', () => { sliderHeld = false; });
   zoomEl.oninput = () => cam.setZoomFraction(+zoomEl.value);
   document.getElementById('fit').onclick = () => { cam.fitAll(); syncZoom(); };
-  window.labViewer = { camera: cam, controls, refocus: rf, get sim() { return sim; } };                                         // a handle for tests and for the browser console
+  window.labViewer = { camera: cam, controls, refocus: rf, frames: () => frames, get sim() { return sim; } };                                         // a handle for tests and for the browser console
   function focusScene() { cam.setBounds(V.sceneBounds(scene)); syncZoom(); }
   function showScene() {
     const a = scene.area || {}, el = document.getElementById('attrib');
@@ -3042,13 +3109,19 @@
   if (calm) document.getElementById('fxEase').checked = false; fxApply();
   function layers() { return { buildings: document.getElementById('lBuild').checked, vehicles: document.getElementById('lVeh').checked, people: document.getElementById('lPeople').checked }; }
   let last = performance.now();
+  let frames = 0, lastFailure = '';
   function frame(now) {
-    const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    if (state.playing) V.stepSim(sim, dt);
-    if (replay && replay.playing) { replay.advance(dt); syncBar(); }
-    const view = cam.view();
-    rf.frame(view, now, c => V.renderFrame(ctxOf.get(c), sim, view, layers()));   // while the wheel is zooming the drawn canvas is stretched instead (zoomhold.js)
-    requestAnimationFrame(frame);
+    try {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      if (state.playing) V.stepSim(sim, dt);
+      if (replay && replay.playing) { replay.advance(dt); syncBar(); }
+      const view = cam.view();
+      rf.frame(view, now, c => V.renderFrame(ctxOf.get(c), sim, view, layers()));   // while the wheel is zooming the drawn canvas is stretched instead (zoomhold.js)
+    } catch (e) {                                           // one bad frame must not stop the viewer for good: skip it, say so once, start the zoom state afresh
+      const msg = String((e && e.message) || e);
+      if (msg !== lastFailure) { lastFailure = msg; console.error(e); const el = document.getElementById('bstats'); el.className = 'note err'; el.textContent = 'A frame failed and was skipped: ' + msg; }
+      try { rf.reset(); } catch (_) { /* nothing more to do */ }
+    } finally { frames++; requestAnimationFrame(frame); }
   }
   regSel.onchange = e => { state.region = e.target.value; state.look = famOf().looks[0].id; fillLooks(); rebuild(); };
   lookSel.onchange = e => { state.look = e.target.value; V.setTheme(sim, themeNow()); showLook(); applyHooks(); };

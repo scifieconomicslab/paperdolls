@@ -117,7 +117,7 @@ People and vehicles take their colours from the family palette (`makeOutfit`, `v
 
 ## Motion
 
-Motion is decorative by default: a random walk on the road network. A class can be given real motion:
+Motion is decorative by default: a random walk on the road network. **People keep off the buildings.** A person is drawn on the pavement at an offset from the road's centre line, and nothing guarantees the pavement is free: in a dense scene buildings stand on it (and in the placeholder, on the tram boulevard, they covered the whole 3.5 m strip), and people were drawn walking through and along the walls (2.8 percent of positions inside a footprint on the placeholder and 2.3 percent on a real Brussels extract, 62 percent on the boulevard). `createSim` now checks each pavement edge against the building footprints, on both sides and at three offsets across the pavement, keeping people 0.4 m from a wall: a person walks on the clearer side and at the clearest offset (the middle of a clear pavement, as before), an edge with less than 70 percent of its length clear on either side is not walked while there is another way (people turn round at its end instead of stepping onto it), and people start only on walkable edges. Measured over 400 steps: inside a footprint 2.8 to 0.2 percent on the placeholder and 2.3 to 0.1 percent on Jette, within half a metre of a wall 2.9 to 0.3 percent on Jette. What is left is a person crossing the blocked stretch (up to 30 percent) of an edge that is mostly clear. Building the walk data adds about 130 ms to `createSim` on a scene of 12,000 buildings. A class can be given real motion:
 
 ```js
 VizLib.setMotion(sim, 'tram', { mode: 'path', loop: true, path: [[t, x, y], …] });          // timetable
