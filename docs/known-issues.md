@@ -13,9 +13,9 @@ Found during the audit of v0.1.0 and kept up to date. Severity is in brackets.
 7. **Performance.** The model recomputes the wealth Gini over all households every week, and `check` runs the model several times. Large runs are slow. (Medium)
 8. **Memory and file size.** The exporter loads every week into memory and the HTML embeds every frame. Eight frames give a 1.2 MB page, so a large spec can make a very large file. (Medium)
 9. **A rerun with construction enabled is only covered by the relaxed check.** (Medium)
-10. **The Python frame renderer is the older one.** `paperdolls/render` (used by `frames` and `build`) does not use looks, trees or the formal theme. The JavaScript scene library does. The pipeline should move to it. (Medium)
+10. **The Python frame renderer is the older one.** `paperdolls/render` (used by `frames` and `build`; the live `replay` page uses the JavaScript engine) does not use looks, trees or the formal theme. The JavaScript scene library does. The pipeline should move to it. (Medium)
 11. **One frame rotation per scene.** A city with several street grids gets the rotation that suits the most buildings. The rest fall back to plain extrusions. The report gives the estimated share. (Medium)
-12. **The model's buildings are not linked to the scene's buildings.** The model has ids and no coordinates. Assigning each to a real footprint is the spatial layer, which is not built. (Medium)
+12. **The model's buildings are not placed on real footprints.** The replay page draws model building k on the scene building ranked k by distance from the scene's centre, which is invented. Geocoded placement is the spatial layer, which is not built. (Medium)
 13. **Font fallback.** The renderer looks for DejaVu fonts and falls back to a small bitmap font on other systems. A font should be bundled. (Low)
 14. **Missing buildings render as to-do without a warning.** If an id is missing in a week, the renderer shows it as to-do. (Low)
 15. **The render seed is the model seed.** `frames` and `build` use the model's seed for layout. They should be separate. (Low)
@@ -26,6 +26,12 @@ Found during the audit of v0.1.0 and kept up to date. Severity is in brackets.
 19. **The first frame is slow on a large scene.** Opened fully zoomed out, a 12,276-building scene takes 4.9 s to draw its first frame (0.37 s at 1.7 px per metre) because the far layer and the sprites are built then. Settled and panning frames are fast. (Medium)
 
 ## Fixed
+
+- `paperdolls doctor` no longer crashes without numpy, pillow or pyyaml; it prints the install command.
+- Replay frames no longer carry the retrofit legend or co-op vans for another model; `replay.legend` names the states.
+- A model can declare which of its variables to draw (`replay.mapping`), and the live replay page generates its legend from them.
+- The README's performance figures were re-measured (they were up to 5 times too optimistic).
+- The test suite runs in CI (GitHub Actions, Python 3.10 and 3.12).
 
 - The vendored model no longer imports plotting libraries, changes a global theme, adds a path pointing to the author's machine, or uses an unseeded global random number generator. Results are unchanged.
 - The hook test compares every array in the result, not five.

@@ -14,10 +14,22 @@ Its replay page plays a model through time in the same engine: a week scrubber a
 
 It makes two kinds of project:
 
-- **Model replay.** Runs the Great Retrofit v2 model (or another model file that follows [the interface](docs/model-interface.md)), records each building's retrofit state and investor ownership week by week, and draws chosen weeks as frames in one offline HTML page.
+- **Model replay.** Runs the Great Retrofit v2 model (or another model file that follows [the interface](docs/model-interface.md)) and records each building's state, and any variables the model declares ([replay-mapping.md](docs/replay-mapping.md)), week by week. `paperdolls replay` plays the run through time in the viewer, with a week scrubber and a legend made from the declared variables. `paperdolls build` makes the older page of fixed keyframes.
 - **Place scene.** Turns an OpenStreetMap extract into a scene and opens it in an offline viewer, with a report of every assumption made.
 
-The two are not linked. The model has building ids and no coordinates, so a replay cannot yet sit on a real map.
+A replay can be drawn on a place scene (`paperdolls replay ... --scene scene.json`), but the placement is invented: the model has building ids and no coordinates, so each model building is put on a scene building in a fixed order nearest the scene's centre, and the page says so. A scene needs at least as many buildings as the model.
+
+## Examples
+
+![A real neighbourhood: part of Jette, Brussels, built from OpenStreetMap data, with the detail and ink options on](docs/images/largesimtest.jpg)
+
+*A place scene from a live OpenStreetMap query for part of Jette, Brussels (2,162 buildings, 208 roads, 615 trees), drawn with the detail and ink options. 619 buildings (29%) fit an asset; the rest are plain extrusions. Storeys are mostly assumed, and tree and road details follow the rules in the scene report. © OpenStreetMap contributors (ODbL).*
+
+![A replay zoomed out: 60 model buildings coloured by state among a thousand neutral ones](docs/images/replay_zoomedout.jpg)
+
+![The same replay zoomed in: tan susceptible, green recovered and red infectious buildings around the central square](docs/images/screenshot_zoomedin.jpg)
+
+*A replay of a toy epidemic (the test model in `tests/toy_model.py`, not an economic model) on the synthetic placeholder area, at week 25. The 60 model buildings sit around the central square, coloured by state (tan susceptible, green recovered, red infectious); the other buildings are neutral because the model has no data for them. Placement is invented and people and vehicles are decoration.*
 
 ## The rendering engine
 
@@ -30,6 +42,7 @@ The viewer is a SimCity-style isometric rendering engine written in plain JavaSc
 - **Far-zoom layer.** Below 1 px per metre, buildings and trees come from a cached layer, people are skipped and vehicles become dots. Ground, road surfaces and shadows are cached per view and theme.
 - **Spatial road index.** Fitting a building footprint to an asset stays fast on a city of tens of thousands of buildings.
 - **Painter's-algorithm drawing,** back to front.
+- **Opt-in finishing, all colorfigures-only and off by default.** `sim.opts.detail` bakes grain, a roof-edge bevel and wall-foot shading into each building sprite, adds roof clutter and darker windows, and softens ground shadows. `ink` draws the heavy outline only on each silhouette. `pixel` (a size above 1, such as 1.5) renders at lower resolution and upscales, with `pixelSmooth` for a soft upscale; `posterize` rounds colours once per sprite and cached layer; `fog` blits a cached haze and vignette. They cost sprite-build time, not per-frame time: settled and panning frames stayed at about 3 ms on the placeholder scene with all of them on. The viewer has a checkbox for each; [viz/README.md](viz/README.md) has the details.
 - **Occlusion culling is built and optional.** `sim.opts.occlusion = true` skips items that nearer buildings fully cover, and the picture is identical pixel for pixel. It is off by default because it was slower on every scene measured (13 to 34% more frame time), since a cached sprite blit costs less than the test. The numbers and when it could pay are in [viz/README.md](viz/README.md).
 
 [viz/README.md](viz/README.md) has the asset model, the theme system and the measurements.
@@ -76,7 +89,9 @@ paperdolls intake show render.yaml
 paperdolls export render.yaml --out trajectory.npz
 paperdolls check render.yaml
 paperdolls frames render.yaml trajectory.npz --out frames/
-paperdolls build render.yaml trajectory.npz --out replay.html
+paperdolls build render.yaml trajectory.npz --out replay.html            # older page: fixed keyframes
+paperdolls replay render.yaml trajectory.npz --out live.html              # live page: plays the run through time
+paperdolls replay render.yaml trajectory.npz --scene scene.json           # ... on a place scene
 
 # place scene
 paperdolls place render.yaml
@@ -97,7 +112,7 @@ Nothing is defaulted quietly. Storeys taken from a building type, an archetype t
 
 - The 36 palettes (three looks in each of twelve regions) are proposals chosen by eye.
 - Facade rules, fleets, tree mixes and drive sides are proposals too.
-- Layout, people and vehicles are invented.
+- Layout, people and vehicles are invented, and so is where a replayed model's buildings stand.
 - The OpenStreetMap ingest has had one live run (a bounding box in Jette, Brussels: 2,162 buildings, 28% of them fit an asset). Relation queries and other cities have not been run live.
 
 The full list of open problems, including the Great Retrofit model's, is in [docs/known-issues.md](docs/known-issues.md).
@@ -109,8 +124,10 @@ The full list of open problems, including the Great Retrofit model's, is in [doc
 - `commands/`: `start`, `preview`, `build`, `place`, `doctor`.
 - `agents/fleet-researcher.md`: researches a place's vehicle fleet, with sources and dates.
 - `bin/paperdolls`: the launcher.
-- `paperdolls/`: the Python pipeline. `paperdolls/ingest/` is the OpenStreetMap ingest.
-- `viz/`: the isometric library and viewer. See [viz/README.md](viz/README.md).
+- `paperdolls/`: the Python pipeline. `paperdolls/ingest/` is the OpenStreetMap ingest; `replay_build.py` builds the replay page.
+- `viz/`: the isometric library and viewer, including `replay.js`. See [viz/README.md](viz/README.md).
+- `docs/`: the model interface, the replay mapping, the intake questions, known issues, and the design and plan the replay work followed (`docs/superpowers/`).
+- `.github/workflows/tests.yml`: runs the Python and JavaScript tests on Python 3.10 and 3.12.
 - `vendor/greatretrofit_v2/`: the vendored model and its licence.
 - `assets/`: palettes, the intake question bank, the demo configuration and the icon.
 - `samples/`: a demo replay and a synthetic OpenStreetMap extract.

@@ -1,12 +1,13 @@
-# viz: isometric library (v0.4): people, vehicles, buildings, trees, themes, scene
+# viz: isometric library: people, vehicles, buildings, trees, themes, scene, replay
 
-Status: people, vehicles, buildings and trees are in the asset system (`assetlib.js`, `buildinglib.js`, `treelib.js`, tested), and colour is one theme system (a region, a look, a register). The scene library (`vizlib.js`: roads, network, renderer) is still a mock and not yet wired into the Python pipeline.
+Status: people, vehicles, buildings and trees are in the asset system (`assetlib.js`, `buildinglib.js`, `treelib.js`, tested), and colour is one theme system (a region, a look, a register). The scene library (`vizlib.js`: roads, network, renderer) drives the place viewer (`paperdolls viewer`, from an ingested scene) and the replay page (`paperdolls replay`, with `replay.js`); the Python pipeline builds both pages.
 
 ## Files
 
 - `assetlib.js`: the engine, plus people and vehicles. Parametric definitions, four-heading builds, SVG and canvas output, regional fleets and outfits, data scales. No dependencies.
 - `buildinglib.js`: buildings as assets (archetypes, facade grammar, roofs, overlays, regional grammar, footprint fitting). Load after `assetlib.js`.
 - `treelib.js`: trees as assets (nine kinds, regional species mixes, foliage colours from the look). Load after `assetlib.js`.
+- `replay.js`: plays an exported trajectory through a scene (placement, mapping, week, legend). Load after `vizlib.js`.
 - `vizlib.js`: scene schema, road network, ground, agent simulation, renderer. Needs the three libraries above loaded first.
 - `library_catalogue.html` and `viewer.html`: templates. `build_pages.py` inlines the libraries and palettes into `library_catalogue_built.html` and `viewer_built.html`, which run offline.
 - `test_assets.js`: the test suite (`node viz/test_assets.js`). `tests/test_viz_assets.py` runs it and validates the SVG.
@@ -143,7 +144,7 @@ A road's `width`, `pavement`, `cycle` and `tram` override its class. `pedestrian
 
 ### Rendering cost
 
-Measured with node-canvas (a software canvas, so a browser will differ). On the 1,023-building placeholder a street-zoom frame costs about 22 ms (1,048 items in view), about 11 ms at 3 px/m, about 5 ms at 5 px/m and about 4 ms at 8 px/m. A synthetic scene of 12,500 buildings and about 4,800 agents renders at about 25 to 35 ms per frame at every zoom; its first frame takes about 3.5 s because the sprites are built once.
+Measured with node-canvas (a software canvas, so a browser will differ). On the 1,023-building placeholder a street-zoom frame costs about 22 ms (1,048 items in view), about 11 ms at 3 px/m, about 5 ms at 5 px/m and about 4 ms at 8 px/m. A synthetic scene of 12,276 buildings and 4,093 agents (the placeholder tiled twelve times; `node viz/scale_bench.js` reproduces it) takes 4.6 ms settled and 4.8 ms panning at 0.7 px/m, 17.5 and 19.2 ms at 1.7 px/m, and 10.9 and 11.2 ms at 4 px/m. Its first frame takes 4.9 s fully zoomed out, 0.37 s at 1.7 px/m and 0.09 s at 4 px/m, because the far layer and the sprites are built then.
 
 What made this fast, in order of effect:
 
@@ -168,6 +169,31 @@ Profiling the 12,500-building scene found that still frames were cheap (10 to 13
 The "before" zoom numbers at 0.7 and 3 px/m are from an intermediate version of this change that repainted an oversized layer at every step, so they are higher than the original code's. The original zoom cost at 1.7 px/m was 55 ms.
 
 `viz/test_assets.js` checks that pan frames are identical pixel for pixel to a fresh render (at 0.7 and 1.7 px/m; at 3 px/m a pan differs from a fresh render in a handful of anti-aliasing bytes), that a pan inside the margin repaints nothing, and that a view that has stopped after a fractional pan or a zoom is exact. Not yet measured: a real browser with a GPU canvas. The remaining pan cost at 1.7 px/m is the per-frame collection and drawing of the visible buildings; a spatial grid and a persistent depth order would reduce it.
+
+### Finishing options (opt-in, colorfigures only)
+
+All are set on `sim.opts`, read by `VizLib.renderFrame`, and baked into sprites or cached layers, so they cost build time and not per-frame time. `node viz/detail_bench.js [outdir]` writes a picture of each variant and times them.
+
+| option | what it does |
+|---|---|
+| `detail: true` | Buildings only, from 2.5 px per metre: a faint grain, a light bevel on roof edges and a soft shading band along the foot of each wall, baked into the sprite; flat roofs get air-conditioning units, vents and a tank, and about a quarter of windows use darker glass; the cached ground gets a longer, fainter cast shadow and three stepped contact rings. Needs the scene built with the option (`createSim`), because the roof props are part of the asset. |
+| `ink: true` | Buildings and trees: hairlines inside, and the heavy outline only around the silhouette. |
+| `pixel: n` | n above 1 (1.5 is a good size): the scene is drawn at 1/n resolution and upscaled with nearest-neighbour, so ink is one logical pixel wide. Grain is skipped in this mode. `pixelSmooth: true` smooths the upscale. |
+| `posterize: step` | With `pixel`: each colour channel is rounded to a multiple of step (12 works), once per sprite and per cached layer. |
+| `fog: true` | A cool haze toward the top of the view and darker edges, painted once and blitted. |
+
+On the placeholder scene in node-canvas, with every option on, settled frames stayed at about 3 ms and panning at about 3 ms; the first frame is slower (about 1.4 s against 0.2 s at 1.5 pixels) because posterize reads each new sprite back once. The formal register ignores all of these.
+
+### Replay (`replay.js`)
+
+`Replay.create(sim, data)` plays a model's trajectory through a scene. `data` holds `weeks` (per week, arrays indexed by model building: `codes`, `investor`, and `vars` keyed by variable name, with `null` or NaN for missing), `mapping` (the declared mapping, see [docs/replay-mapping.md](../docs/replay-mapping.md)), `states` (legend labels for the four state codes) and `n`. The returned object has `setWeek(t)`, `advance(dt)` (at `speed` weeks per second while `playing`), `setWall(i)`, `legend()`, `entityOf(k)` and `error`.
+
+- **Placement.** `Replay.place(scene, n)` orders the scene's buildings by distance from its centre; model building k takes the k-th, and the rest are extras with no data. A scene with fewer buildings than the model gives `{ ok: false, error }` and `create` draws nothing from the model.
+- **Missing data** is `Replay.NO_DATA`, never the low end of a scale. A sequential scale clamps outside its domain.
+- **Legend.** Built from the scales (`ramp` or `swatches`), so it can describe only what is drawn. With no mapping, the four states use the labels the page was given.
+- With a mapping, `sim.buildingStyle` is replaced; without one, the state codes are written onto the scene's buildings and the default Great Retrofit style draws them.
+
+Tests: `node viz/test_replay.js` (the library) and `viz/test_replay_page.js` (a built page in jsdom, run by `tests/test_replay_page.py`).
 
 ### Occlusion culling: built, correct, and not faster (opt-in)
 
