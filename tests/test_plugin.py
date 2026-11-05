@@ -67,9 +67,13 @@ def test_no_stale_names_in_plugin_files():
 
 def test_every_paperdolls_command_in_the_docs_exists():
     text = "\n".join(p.read_text(encoding="utf-8") for p in [*(ROOT / "skills").rglob("*.md"), *(ROOT / "commands").glob("*.md"), ROOT / "README.md"])
-    known = {"validate", "export", "check", "frames", "build", "ingest", "osm-query", "osm-fetch", "doctor", "looks", "intake", "place", "viewer"}
+    known = {"validate", "export", "check", "frames", "build", "ingest", "osm-query", "osm-fetch", "doctor", "looks", "intake", "place", "viewer", "replay"}
     used = set(re.findall(r"(?:^|`)paperdolls ([a-z][a-z-]+)", text, re.M))
     assert used <= known, f"documented commands that do not exist: {used - known}"
+    import subprocess, sys
+    for cmd in sorted(known):                                            # and every command in the list really exists
+        r = subprocess.run([sys.executable, str(ROOT / "bin" / "paperdolls"), cmd, "--help"], capture_output=True, text=True)
+        assert r.returncode == 0, f"paperdolls {cmd} --help failed: {r.stderr[-200:]}"
 
 
 def test_launcher_and_icon_exist():
