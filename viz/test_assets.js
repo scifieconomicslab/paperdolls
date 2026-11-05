@@ -700,4 +700,17 @@ test('the far-zoom layer is painted a slice per frame while the buildings are dr
   assert(one.rep10 <= 2, 'ground and far layer are each painted once, not again when sprites go exact: ' + one.rep10 + ' repaints in 10 frames'); A.sprites.exact = false;
 });
 
+test('layer canvases are reused: repainting the ground again and again allocates two, not one a time', () => {
+  let createCanvas; try { createCanvas = require(process.env.NODE_CANVAS || 'canvas').createCanvas; } catch (e) { console.log('SKIP (node canvas not installed)'); return; }
+  A.sprites.cache.clear(); A.sprites.pixels = 0; A.sprites.index.clear(); let big = 0;
+  A.sprites.factory = (w, h) => { if (w >= 1500) big++; return createCanvas(w, h); };      // a layer is (900 + 2 * 360) wide here; no sprite is that wide
+  const W = 900, H = 600, mk = k => ({ w: W, h: H, scale: k, ox: W / 2 - (330 - 262) * k * 0.8660254, oy: H / 2 - (330 + 262) * k * 0.5 });
+  const s = sim('nw'), c = createCanvas(W, H).getContext('2d'); s.opts.layerMs = 0; s.opts.prewarm = false;
+  for (const k of [2, 2.6, 3.4, 2.2, 3, 2.5]) { for (let i = 0; i < 400; i++) V.renderFrame(c, s, mk(k), {}); }
+  assert(big <= 2, 'layer-sized canvases allocated for six repaints: ' + big + ' (expected the first, and one spare)');
+  const fresh = sim('nw'), c2 = createCanvas(W, H).getContext('2d'); fresh.opts.sliceLayers = false; for (let i = 0; i < 60; i++) V.renderFrame(c2, fresh, mk(2.5), {});
+  let diff = 0; const a = c.getImageData(0, 0, W, H).data, b = c2.getImageData(0, 0, W, H).data; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diff++;
+  assert.strictEqual(diff, 0, 'a reused canvas gives the same picture as a fresh one: ' + diff + ' bytes differ'); A.sprites.exact = false;
+});
+
 console.log(passed + ' passed' + (process.exitCode ? ', with failures' : ''));

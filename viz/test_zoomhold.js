@@ -61,4 +61,16 @@ test('ratio and active say how far the picture is stretched, and rebind moves th
   frame(z, view(3.6), 32); assert.ok(other.style.transform.indexOf('scale(' + 3.6 / 3 + ')') > 0, 'later stretches go to the new canvas, from the new base');
   assert.ok(el.style.transform === 'none' || el.style.transform.indexOf('scale(1.5)') > 0, 'the old canvas is left alone');
 });
+test('a scale that is only creeping (an easing tail) is not a zoom: the real frame comes after the settle time', () => {
+  const { z } = mk(); frame(z, view(2), 0); frame(z, view(2.4), 16);
+  let s = 2.4, t = 16; for (let i = 0; i < 6; i++) { s *= 1.0005; t += 16; frame(z, view(s), t); }       // 0.05 percent a frame: invisible
+  assert.strictEqual(frame(z, view(s * 1.0005), 16 + 130), true, 'drawn once 120 ms have passed since the last real movement, creep or not');
+  const { z: z2 } = mk(); frame(z2, view(2), 0); let u = 2, tt = 0; for (let i = 0; i < 12; i++) { u *= 1.02; tt += 16; assert.strictEqual(frame(z2, view(u), tt), false, 'a steady zoom of 2 percent a frame is still a zoom'); }
+});
+test('place() moves the stretched picture to follow a pan without ending the zoom or changing the base', () => {
+  const { z, el } = mk(); frame(z, view(2), 0); frame(z, view(2.4), 16); const before = el.style.transform;
+  const panned = view(2.4, view(2.4).ox + 50, view(2.4).oy - 20); z.place(panned);
+  const r = 1.2, d = view(2); assert.strictEqual(el.style.transform, 'translate(' + (panned.ox - d.ox * r) + 'px, ' + (panned.oy - d.oy * r) + 'px) scale(' + r + ')');
+  assert.notStrictEqual(el.style.transform, before); assert.strictEqual(z.active(), true);
+});
 if (failed) { console.log(failed + ' failed'); process.exit(1); } else console.log('all passed');

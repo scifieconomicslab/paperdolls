@@ -152,7 +152,7 @@
   window.addEventListener('pointerup', () => { sliderHeld = false; });
   zoomEl.oninput = () => cam.setZoomFraction(+zoomEl.value);
   document.getElementById('fit').onclick = () => { cam.fitAll(); syncZoom(); };
-  window.labViewer = { camera: cam, controls, refocus: rf, get sim() { return sim; } };                                         // a handle for tests and for the browser console
+  window.labViewer = { camera: cam, controls, refocus: rf, frames: () => frames, get sim() { return sim; } };                                         // a handle for tests and for the browser console
   function focusScene() { cam.setBounds(V.sceneBounds(scene)); syncZoom(); }
   function showScene() {
     const a = scene.area || {}, el = document.getElementById('attrib');
@@ -262,13 +262,19 @@
   if (calm) document.getElementById('fxEase').checked = false; fxApply();
   function layers() { return { buildings: document.getElementById('lBuild').checked, vehicles: document.getElementById('lVeh').checked, people: document.getElementById('lPeople').checked }; }
   let last = performance.now();
+  let frames = 0, lastFailure = '';
   function frame(now) {
-    const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    if (state.playing) V.stepSim(sim, dt);
-    if (replay && replay.playing) { replay.advance(dt); syncBar(); }
-    const view = cam.view();
-    rf.frame(view, now, c => V.renderFrame(ctxOf.get(c), sim, view, layers()));   // while the wheel is zooming the drawn canvas is stretched instead (zoomhold.js)
-    requestAnimationFrame(frame);
+    try {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      if (state.playing) V.stepSim(sim, dt);
+      if (replay && replay.playing) { replay.advance(dt); syncBar(); }
+      const view = cam.view();
+      rf.frame(view, now, c => V.renderFrame(ctxOf.get(c), sim, view, layers()));   // while the wheel is zooming the drawn canvas is stretched instead (zoomhold.js)
+    } catch (e) {                                           // one bad frame must not stop the viewer for good: skip it, say so once, start the zoom state afresh
+      const msg = String((e && e.message) || e);
+      if (msg !== lastFailure) { lastFailure = msg; console.error(e); const el = document.getElementById('bstats'); el.className = 'note err'; el.textContent = 'A frame failed and was skipped: ' + msg; }
+      try { rf.reset(); } catch (_) { /* nothing more to do */ }
+    } finally { frames++; requestAnimationFrame(frame); }
   }
   regSel.onchange = e => { state.region = e.target.value; state.look = famOf().looks[0].id; fillLooks(); rebuild(); };
   lookSel.onchange = e => { state.look = e.target.value; V.setTheme(sim, themeNow()); showLook(); applyHooks(); };

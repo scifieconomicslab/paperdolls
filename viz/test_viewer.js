@@ -70,6 +70,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   assert(text.textContent.includes(scene.area.name), 'the previous scene stays loaded after a bad file');
   d.getElementById('scenePlaceholder').click(); await sleep(800);
   assert(/Placeholder scene/.test(text.textContent), 'the placeholder button restores the placeholder');
+  // a frame that throws must not stop the viewer for good: it is skipped, reported, and the next frame is scheduled
+  { const real = w.VizLib.renderFrame; let thrown = 0; w.VizLib.renderFrame = function () { thrown++; throw new Error('boom'); };
+    await sleep(300); w.VizLib.renderFrame = real; const f0 = w.labViewer.frames(); await sleep(400);
+    assert(thrown > 2, 'the throwing renderer was called on several frames: ' + thrown); assert(w.labViewer.frames() > f0 + 5, 'frames keep coming after the failures: ' + (w.labViewer.frames() - f0));
+    assert(/A frame failed and was skipped: boom/.test(stats.textContent), 'the failure is shown: ' + stats.textContent.slice(0, 80)); }
+  errs.length = 0;                                                                     // the expected failures above were caught by the page; none may have escaped it
+  await sleep(200);
   assert.strictEqual(errs.length, 0, 'no page errors: ' + errs.slice(0, 2).join(' | ').slice(0, 300));
   console.log('PASS viewer: load, attribution, drag, A and D, wheel, W and S, slider, Fit, region, look, register, bad files, placeholder');
   process.exit(0);

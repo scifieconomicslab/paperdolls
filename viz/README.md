@@ -195,6 +195,16 @@ The stretched picture (above) and the sharp frame that replaces it are two diffe
 
 Measured in Chrome (canvas 2770 by 1296, 1,023 buildings, 12 wheel notches, which the easing turns into a zoom to 14 times): the viewer went live, zoom for 65 frames, refine for 29 frames (the sharp frame being built out of sight), fade for 8 frames, live; no page errors; median frame 17 ms and slowest 33 ms, with none over 34 ms. The old build's slowest frames in a similar test were 50 to 120 ms. The second canvas doubles the canvas memory. A screenshot mid-zoom with blur and the reticle on showed the blurred, stretched city with the brackets over the cursor. The lock flash and the cross-fade itself were not caught in a screenshot.
 
+**Fixes after use (blinking, judder, a stuck view).** Reported from real use, traced in Chrome with a stress script (14 gestures of 6 notches in and out with pauses of 30 to 500 ms; an 8 ms wheel storm; pans, switch toggles and W/S keys mid-zoom):
+
+- *The easing tail kept the viewer in "zoom" for about 0.8 s after every gesture.* The exponential tail needs 0.66 s to fall under 0.01 percent, and `zoomhold.js` read each tiny scale change as a zoom, so the sharp frame was late, people and vehicles stayed frozen and then jumped (the blinking), and gestures less than 0.8 s apart never rendered a real frame at all (the stuck feeling). Now a zoom is a scale that moves more than 0.15 percent a frame (`creep`), and the controls apply the last 0.3 percent at once instead of tailing off. After a pause of 500 ms the viewer is refining or fading (it was still in "zoom" with a 0.0038 tail); after about 0.45 s it has settled.
+- *A pan while the sharp frame was being made was ignored*, so the old picture sat still and then jumped, and the cross-fade blended two misaligned pictures. `ZoomHold.place(view)` now moves the stretched picture with the pan during the refinement and the fade.
+- *The swap could come a few percent early*: the CSS fade runs on the compositor's clock, so at the frame it was due the new picture could be about 90 percent opaque and the old one vanished. The swap now waits 40 ms more.
+- *One failing frame stopped the viewer for good* (the loop only scheduled the next frame after a successful one). `frame()` now catches, shows "A frame failed and was skipped" once, resets the zoom state and always schedules the next frame; `window.labViewer.frames()` counts frames.
+- *Layer canvases were allocated anew for every repaint* (40 to 50 MB each on a large screen, slow to be garbage collected, a risk of running out of canvas memory after many zooms). The canvas of the layer just replaced is kept as a spare and reused.
+
+Not reproduced: a hard freeze. None of the stress runs left the viewer stuck or raised an error; if it happens again, `window.labViewer.refocus.state()`, `window.labViewer.controls.pendingZoom()` and `window.labViewer.frames()` in the console say whether the loop is alive, which state it is in, and whether a zoom is still being chased.
+
 #### Pan and zoom frames
 
 Profiling the 12,500-building scene found that still frames were cheap (10 to 13 ms) but frames while panning or zooming cost 46 to 157 ms, because the ground layer and the far layer were keyed on the pan offset and the scale and were repainted at every step. Median frame time, node-canvas, 1200 by 700:

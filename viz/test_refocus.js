@@ -39,11 +39,11 @@ test('the back canvas fades in once its frame is whole, and the roles swap when 
   m.st.done = true; m.f(view(3), t + 182);
   assert.strictEqual(m.rf.state(), 'fade'); assert.strictEqual(m.back.style.opacity, '1'); assert.ok(/opacity 160ms/.test(m.back.style.transition));
   assert.strictEqual(m.reticle.className, 'fx lock', 'the reticle locks as the sharp picture arrives');
-  m.f(view(3), t + 182 + 100); assert.strictEqual(m.rf.state(), 'fade'); m.f(view(3), t + 182 + 170);
+  m.f(view(3), t + 182 + 100); assert.strictEqual(m.rf.state(), 'fade'); m.f(view(3), t + 182 + 170); assert.strictEqual(m.rf.state(), 'fade', 'the CSS fade may still be a few percent short: wait a little longer'); m.f(view(3), t + 182 + 215);
   assert.strictEqual(m.rf.state(), 'live'); assert.strictEqual(m.rf.front().name, 'B', 'B is the front now'); assert.strictEqual(m.rf.back().name, 'A');
   assert.strictEqual(m.rf.back().style.opacity, '0'); assert.strictEqual(m.rf.back().style.transform, 'none');
   m.drawn.length = 0; m.f(view(3), t + 182 + 190); assert.deepStrictEqual(m.drawn.slice(), ['B'], 'and the next frame is drawn on it');
-  m.f(view(3), t + 182 + 170 + 800); assert.strictEqual(m.reticle.className, '', 'the lock fades away');
+  m.f(view(3), t + 182 + 215 + 800); assert.strictEqual(m.reticle.className, '', 'the lock fades away');
 });
 test('zooming again during the refinement goes back to stretching the original picture and hides the back canvas', () => {
   const m = mk(), t = zoomThenStill(m, 0); m.f(view(3), t + 150); m.st.done = true; m.f(view(3), t + 166); assert.strictEqual(m.rf.state(), 'fade');
@@ -51,6 +51,13 @@ test('zooming again during the refinement goes back to stretching the original p
   assert.strictEqual(m.rf.state(), 'zoom'); assert.strictEqual(m.back.style.opacity, '0'); assert.strictEqual(m.back.style.transition, 'none'); assert.strictEqual(m.drawn.length, 0);
   assert.ok(m.front.style.transform.indexOf('scale(' + 3.3 / 2 + ')') > 0, 'still stretching the picture that was drawn at 2');
   assert.strictEqual(m.reticle.className, 'fx seek');
+});
+test('a pan while the sharp frame is being made moves the stretched picture with it', () => {
+  const m = mk(), t = zoomThenStill(m, 0); m.f(view(3), t + 150); const tr0 = m.front.style.transform;
+  m.f(view(3, view(3).ox + 80, view(3).oy + 30), t + 166);
+  assert.strictEqual(m.rf.state(), 'refine'); assert.notStrictEqual(m.front.style.transform, tr0, 'the old picture follows the pan'); assert.ok(m.front.style.transform.indexOf('scale(1.5)') > 0);
+  m.st.done = true; m.f(view(3, view(3).ox + 80, view(3).oy + 30), t + 182); m.f(view(3, view(3).ox + 80, view(3).oy + 30), t + 200); assert.strictEqual(m.rf.state(), 'fade');
+  const tr1 = m.front.style.transform; m.f(view(3, view(3).ox + 120, view(3).oy + 30), t + 216); assert.notStrictEqual(m.front.style.transform, tr1, 'and during the fade');
 });
 test('a frame that never finishes is shown after the maximum wait', () => {
   const m = mk(), t = zoomThenStill(m, 0); m.f(view(3), t + 150);
@@ -65,7 +72,7 @@ test('with the effect off the picture is drawn straight onto the front canvas as
 test('with blur on, the stretched picture is blurred in proportion to the stretch and sharp again after the swap', () => {
   const m = mk({ blur: true }); m.f(view(2), 0); m.f(view(2.4), 16); const small = m.front.style.filter; m.f(view(4), 32); const big = m.front.style.filter;
   const px = f => parseFloat(/blur\(([\d.]+)px\)/.exec(f)[1]); assert.ok(px(big) > px(small) && px(small) > 0, small + ' then ' + big);
-  m.f(view(4), 200); m.st.done = true; m.f(view(4), 216); m.f(view(4), 216 + 170); assert.strictEqual(m.rf.back().style.filter, 'none');
+  m.f(view(4), 200); m.st.done = true; m.f(view(4), 216); m.f(view(4), 216 + 215); assert.strictEqual(m.rf.back().style.filter, 'none');
 });
 test('with no fade time (reduced motion) the swap is at once', () => {
   const m = mk({ fadeMs: 0 }), t = zoomThenStill(m, 0); m.f(view(3), t + 150); m.st.done = true; m.f(view(3), t + 166);

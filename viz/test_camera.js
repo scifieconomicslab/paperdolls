@@ -237,6 +237,11 @@ test('with smoothZoom a zoom into the limit stops there and clears what is left'
   for (let i = 0; i < 400; i++) d.controls.tick(1 / 60);
   near(d.cam.scale, d.cam.maxScale, 1e-9); assert.strictEqual(d.controls.pendingZoom(), 0, 'nothing is left to chase');
 });
+test('with smoothZoom the easing tail ends within half a second and its last step is invisible', () => {
+  const d = setup({ smoothZoom: true }); for (let i = 0; i < 6; i++) d.canvas.fire('wheel', { deltaY: -100, deltaMode: 0, clientX: 300, clientY: 200 });   // a flick of 6 notches (2.6 times), inside the camera's limits: the tail is the easing, not a clamp
+  let frames = 0, lastStep = 0; for (; d.controls.pendingZoom() !== 0 && frames < 200; frames++) { const s = d.cam.scale; d.controls.tick(1 / 60); lastStep = Math.abs(d.cam.scale / s - 1); }
+  assert(frames <= 36, 'frames until the tail is over: ' + frames + ' (0.6 s)'); assert(lastStep < 0.004, 'the last step moves the scale by ' + lastStep);
+});
 test('without smoothZoom a wheel notch still zooms at once', () => {
   const d = setup(), s0 = d.cam.scale; d.canvas.fire('wheel', { deltaY: -100, deltaMode: 0, clientX: 300, clientY: 200 }); assert(d.cam.scale > s0);
 });

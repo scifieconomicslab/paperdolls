@@ -92,7 +92,7 @@
       if (held.has('in')) { cam.zoomAt(Math.exp(opts.zoomRate * dt)); moved = true; }     // W: about the middle of the canvas
       if (held.has('out')) { cam.zoomAt(Math.exp(-opts.zoomRate * dt)); moved = true; }   // S
       if (pend !== 0) {                  // an eased wheel zoom: a fraction of what is left each frame (ease-out), whatever the frame rate
-        const part = Math.abs(pend) < 1e-4 ? pend : pend * (1 - Math.exp(-opts.zoomEase * dt)), before = cam.scale;
+        const part = Math.abs(pend) < 3e-3 ? pend : pend * (1 - Math.exp(-opts.zoomEase * dt)), before = cam.scale;      // the last 0.3 percent is applied at once: an exponential tail takes half a second to reach 0.01 percent
         cam.zoomAt(Math.exp(part), pendX, pendY); pend -= part; moved = true;
         if (Math.abs(Math.log(cam.scale / before)) < Math.abs(part) * 0.5) pend = 0;      // the camera's limit: nothing more to chase
         if (Math.abs(pend) < 1e-9) pend = 0;

@@ -819,6 +819,13 @@
     u0 = Math.max(0, u0); v0 = Math.max(0, v0); u1 = Math.min(cw, u1); v1 = Math.min(ch, v1);
     if (u1 > u0 && v1 > v0) ctx.drawImage(L.cv, u0 * q, v0 * q, (u1 - u0) * q, (v1 - v0) * q, view.ox + (u0 - L.mw - L.ox) * r, view.oy + (v0 - L.mh - L.oy) * r, (u1 - u0) * r, (v1 - v0) * r);
   }
+  // A layer canvas is 40 to 50 MB on a large screen. Allocating one for every repaint churns memory (and the garbage collector is slow to give it back),
+  // so the canvas of the layer that was just replaced is kept as a spare and reused for the next, when the size is the same.
+  function layerCanvas(sim, slot, w, h) {
+    const sp = sim[slot + 'Spare']; sim[slot + 'Spare'] = null;
+    if (sp && sp.width === w && sp.height === h) { const c = sp.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); return sp; }
+    return A_().sprites.factory(w, h);
+  }
   const LAYER_STAND_IN = [0.15, 8];                  // the old layer, scaled, may stand in for a new one this far either way: no blurrier than the zoom just before it
   const LAYER_MS = 6;                                // wall time a frame may spend painting a layer in slices
   const layerClock = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -842,13 +849,15 @@
         let p = sim[slot + 'P'];
         if (!p || p.sc !== sc || p.skey !== skey) {
           const mw = Math.ceil(view.w * LAYER_MARGIN), mh = Math.ceil(view.h * LAYER_MARGIN);
-          const cv = A.sprites.factory(Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d'); c.scale(q, q);
+          if (p) sim[slot + 'Spare'] = p.cv;               // an abandoned repaint: its canvas is free again
+          const cv = layerCanvas(sim, slot, Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d'); c.scale(q, q);
           p = sim[slot + 'P'] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh, gen: steps(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh }), done: false };
         }
         const budget = sim.opts.layerMs === undefined ? LAYER_MS : sim.opts.layerMs, t0 = layerClock();
         do { if (p.gen.next().done) { p.done = true; break; } } while (layerClock() - t0 < budget);
         if (p.done) {
           if (A.sprites.posterize) A.quantise(p.cv, A.sprites.posterize);
+          if (L && L.cv !== p.cv) sim[slot + 'Spare'] = L.cv;
           L = sim[slot] = { skey, sc, scale: p.scale, cv: p.cv, ox: p.ox, oy: p.oy, mw: p.mw, mh: p.mh }; sim[slot + 'P'] = null;
           sim.layerRepaints = (sim.layerRepaints || 0) + 1;
         } else if (L) { blitScaled(ctx, view, L, q, bg); return true; }
@@ -864,7 +873,8 @@
     } else L = null;
     if (!L) {
       const mw = Math.ceil(view.w * LAYER_MARGIN), mh = Math.ceil(view.h * LAYER_MARGIN);
-      const cv = A.sprites.factory(Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d');
+      if (sim[slot]) sim[slot + 'Spare'] = sim[slot].cv;
+      const cv = layerCanvas(sim, slot, Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d');
       c.scale(q, q); paint(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh });
       if (A.sprites.posterize) A.quantise(cv, A.sprites.posterize);
       L = sim[slot] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh }; sx = mw * q; sy = mh * q;

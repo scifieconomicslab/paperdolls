@@ -41,10 +41,11 @@
     function startFade(view, now) {
       if (!(o.fadeMs > 0)) { finish(view, now); return; }
       back.style.transition = 'opacity ' + o.fadeMs + 'ms ease-out'; back.style.opacity = '1';
-      fadeEnd = now + o.fadeMs; state = 'fade';
+      fadeEnd = now + o.fadeMs + 40; state = 'fade';              // 40 ms over: the CSS fade runs on the compositor's clock and may be a few percent short at the frame it was due
       if (reticle) cue('fx lock');
     }
     function refine(view, now, render) {
+      hold.place(view);                                       // the stretched picture follows a pan (or a little scale) while the sharp frame is made
       render(back);
       if (o.isDone() || now - since >= o.maxWaitMs) startFade(view, now);
     }
@@ -66,7 +67,7 @@
           if (!want) { hideBack(); state = 'zoom'; seek(); applyBlur(); } else refine(view, now, render);
         } else {                                              // fade
           if (!want) { hideBack(); state = 'zoom'; seek(); applyBlur(); }
-          else { render(back); if (now >= fadeEnd) finish(view, now); }
+          else { hold.place(view); render(back); if (now >= fadeEnd) finish(view, now); }
         }
       }
     };
