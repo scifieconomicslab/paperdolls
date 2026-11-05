@@ -149,7 +149,25 @@ What made this fast, in order of effect:
 
 1. **Sprites at the exact scale.** A sprite is cached at a scale bucket, and a bucket is almost never the view's exact scale, so every blit was resampled. That cost about 2.4 times the frame time (3.0 px/m: 19 ms; 3.1 px/m: 46 ms) and softened the hairlines. Once the zoom has held still for two frames, sprites are built at exactly the view's scale and blitted 1:1 on whole device pixels. While the zoom is changing the old quarter-pixel buckets are used so a zoom does not rebuild every sprite each frame, and at most 150 sprites are rebuilt per frame, so a settled view sharpens over a few frames and never stalls. `AssetLib.sprites.exact` is the switch; `VizLib.renderFrame` sets it.
 2. **Unique tone per building defeated the cache.** Tones now come in five steps (this one cost 6 s per frame on 12,500 buildings).
-3. **Static layers.** Ground, road surfaces and building shadows are drawn once per view and theme; below 1 px per metre buildings and trees are a cached layer too, people are skipped and vehicles are dots. A road spatial index keeps footprint fitting fast.
+3. **World-anchored layers.** The ground (roads, landuse, building shadows) and, below 1 px per metre, the buildings and trees are drawn into cached canvases 1.8 times the view in each direction, anchored to the world rather than the screen (`worldLayer` in `vizlib.js`). Panning blits a window of the layer, so a pan frame costs one `drawImage` until the view moves more than 40% of its size, when the layer is repainted once. While the zoom is changing the old layer is drawn scaled, a little soft, and repainted exactly once the zoom stops. After a pan ends with a fractional shift the layer is repainted once, so a still picture is exact. Below 1 px per metre people are skipped and vehicles are dots. A road spatial index keeps footprint fitting fast.
+
+#### Pan and zoom frames
+
+Profiling the 12,500-building scene found that still frames were cheap (10 to 13 ms) but frames while panning or zooming cost 46 to 157 ms, because the ground layer and the far layer were keyed on the pan offset and the scale and were repainted at every step. Median frame time, node-canvas, 1200 by 700:
+
+| view | before | after |
+|---|---|---|
+| pan at 0.7 px/m | 157 ms | 4.7 ms |
+| pan at 1.7 px/m | 55 ms | 13.6 ms |
+| pan at 3 px/m | 46 ms | 10.2 ms |
+| zoom at 0.7 px/m | about 85 ms | 6.4 ms |
+| zoom at 1.7 px/m | 55 ms | 15 ms |
+| zoom at 3 px/m | about 59 ms | 19 ms |
+| still at 0.7 px/m | 11.6 ms | 4.9 ms |
+
+The "before" zoom numbers at 0.7 and 3 px/m are from an intermediate version of this change that repainted an oversized layer at every step, so they are higher than the original code's. The original zoom cost at 1.7 px/m was 55 ms.
+
+`viz/test_assets.js` checks that pan frames are identical pixel for pixel to a fresh render (at 0.7 and 1.7 px/m; at 3 px/m a pan differs from a fresh render in a handful of anti-aliasing bytes), that a pan inside the margin repaints nothing, and that a view that has stopped after a fractional pan or a zoom is exact. Not yet measured: a real browser with a GPU canvas. The remaining pan cost at 1.7 px/m is the per-frame collection and drawing of the visible buildings; a spatial grid and a persistent depth order would reduce it.
 
 ### Occlusion culling: built, correct, and not faster (opt-in)
 

@@ -20,6 +20,7 @@ The viewer is a SimCity-style isometric rendering engine written in plain JavaSc
 - **Back-face culling.** Each asset is built once for each of the four isometric headings, with only the faces that point at the camera. Hidden walls are never created, so they are never drawn.
 - **Viewport culling.** Anything whose screen bounds miss the canvas is skipped.
 - **Sprite cache.** Assets are drawn once into sprites. When the view has held still, sprites are rebuilt at the exact scale and blitted 1:1 on whole pixels, at most 150 rebuilds per frame, so a settled view sharpens over a few frames and never stalls.
+- **World-anchored layer caches.** The ground, and at far zoom the buildings, are cached in canvases larger than the screen and anchored to the world. A pan frame is one blit, and a zoom draws the old layer scaled until it settles. Pan frames on a 12,500-building scene went from 46 to 157 ms down to 5 to 14 ms in node-canvas.
 - **Far-zoom layer.** Below 1 px per metre, buildings and trees come from a cached layer, people are skipped and vehicles become dots. Ground, road surfaces and shadows are cached per view and theme.
 - **Spatial road index.** Fitting a building footprint to an asset stays fast on a city of tens of thousands of buildings.
 - **Painter's-algorithm drawing,** back to front.

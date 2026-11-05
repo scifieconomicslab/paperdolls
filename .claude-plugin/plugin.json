@@ -1,6 +1,6 @@
 {
   "name": "lab-render",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Isometric visuals for policy audiences: replay renders of agent-based economic simulations and scenes of real places built from OpenStreetMap.",
   "author": {
     "name": "Sci-Fi Economics Lab",

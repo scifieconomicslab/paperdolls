@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2 (panning and zooming)
+
+- **World-anchored layer caches.** Profiling showed that still frames cost 10 to 13 ms while panning or zooming cost 46 to 157 ms, because the ground and far-zoom layers were keyed on the view offset and repainted every frame. They are now cached at 1.8 times the view and anchored to the world: a pan frame is one blit, a zoom draws the old layer scaled and repaints once when it stops, and a fractional pan is repainted exactly once it stops. On the 12,500-building scene (node-canvas) pan frames went from 46 to 157 ms down to 5 to 14 ms, and zoom frames from 55 ms down to 6 to 19 ms.
+- Far zoom no longer collects every building each frame while its layer is valid, so a still frame at 0.7 px/m went from 11.6 to 4.9 ms.
+- Tests: 50 JavaScript checks (two new: pan and zoom match a fresh render and settle exactly).
+
 ## 0.6.1 (occlusion culling)
 
 - **Occlusion culling**, opt-in with `sim.opts.occlusion = true`. A front-to-back pass with a coverage grid skips items that nearer buildings fully cover. It draws the same picture pixel for pixel (tested on a 4 to 8 storey scene at two zooms). It is off by default: on the placeholder, a tall variant and a 12,500-building scene it added 13 to 34% to the frame time, because the test costs more than the blits it saves.

@@ -218,6 +218,48 @@ test('occlusion culling draws the same picture pixel for pixel, skips hidden ite
   assert(culled > 20, 'no hidden item was skipped: ' + culled);
 });
 
+test('panning blits world-anchored layers: no repaint inside the margin, and the picture matches a fresh render', () => {
+  let createCanvas; try { createCanvas = require(process.env.NODE_CANVAS || 'canvas').createCanvas; } catch (e) { console.log('SKIP panning (node canvas not installed)'); return; }
+  A.sprites.factory = (w, h) => createCanvas(w, h);
+  const scene = V.makePlaceholderScene(7), W = 900, H = 600, B = V.sceneBounds(scene), cx = (B[0] + B[2]) / 2, cy = (B[1] + B[3]) / 2, theme = A.theme(fam, undefined, 'colorfigures');
+  const mk = () => { const s = V.createSim(scene, { seed: 5, theme, region: fam.id }); for (let i = 0; i < 40; i++) V.stepSim(s, 0.1); return s; };
+  const view = (k, dx, dy) => ({ w: W, h: H, scale: k, ox: W / 2 - (cx - cy) * k * 0.8660254 + dx, oy: H / 2 - (cx + cy) * k * 0.5 + dy });
+  const frame = (s, v, n) => { const c = createCanvas(W, H).getContext('2d'); for (let i = 0; i < n; i++) V.renderFrame(c, s, v, {}); return c.getImageData(0, 0, W, H).data; };
+  const same = (a, b, what) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) assert.fail(what + ': pixel ' + (i >> 2) + ' differs'); };
+  for (const k of [0.7, 1.7]) {                                   // 0.7 uses the far layer, 1.7 draws items directly over the cached ground
+    const P = mk(), c = createCanvas(W, H).getContext('2d');
+    for (let i = 0; i < 40; i++) V.renderFrame(c, P, view(k, 0, 0), {});
+    const built = P.layerRepaints;
+    for (const [dx, dy] of [[40, 0], [-90, 30], [130, -60]]) {
+      V.renderFrame(c, P, view(k, dx, dy), {});
+      same(c.getImageData(0, 0, W, H).data, frame(mk(), view(k, dx, dy), 40), 'pan ' + dx + ',' + dy + ' at ' + k);
+    }
+    assert.strictEqual(P.layerRepaints, built, 'a pan inside the margin repainted a layer at ' + k);
+    V.renderFrame(c, P, view(k, 600, 0), {});                      // further than the margin: the layer is repainted, the picture is still right
+    assert(P.layerRepaints > built, 'a pan past the margin did not repaint at ' + k);
+    for (let i = 0; i < 40; i++) V.renderFrame(c, P, view(k, 600, 0), {});
+    same(c.getImageData(0, 0, W, H).data, frame(mk(), view(k, 600, 0), 40), 'pan past the margin at ' + k);
+  }
+});
+
+test('a view that has stopped is exact after a fractional pan or a zoom', () => {
+  let createCanvas; try { createCanvas = require(process.env.NODE_CANVAS || 'canvas').createCanvas; } catch (e) { console.log('SKIP settling (node canvas not installed)'); return; }
+  A.sprites.factory = (w, h) => createCanvas(w, h);
+  const scene = V.makePlaceholderScene(7), W = 900, H = 600, B = V.sceneBounds(scene), cx = (B[0] + B[2]) / 2, cy = (B[1] + B[3]) / 2, theme = A.theme(fam, undefined, 'colorfigures');
+  const mk = () => { const s = V.createSim(scene, { seed: 5, theme, region: fam.id }); for (let i = 0; i < 40; i++) V.stepSim(s, 0.1); return s; };
+  const view = (k, dx, dy) => ({ w: W, h: H, scale: k, ox: W / 2 - (cx - cy) * k * 0.8660254 + dx, oy: H / 2 - (cx + cy) * k * 0.5 + dy });
+  const settle = (s, c, v) => { for (let i = 0; i < 40; i++) V.renderFrame(c, s, v, {}); return c.getImageData(0, 0, W, H).data; };
+  for (const k of [0.7, 1.7]) {
+    const P = mk(), c = createCanvas(W, H).getContext('2d'); settle(P, c, view(k, 0, 0));
+    for (let i = 0; i < 6; i++) V.renderFrame(c, P, view(k, 10.37 + i * 0.5, 4.21), {});       // a pan with fractional steps
+    const a = settle(P, c, view(k, 12.37, 4.21)), b = settle(mk(), createCanvas(W, H).getContext('2d'), view(k, 12.37, 4.21));
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) assert.fail('fractional pan at ' + k + ': pixel ' + (i >> 2) + ' differs');
+    for (let i = 0; i < 8; i++) V.renderFrame(c, P, view(k * (1 + 0.03 * (i + 1)), 12.37, 4.21), {});   // a zoom in eight steps
+    const z = settle(P, c, view(k * 1.24, 12.37, 4.21)), y = settle(mk(), createCanvas(W, H).getContext('2d'), view(k * 1.24, 12.37, 4.21));
+    for (let i = 0; i < z.length; i++) if (z[i] !== y[i]) assert.fail('zoom at ' + k + ': pixel ' + (i >> 2) + ' differs');
+  }
+});
+
 // ================= buildings =================
 const BPAL = { wall: fam.wall, wall2: fam.wall2, roof: fam.roof, ground: fam.ground, accent: fam.accent, shadow: fam.shadow };
 function bparams(region, kind, W, D, N, seed) { return A.buildingParams(region, kind, N, { W, D }, seed); }

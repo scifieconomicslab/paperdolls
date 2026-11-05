@@ -652,77 +652,122 @@
     const zs = sim._zoom || (sim._zoom = { scale: NaN, still: 0 });
     if (zs.scale === view.scale) zs.still++; else { zs.scale = view.scale; zs.still = 0; }
     A.sprites.exact = zs.still >= 2;
+    // the whole view (scale and offset) unchanged for a few frames: cached layers are then repainted exactly if they are off by a fraction of a pixel
+    if (zs.ox === view.ox && zs.oy === view.oy && zs.vscale === view.scale) zs.stillView = (zs.stillView || 0) + 1; else { zs.ox = view.ox; zs.oy = view.oy; zs.vscale = view.scale; zs.stillView = 0; }
     const shadow = mixHex(pal.shadow, pal.bg, 0.72);
     const heightOfEntity = e => e.params ? A_().buildingHeight(e.kind, e.params.N) : e.levels * (LIB.buildings[e.kind] || LIB.buildings.terrace).storeyH;
-    // The ground and the building shadows do not change between frames, so they are drawn once per view and theme and blitted.
-    const drawStatic = c => {
-      c.fillStyle = pal.bg; c.fillRect(0, 0, view.w, view.h); c.lineJoin = 'round';
-      drawGround(c, view, sim.scene, pal, reg);
+    // The ground and the building shadows do not change between frames. They are drawn once into a cached layer that is bigger than the
+    // screen and anchored to the world, so panning only moves a window over it (see worldLayer).
+    const drawStatic = (c, v) => {
+      c.fillStyle = pal.bg; c.fillRect(0, 0, v.w, v.h); c.lineJoin = 'round';
+      drawGround(c, v, sim.scene, pal, reg);
       if (layers.buildings) for (const e of sim.buildings) {
-        const b = e.src, H = heightOfEntity(e), q = proj(view, b.footprint[0][0], b.footprint[0][1], 0);
-        if (q[0] < -view.w * 0.5 - H * view.scale || q[0] > view.w * 1.5 + H * view.scale || q[1] < -view.h * 0.5 - H * view.scale || q[1] > view.h * 1.5 + H * view.scale) continue;
-        poly(c, b.footprint.map(p => proj(view, p[0] - H * 0.35, p[1] + H * 0.12, 0)), shadow, null, 0);
+        const b = e.src, H = heightOfEntity(e), q = proj(v, b.footprint[0][0], b.footprint[0][1], 0);
+        if (q[0] < -v.w * 0.5 - H * v.scale || q[0] > v.w * 1.5 + H * v.scale || q[1] < -v.h * 0.5 - H * v.scale || q[1] > v.h * 1.5 + H * v.scale) continue;
+        poly(c, b.footprint.map(p => proj(v, p[0] - H * 0.35, p[1] + H * 0.12, 0)), shadow, null, 0);
       }
     };
-    const F = A.sprites.factory, gkey = [view.w, view.h, view.scale.toFixed(4), view.ox.toFixed(1), view.oy.toFixed(1), pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings].join('|');
-    if (F && sim.opts.cacheGround !== false) {
-      if (!sim._ground || sim._ground.key !== gkey) {
-        const q = A.sprites.dpr || 1, cv = F(Math.ceil(view.w * q), Math.ceil(view.h * q)), c2 = cv.getContext('2d');
-        c2.scale(q, q); drawStatic(c2); sim._ground = { key: gkey, cv };
+    const F = A.sprites.factory, gkey = [view.w, view.h, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings].join('|');
+    const settled = zs.stillView >= 3, zooming = zs.still < 2;
+    if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg);
+    else drawStatic(ctx, view);
+    // What can be seen at a view: buildings and trees (and the fountain) that reach it, and the agents. Anything whose screen bounds
+    // miss the canvas is skipped (viewport culling).
+    const collectStatic = (v, out) => {
+      const pad = v.scale * 12;
+      if (layers.buildings) for (const e of sim.buildings) {
+        const H = heightOfEntity(e) * v.scale; let vis = false;
+        for (const p of e.src.footprint) { const q = proj(v, p[0], p[1], 0); if (q[0] > -pad && q[0] < v.w + pad && q[1] > -pad && q[1] < v.h + pad + H) { vis = true; break; } }
+        if (vis) out.push({ d: e.fit.cx + e.fit.cy, kind: 'b', o: e });
       }
-      ctx.drawImage(sim._ground.cv, 0, 0, view.w, view.h);
-    } else drawStatic(ctx);
+      if (layers.trees) for (const t of sim.trees) {
+        const q = proj(v, t.x, t.y, 0), H = A.treeHeight(t.kind, t.s) * v.scale;
+        if (q[0] > -pad && q[0] < v.w + pad && q[1] > -pad && q[1] < v.h + pad + H) out.push({ d: t.x + t.y + 0.5, kind: 't', o: t });
+      }
+      for (const l of sim.scene.landuse) if (l.kind === 'square') {
+        let cx = 0, cy = 0; l.footprint.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= l.footprint.length; cy /= l.footprint.length;
+        out.push({ d: cx + cy, kind: 'fountain', o: [cx, cy] });
+      }
+      return out;
+    };
+    const collectAgents = (out) => {
+      const pad = view.scale * 12;
+      for (const a of sim.agents) {
+        if (a.group === 'people' ? !layers.people : !layers.vehicles) continue;
+        const pose = agentPose(a, sim), p = proj(view, pose.x, pose.y, 0);
+        if (!(p[0] > -pad && p[0] < view.w + pad && p[1] > -pad && p[1] < view.h + pad)) continue;
+        out.push({ d: pose.x + pose.y, kind: 'a', o: a, pose });
+      }
+      return out;
+    };
+    const drawItems = (target, list, v) => {
+      for (const it of list) {
+        if (it.kind === 'b') drawBuildingEntity(target, v, reg, pal, shadow, sim, it.o);
+        else if (it.kind === 'fountain') drawFountain(target, v, pal, reg, it.o[0], it.o[1]);
+        else if (it.kind === 't') drawTreeEntity(target, v, sim, it.o, pal, reg, shadow);
+        else drawAgent(target, v, reg, shadow, sim, it.o, it.pose, layers);
+      }
+    };
+    const byDepth = (p, q) => p.d - q.d;
+    // Zoomed far out nothing in the buildings and trees changes from frame to frame, so they are drawn once into a world-anchored layer
+    // and blitted; only vehicles (dots at this zoom) are drawn on top. The layer is redrawn when the scale, the theme or any building's
+    // state changes, or when panning runs past its margin. A binding or a custom building style can change colours at any moment, so
+    // they switch it off.
+    const far = view.scale < 1.0 && F && sim.opts.cacheGround !== false && !sim.bindings.length && !sim.buildingStyle;
+    if (far) {
+      let h = 0; for (const e of sim.buildings) h = (h * 31 + (e.state ? e.state.charCodeAt(0) : 0) * 2 + (e.investor ? 1 : 0)) | 0;
+      worldLayer(ctx, sim, '_far', view, gkey + '|' + h + '|' + layers.trees + '|' + (A.sprites.exact ? 1 : 0), settled, zooming, (c, v) => { c.lineJoin = 'round'; drawItems(c, collectStatic(v, []).sort(byDepth), v); });
+      const agents = collectAgents([]).sort(byDepth);
+      drawItems(ctx, agents, view);
+      return;
+    }
     // items sorted back to front
-    let items = [];
-    // viewport culling: skip anything whose screen bounds miss the canvas (cheap, and it is most of the scene)
-    const pad = view.scale * 12;
-    const onScreen = (x, y, z) => { const p = proj(view, x, y, z || 0); return p[0] > -pad && p[0] < view.w + pad && p[1] > -pad && p[1] < view.h + pad; };
-    if (layers.buildings) for (const e of sim.buildings) {
-      const H = heightOfEntity(e) * view.scale; let vis = false;
-      for (const p of e.src.footprint) { const q = proj(view, p[0], p[1], 0); if (q[0] > -pad && q[0] < view.w + pad && q[1] > -pad && q[1] < view.h + pad + H) { vis = true; break; } }
-      if (vis) items.push({ d: e.fit.cx + e.fit.cy, kind: 'b', o: e });
-    }
-    if (layers.trees) for (const t of sim.trees) {
-      const q = proj(view, t.x, t.y, 0), H = A.treeHeight(t.kind, t.s) * view.scale;
-      if (q[0] > -pad && q[0] < view.w + pad && q[1] > -pad && q[1] < view.h + pad + H) items.push({ d: t.x + t.y + 0.5, kind: 't', o: t });
-    }
-    for (const l of sim.scene.landuse) if (l.kind === 'square') {
-      let cx = 0, cy = 0; l.footprint.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= l.footprint.length; cy /= l.footprint.length;
-      items.push({ d: cx + cy, kind: 'fountain', o: [cx, cy] });
-    }
-    for (const a of sim.agents) {
-      if (a.group === 'people' ? !layers.people : !layers.vehicles) continue;
-      const pose = agentPose(a, sim);
-      if (!onScreen(pose.x, pose.y, 0)) continue;
-      items.push({ d: pose.x + pose.y, kind: 'a', o: a, pose });
-    }
-    items.sort((p, q) => p.d - q.d);
+    let items = collectAgents(collectStatic(view, [])).sort(byDepth);
     // occlusion culling: off unless sim.opts.occlusion is true. It draws the same picture, but on every scene measured it costs more time
     // than the draws it saves (see viz/README.md), so it is opt-in.
     if (sim.opts.occlusion === true && A.sprites.exact && F && items.length >= (sim.opts.occlusionMin || OCCLUSION_MIN_ITEMS)) items = cullHidden(items, sim, view, layers, pal);
     else sim.occlusionStats = null;
-    const drawItems = (target, list) => {
-      for (const it of list) {
-        if (it.kind === 'b') drawBuildingEntity(target, view, reg, pal, shadow, sim, it.o);
-        else if (it.kind === 'fountain') drawFountain(target, view, pal, reg, it.o[0], it.o[1]);
-        else if (it.kind === 't') drawTreeEntity(target, view, sim, it.o, pal, reg, shadow);
-        else drawAgent(target, view, reg, shadow, sim, it.o, it.pose, layers);
+    drawItems(ctx, items, view);
+  }
+
+  // A layer that is cached in a canvas bigger than the screen (LAYER_MARGIN of the view on every side) and anchored to the world.
+  // Panning only changes which window of it is blitted, so a pan frame costs one drawImage. While the zoom is changing, the old layer is
+  // drawn scaled instead of being repainted at every step (a little soft, then exact once the zoom stops).
+  // The layer is repainted when its key changes (theme, state, or the scale once it has held still), when the view has moved further than
+  // the margin, and once after a pan has ended with a fractional shift, so a still picture is always exact.
+  // skey describes everything but the scale. paint(ctx, v) draws the layer for the enlarged view v. bg, if given, is filled first when
+  // the scaled layer does not cover the screen.
+  const LAYER_MARGIN = 0.4;
+  function worldLayer(ctx, sim, slot, view, skey, settled, zooming, paint, bg) {
+    const A = A_(), q = A.sprites.dpr || 1, sc = view.scale.toFixed(4);
+    let L = sim[slot], sx = 0, sy = 0;
+    if (L && L.skey === skey && L.sc !== sc && zooming) {
+      const r = view.scale / L.scale;
+      if (r > 0.5 && r < 2) {
+        if (bg) { ctx.fillStyle = bg; ctx.fillRect(0, 0, view.w, view.h); }
+        // only the part of the layer that lands on the screen is resampled: u is a layer position in css pixels, x a screen position
+        const cw = L.cv.width / q, ch = L.cv.height / q;
+        let u0 = (0 - view.ox) / r + L.mw + L.ox, u1 = (view.w - view.ox) / r + L.mw + L.ox, v0 = (0 - view.oy) / r + L.mh + L.oy, v1 = (view.h - view.oy) / r + L.mh + L.oy;
+        u0 = Math.max(0, u0); v0 = Math.max(0, v0); u1 = Math.min(cw, u1); v1 = Math.min(ch, v1);
+        if (u1 > u0 && v1 > v0) ctx.drawImage(L.cv, u0 * q, v0 * q, (u1 - u0) * q, (v1 - v0) * q, view.ox + (u0 - L.mw - L.ox) * r, view.oy + (v0 - L.mh - L.oy) * r, (u1 - u0) * r, (v1 - v0) * r);
+        return;
       }
-    };
-    // Zoomed far out nothing in the buildings and trees changes from frame to frame, so they are drawn once into a layer and
-    // blitted; only vehicles (dots at this zoom) are drawn on top. The layer is redrawn when the view, the theme or any
-    // building's state changes. A binding or a custom building style can change colours at any moment, so they switch it off.
-    const far = view.scale < 1.0 && F && sim.opts.cacheGround !== false && !sim.bindings.length && !sim.buildingStyle;
-    if (far) {
-      let h = 0; for (const e of sim.buildings) h = (h * 31 + (e.state ? e.state.charCodeAt(0) : 0) * 2 + (e.investor ? 1 : 0)) | 0;
-      const fkey = gkey + '|' + h + '|' + layers.trees;
-      if (!sim._far || sim._far.key !== fkey) {
-        const q = A.sprites.dpr || 1, cv = F(Math.ceil(view.w * q), Math.ceil(view.h * q)), c3 = cv.getContext('2d');
-        c3.scale(q, q); c3.lineJoin = 'round'; drawItems(c3, items.filter(it => it.kind !== 'a')); sim._far = { key: fkey, cv };
-      }
-      ctx.drawImage(sim._far.cv, 0, 0, view.w, view.h);
-      drawItems(ctx, items.filter(it => it.kind === 'a'));
-    } else drawItems(ctx, items);
+    }
+    if (L && L.skey === skey && L.sc === sc) {
+      const dx = (view.ox - L.ox) * q, dy = (view.oy - L.oy) * q;                    // device pixels the view has moved since the layer was painted
+      sx = L.mw * q - Math.round(dx); sy = L.mh * q - Math.round(dy);
+      const inside = sx >= 0 && sy >= 0 && sx + Math.ceil(view.w * q) <= L.cv.width && sy + Math.ceil(view.h * q) <= L.cv.height;
+      const exact = Math.abs(dx - Math.round(dx)) < 0.01 && Math.abs(dy - Math.round(dy)) < 0.01;
+      if (!inside || (settled && !exact)) L = null;
+    } else L = null;
+    if (!L) {
+      const mw = Math.ceil(view.w * LAYER_MARGIN), mh = Math.ceil(view.h * LAYER_MARGIN);
+      const cv = A.sprites.factory(Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d');
+      c.scale(q, q); paint(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh });
+      L = sim[slot] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh }; sx = mw * q; sy = mh * q;
+      sim.layerRepaints = (sim.layerRepaints || 0) + 1;
+    }
+    ctx.drawImage(L.cv, sx, sy, Math.ceil(view.w * q), Math.ceil(view.h * q), 0, 0, view.w, view.h);
   }
 
   // A building: an asset sprite when its footprint fits a slot, otherwise the generic extrusion.
