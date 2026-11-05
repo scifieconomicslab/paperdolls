@@ -2,9 +2,9 @@
 
 ![A 28-second tour of the viewer: zooming from the whole synthetic city to street level and back, with the detail pass and fog on](docs/images/tour.webp)
 
-*A 28-second tour of the viewer on the synthetic placeholder area (South Asian tropical region, Whitewash and clay tile look) with the detail pass and fog on. It was drawn frame by frame at full quality by [viz/record_tour.js](viz/record_tour.js), not screen-recorded, so it is a steady 30 frames a second ([full-quality 1280 by 720 mp4](docs/images/tour.mp4)); the live viewer's speed is a separate matter (see [viz/README.md](viz/README.md)).*
+*A 28-second tour of the viewer on the synthetic placeholder area (South Asian tropical region, Whitewash and clay tile look) with the detail pass and fog on. It was drawn frame by frame at full quality by [viz/record_tour.js](viz/record_tour.js), and at low quality. See ([full-quality 1280 by 720 mp4](docs/images/tour.mp4)) and [viz/README.md](viz/README.md)).*
 
-A Claude plugin from the Sci-Fi Economics Lab. It draws agent-based economic simulations and real places as isometric pictures, in a hand-inked style (colorfigures) or a grey technical style (formal), for policy audiences.
+A Claude plugin from the Sci-Fi Economics Lab. It is a visualization engine draws agent-based economic simulations and real places as isometric pictures, in a hand-inked style (colorfigures) or a grey technical style (formal), for policy audiences.
 
 ![The viewer on a synthetic placeholder area, South Asian tropical region, Whitewash and clay tile look, colorfigures register](docs/images/viewer.webp)
 
