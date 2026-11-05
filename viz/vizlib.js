@@ -640,7 +640,9 @@
 
   // At most SPRITE_BUILDS_PER_FRAME sprites are rebuilt at the exact scale in one frame, so a settled view sharpens over a few frames
   // instead of stalling on one.
-  const SPRITE_BUILDS_PER_FRAME = 150;
+  const SPRITE_BUILDS_PER_FRAME = 60;
+  const BUILD_MS_PER_FRAME = 8;                      // wall time a frame may spend building sprites (at least one is always built)
+  const PREWARM_MS = 4;                              // and pre-rendering neighbouring levels while the view is still
   const PREWARM_PER_FRAME = 12;                      // while the view is still and fully sharp: sprites pre-rendered for the neighbouring zoom levels, per frame
   const ZOOM_BUILDS_PER_FRAME = 16;                  // while the zoom is changing: about 6 ms of sprite building, then scaled sprites are used
   const OCCLUSION_MIN_ITEMS = 300;
@@ -648,12 +650,14 @@
   // every pixel is n by n and the ink is one logical pixel wide; sim.opts.posterize = step rounds each colour channel to a multiple of step (at the
   // low resolution, so it is cheap); sim.opts.fog = true lays a cool haze toward the top of the screen and darkens the edges. Fog is two gradient
   // fills. The low-resolution frame has no grain, because at that size grain reads as noise.
+  const clockNow = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   function renderFrame(ctx, sim, view, layers) {
     const A = A_(), o = sim.opts, finish = sim.theme.reg !== 'formal';
     const ps = finish && A.sprites.factory && o.pixel > 1 ? o.pixel : 1;
     A.sprites.posterize = ps > 1 && o.posterize > 1 ? o.posterize : 0;
     A.sprites.grain = ps === 1; A.sprites.minDetail = ps > 1 ? 1.25 : 2.5;
     A.sprites.builds = 0; A.sprites.maxBuilds = SPRITE_BUILDS_PER_FRAME; A.sprites.maxZoomBuilds = ZOOM_BUILDS_PER_FRAME;
+    A.sprites.frameStart = clockNow(); A.sprites.maxBuildMs = sim.opts.buildMs === undefined ? BUILD_MS_PER_FRAME : sim.opts.buildMs;
     try {
       if (ps === 1) renderFrameInner(ctx, sim, view, layers);
       else {
@@ -663,12 +667,12 @@
         try { renderFrameInner(P.c, sim, { w: iw, h: ih, scale: view.scale / ps, ox: view.ox / ps, oy: view.oy / ps }, layers); } finally { A.sprites.dpr = dpr; }
         ctx.save(); ctx.imageSmoothingEnabled = o.pixelSmooth === true; ctx.drawImage(P.cv, 0, 0, iw * ps, ih * ps); ctx.restore();
       }
-      if (finish && o.fog && !(ps === 1 && sim._mode === 'snap')) drawFog(ctx, sim.theme, view);      // a held picture already carries the fog
+      if (finish && o.fog) drawFog(ctx, sim.theme, view);
       const warm = sim._warm;
       A.sprites.warmBuilds = 0;
-      if (A.sprites.collect && A.sprites.builds === 0 && ps === 1) { A.sprites.warmBuilds = A.prewarm(view.scale, PREWARM_PER_FRAME); warm.done = A.sprites.warmBuilds === 0; }
+      if (A.sprites.collect && A.sprites.builds === 0 && ps === 1) { A.sprites.warmBuilds = A.prewarm(view.scale, PREWARM_PER_FRAME, PREWARM_MS); warm.done = A.sprites.warmBuilds === 0; }
       A.sprites.collect = null;
-    } finally { A.sprites.maxBuilds = Infinity; A.sprites.maxZoomBuilds = Infinity; }
+    } finally { A.sprites.maxBuilds = Infinity; A.sprites.maxZoomBuilds = Infinity; A.sprites.maxBuildMs = Infinity; }
   }
   // The haze is painted once into a canvas the size of the view and blitted each frame.
   function drawFog(ctx, pal, view) {
@@ -722,33 +726,8 @@
     };
     const F = A.sprites.factory, gkey = [view.w, view.h, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings, detail, A.sprites.ink, A.sprites.posterize].join('|');
     const settled = zs.stillView >= 3, zooming = zs.still < 2;
-    // Hold and scale: the frame before a zoom begins is still on the canvas, sharp. It is copied once, and while the scale keeps changing that one
-    // picture is drawn scaled about the same point, which costs one blit however big the scene. A jump of more than 1.8 times, or a view that has
-    // stopped, is drawn for real (and the next moving frame holds that one instead).
-    const canvas = ctx.canvas, moving = zs.still === 0 && zs.moved, hold = F && canvas && sim.opts.holdZoom !== false;
-    if (hold && moving && !sim._snap && sim._last && sim._last.real && sim._last.w === view.w && sim._last.h === view.h) {
-      let cv = sim._snapcv; if (!cv || cv.width !== canvas.width || cv.height !== canvas.height) cv = sim._snapcv = F(canvas.width, canvas.height);
-      const c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height); c.drawImage(canvas, 0, 0);
-      sim._snap = { cv, scale: sim._last.scale, ox: sim._last.ox, oy: sim._last.oy };
-    }
-    let held = null;                                               // the held picture, if this frame is drawn from it, and where it lands
-    if (hold && moving && sim._snap) {
-      const sn = sim._snap, r = view.scale / sn.scale;
-      if (r >= 0.55 && r <= 1.8) {
-        const dx = view.ox - sn.ox * r, dy = view.oy - sn.oy * r, dw = view.w * r, dh = view.h * r;
-        held = { sn, dx, dy, dw, dh, covers: dx <= 0 && dy <= 0 && dx + dw >= view.w && dy + dh >= view.h };
-      }
-    }
-    if (!(held && held.covers)) {                                  // the ground is skipped when the held picture covers the screen; otherwise it fills what the picture does not reach
-      if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg);
-      else drawStatic(ctx, view);
-    }
-    if (held) {
-      ctx.drawImage(held.sn.cv, 0, 0, held.sn.cv.width, held.sn.cv.height, held.dx, held.dy, held.dw, held.dh);
-      sim.snapFrames = (sim.snapFrames || 0) + 1; sim._mode = 'snap'; return;
-    }
-    if (!moving || sim._snap) sim._snap = null;
-    sim._mode = 'real';
+    if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg);
+    else drawStatic(ctx, view);
     // What can be seen at a view: buildings and trees (and the fountain) that reach it, and the agents. Anything whose screen bounds
     // miss the canvas is skipped (viewport culling).
     const collectStatic = (v, out) => {
@@ -806,7 +785,6 @@
     if (sim.opts.occlusion === true && A.sprites.exact && F && items.length >= (sim.opts.occlusionMin || OCCLUSION_MIN_ITEMS)) items = cullHidden(items, sim, view, layers, pal);
     else sim.occlusionStats = null;
     drawItems(ctx, items, view);
-    sim._last = { real: true, scale: view.scale, ox: view.ox, oy: view.oy, w: view.w, h: view.h };
   }
 
   // A layer that is cached in a canvas bigger than the screen (LAYER_MARGIN of the view on every side) and anchored to the world.

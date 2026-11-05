@@ -313,13 +313,17 @@
 
   // Sprite cache: an asset at a given scale and colouring is painted once into an offscreen canvas, then blitted.
   // Set AssetLib.sprites.factory = (w, h) => canvas (browser: document.createElement; node: createCanvas).
-  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false, ink: false, grain: true, minDetail: 2.5, posterize: 0, maxZoomBuilds: Infinity, zooming: false, collect: null, index: new Map() };
+  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false, ink: false, grain: true, minDetail: 2.5, posterize: 0, maxZoomBuilds: Infinity, maxBuildMs: Infinity, frameStart: 0, zooming: false, collect: null, index: new Map() };
   // round each colour channel of a canvas to a multiple of step (alpha untouched). Used once per sprite and per cached layer, never per frame.
   function quantise(cv, step) {
     const c = cv.getContext('2d'), d = c.getImageData(0, 0, cv.width, cv.height), a = d.data, k = 1 / step;
     for (let i = 0; i < a.length; i += 4) { a[i] = Math.min(255, Math.round(a[i] * k) * step); a[i + 1] = Math.min(255, Math.round(a[i + 1] * k) * step); a[i + 2] = Math.min(255, Math.round(a[i + 2] * k) * step); }
     c.putImageData(d, 0, 0);
   }
+  // Sprites are built under a budget of count and of time (a build costs 0.3 ms in node and about 0.8 ms in a browser, so a count alone is the wrong unit).
+  // Every frame may build at least one, so a view always makes progress.
+  const clock = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const timeUp = () => sprites.builds > 0 && clock() - sprites.frameStart >= sprites.maxBuildMs;
   // Over the sprite memory cap: drop the sprites built for scales far from the one wanted (more than 2.7 times away), keeping the neighbouring
   // octaves a zoom can still use. Only when that is not enough is everything dropped. (Clearing everything made the next zoom rebuild it all.)
   function evict(sbWanted) {
@@ -362,14 +366,14 @@
   // Pre-render and hold: while the view is still, build the sprites for the zoom levels either side of the current one (whole octaves, the same
   // ones a zoom draws), for the sprites seen in this frame, a few per frame. A zoom then finds them ready and only downscales. Returns how many it
   // built, so 0 means nothing is missing. sprites.collect is the map of sprites the frame drew (set by the renderer while this is wanted).
-  function prewarm(scale, budget) {
+  function prewarm(scale, budget, budgetMs) {
     if (!sprites.collect || !sprites.factory) return 0;
     const q = sprites.dpr || 1, lev = Math.pow(2, Math.ceil(Math.log2(Math.max(1, scale * q)))), levels = [lev, lev * 2, lev / 2].filter(l => l >= 1 && l <= 64);
-    let n = 0;
+    let n = 0; const t0 = clock();
     for (const [asset, colours, reg] of sprites.collect.values()) for (const L of levels) {
       const kk = keysFor(asset, colours, reg, L);
       if (sprites.cache.has(kk.key)) continue;
-      if (n >= budget) return n;
+      if (n >= budget || (n > 0 && clock() - t0 >= budgetMs)) return n;
       buildSprite(asset, colours, reg, L, L / q, kk); n++;
     }
     return n;
@@ -388,14 +392,15 @@
     // build budget is spent (maxZoomBuilds). Rebuilding every visible sprite at each new bucket stalled a zoom for 150 to 500 ms at a time. The
     // scaled blit is soft; the view sharpens (exact sprites, 150 builds a frame) once it stops. With nothing held to scale, a building or tree is
     // built, and decoration (people, vehicles) is left out for a few frames.
-    if (!sp && sprites.zooming && sprites.builds >= sprites.maxZoomBuilds) {
+    if (!sp && sprites.zooming && (sprites.builds >= sprites.maxZoomBuilds || timeUp())) {
       const held = sprites.index.get(kk.ikey); let best = null, bd = Infinity;
-      if (held) for (const h of held) { const r = Math.log(h.sb / sb), d = Math.abs(r); if (r >= -1.6 && r <= 1.4 && d < bd && sprites.cache.get(h.key) === h) { best = h; bd = d; } }
+      if (held) for (const h of held) { const r = Math.log(h.sb / sb), d = Math.abs(r); if (r >= -2.3 && r <= 2.3 && d < bd && sprites.cache.get(h.key) === h) { best = h; bd = d; } }
       if (best) { sp = best; sbUse = best.sb; }
       else if (asset.group === 'people' || asset.group === 'vehicles') return;
     }
-    if (!sp && sprites.exact && sprites.builds >= sprites.maxBuilds) {      // over this frame's budget: show the bucketed sprite and sharpen on a later frame
-      sprites.exact = false; drawSprite(ctx, asset, colours, reg, px, py, scale); sprites.exact = true; return;
+    if (!sp && sprites.exact && (sprites.builds >= sprites.maxBuilds || timeUp())) {      // over this frame's budget: show the bucketed sprite and sharpen on a later frame
+      const z = sprites.zooming; sprites.exact = false; sprites.zooming = true;       // scaled from a sprite already held, not built: the octave sprite is not there yet
+      drawSprite(ctx, asset, colours, reg, px, py, scale); sprites.exact = true; sprites.zooming = z; return;
     }
     if (!sp) { sprites.builds++; sp = buildSprite(asset, colours, reg, sb, scale, kk); }
     const k = scale / sbUse;                                                         // sprite pixels to canvas units

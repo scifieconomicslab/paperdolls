@@ -25,7 +25,7 @@ Found during the audit of v0.1.0 and kept up to date. Severity is in brackets.
 
 19. **The first frame is slow on a large scene.** Opened fully zoomed out, a 12,276-building scene takes 4.9 s to draw its first frame (0.37 s at 1.7 px per metre) because the far layer and the sprites are built then. Settled and panning frames are fast. (Medium)
 
-20. **A zoom still has one real frame per 1.8 times.** The held picture is scaled up to 1.8 times; beyond that a frame is drawn for real (60 to 120 ms on a small scene, about 300 ms with 12,000 buildings because the ground layer repaints). People and vehicles freeze for the length of a zoom. (Low)
+20. **A zoom still ends with one real frame.** The picture is stretched by the compositor while the wheel zooms, then drawn for real: about 50 to 180 ms in Chrome with a 1,000-building scene (sprite builds, a ground-layer repaint of about 33 ms), and again each time the stretch passes 4 times. People and vehicles freeze for the length of a zoom. Slicing that frame into an offscreen canvas, or building in a worker with `OffscreenCanvas`, would hide it. (Medium)
 
 ## Fixed
 

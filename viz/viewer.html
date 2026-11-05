@@ -11,8 +11,9 @@
  .controls label { display:flex; gap:6px; align-items:center; }
  select,button { font:inherit; padding:3px 7px; border:1px solid #9d978a; border-radius:6px; background:#fff; color:var(--ink); }
  button.on { background:var(--ink); color:#fff; }
- #stage { display:block; width:100%; height:72vh; background:#f2efe7; cursor:grab; touch-action:none; }
- #stage.dragging { cursor:grabbing; }
+ #stagebox { position:relative; width:100%; height:72vh; overflow:hidden; background:#f2efe7; cursor:grab; touch-action:none; }
+ #stagebox.dragging { cursor:grabbing; }
+ #stage { position:absolute; left:0; top:0; display:block; width:100%; height:100%; will-change:transform; }
  .err { color:#a2191f; }
  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; padding:14px 22px 30px; }
  .card { background:#fff; border:1px solid #cfc8b8; border-radius:8px; padding:12px; font-size:13px; }
@@ -60,7 +61,7 @@
 <div id="attrib" class="note" style="padding:6px 22px 0;font-size:12px"></div>
 <div id="looknote" class="note" style="padding:6px 22px 0;font-size:12px"></div>
 <div id="bstats" class="note" style="padding:2px 22px 6px;font-size:12px"></div>
-<canvas id="stage"></canvas>
+<div id="stagebox"><canvas id="stage"></canvas></div>
 <div class="grid">
   <div class="card"><b>Library: vehicles</b> (assetlib.js)<br>19 classes, each pre-built for the four isometric headings with only the faces turned toward the camera. Regions choose the fleet (tuk-tuks, cargo bikes, double-deckers, minibuses, trams…) and the drive side. The body or livery is the <i>data surface</i>. See library_catalogue.html.</div>
   <div class="card"><b>Library: people</b> (assetlib.js)<br>Paper dolls: flat cut-outs, one neutral paper tone, no skin tones, no walking animation. Man, woman, boy, girl, couple, parent and child, family, wheelchair user, rider. Outfits follow the region's climate (coats, sun hats, umbrellas). The garment is the data surface.</div>
@@ -85,6 +86,9 @@
 </script>
 <script>
 /*__REPLAY__*/
+</script>
+<script>
+/*__ZOOMHOLD__*/
 </script>
 <script>
 /*__CAMERA__*/
@@ -120,12 +124,13 @@
   const cam = LabCamera.create({ bounds: V.sceneBounds(scene), width: canvas.clientWidth || 1200, height: canvas.clientHeight || 700 });
   let sliderHeld = false;
   const syncZoom = () => { if (!sliderHeld) zoomEl.value = cam.zoomFraction(); };       // the slider follows the camera, except while it is being dragged
-  const controls = LabControls.attach(canvas, cam, { onChange: syncZoom });
+  const box = document.getElementById('stagebox'), hold = ZoomHold.create(canvas, { settleMs: 120 });   // the box takes the input and clips the canvas, which a zoom moves with a CSS transform
+  const controls = LabControls.attach(box, cam, { onChange: syncZoom });
   zoomEl.addEventListener('pointerdown', () => { sliderHeld = true; });
   window.addEventListener('pointerup', () => { sliderHeld = false; });
   zoomEl.oninput = () => cam.setZoomFraction(+zoomEl.value);
   document.getElementById('fit').onclick = () => { cam.fitAll(); syncZoom(); };
-  window.labViewer = { camera: cam, controls };                                         // a handle for tests and for the browser console
+  window.labViewer = { camera: cam, controls, get sim() { return sim; } };                                         // a handle for tests and for the browser console
   function focusScene() { cam.setBounds(V.sceneBounds(scene)); syncZoom(); }
   function showScene() {
     const a = scene.area || {}, el = document.getElementById('attrib');
@@ -145,7 +150,7 @@
     const dpr = window.devicePixelRatio || 1;
     canvas.width = canvas.clientWidth * dpr; canvas.height = canvas.clientHeight * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    cam.resize(canvas.clientWidth || 1200, canvas.clientHeight || 700); syncZoom();
+    hold.reset(); cam.resize(canvas.clientWidth || 1200, canvas.clientHeight || 700); syncZoom();
   }
   function rebuild() {
     const drive = document.getElementById('drive').value;
@@ -236,7 +241,8 @@
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     if (state.playing) V.stepSim(sim, dt);
     if (replay && replay.playing) { replay.advance(dt); syncBar(); }
-    V.renderFrame(ctx, sim, cam.view(), layers());
+    const view = cam.view();
+    if (hold.shouldRender(view, now)) { V.renderFrame(ctx, sim, view, layers()); hold.rendered(view); }   // while the wheel is zooming the drawn canvas is stretched instead (zoomhold.js)
     requestAnimationFrame(frame);
   }
   regSel.onchange = e => { state.region = e.target.value; state.look = famOf().looks[0].id; fillLooks(); rebuild(); };
