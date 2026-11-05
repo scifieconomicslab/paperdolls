@@ -48,6 +48,15 @@
   <button id="play" class="on">Pause</button>
   <button id="reseed">New seed</button>
 </div>
+<div id="replaybar" class="controls" style="display:none;position:static">
+  <button id="rpPlay">Play</button>
+  <input id="rpWeek" type="range" min="0" max="0" step="1" value="0" style="width:min(380px,50vw)" aria-label="Week">
+  <span id="rpLabel"></span>
+  <label>Speed <select id="rpSpeed"><option value="1">1 week per second</option><option value="4" selected>4 weeks per second</option><option value="12">12 weeks per second</option></select></label>
+  <label id="rpWallLabel">Colour walls by <select id="rpWall"></select></label>
+</div>
+<div id="rpLegend" style="display:none;padding:8px 22px 0;font-size:13px"></div>
+<div id="rpNote" class="note" style="display:none;padding:2px 22px 4px;font-size:12px"></div>
 <div id="attrib" class="note" style="padding:6px 22px 0;font-size:12px"></div>
 <div id="looknote" class="note" style="padding:6px 22px 0;font-size:12px"></div>
 <div id="bstats" class="note" style="padding:2px 22px 6px;font-size:12px"></div>
@@ -2326,6 +2335,103 @@
 
 </script>
 <script>
+/* replay.js: plays a model's trajectory through the scene. No DOM, so it can be tested in Node.
+ *
+ * Replay.create(sim, data) with data = {
+ *   weeks:   [{ codes?: [..], investor?: [..], vars?: { 'building.wealth': [..], .. } }, ..]   one entry per week, indexed by model building k
+ *   mapping: [{ variable, channel: 'wall' | 'overlay', scale: {type, ..} }, ..]               the declared mapping; [] means the four state codes
+ *   states:  [{ key, label }, ..]                                                             the legend labels for the four state codes
+ * }
+ * Model building k is drawn on scene building k (see place). A value the model did not set (NaN) is drawn as "no data", never as zero.
+ * The legend is built from the scales themselves, so it can describe only what is drawn.
+ */
+(function (root) {
+  'use strict';
+  const NO_DATA = '#cfcabd';
+  const STATES = ['to_do', 'queued', 'in_progress', 'finished'];
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const rgb = h => [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16));
+  const hex = c => '#' + c.map(v => ('0' + clamp(Math.round(v), 0, 255).toString(16)).slice(-2)).join('');
+
+  // colours spread evenly over the domain; a value outside the domain takes the nearest end
+  function sequential(colours, domain, v) {
+    const t = clamp((v - domain[0]) / (domain[1] - domain[0]), 0, 1), p = t * (colours.length - 1), i = Math.min(colours.length - 2, Math.floor(p)), f = p - i;
+    const a = rgb(colours[i]), b = rgb(colours[i + 1]);
+    return hex(a.map((x, j) => x + (b[j] - x) * f));
+  }
+  const key = v => String(Object.is(v, -0) ? 0 : v);
+
+  // Model building k is drawn on a scene building: the scene's buildings are ordered by distance from its centre (ties by position in the
+  // scene), and model building k takes the k-th. Placement is invented and the page says so. Scene buildings beyond the model are extras.
+  function place(scene, nModel) {
+    const bs = scene.buildings, nb = bs.length;
+    if (nb < nModel) return { ok: false, error: 'model has ' + nModel + ' buildings, scene has ' + nb + '. Use a scene with at least as many buildings.' };
+    let cx = 0, cy = 0; for (const b of bs) { cx += b.footprint[0][0]; cy += b.footprint[0][1]; } cx /= nb || 1; cy /= nb || 1;
+    const dist = bs.map(b => Math.hypot(b.footprint[0][0] - cx, b.footprint[0][1] - cy));
+    const order = bs.map((b, i) => i).sort((a, b) => (dist[a] - dist[b]) || (a - b)), rank = new Array(nb);
+    order.forEach((si, k) => { rank[si] = k; });
+    return { ok: true, order, rank, assigned: nModel, extra: nb - nModel };
+  }
+
+  function create(sim, data) {
+    const A = root.AssetLib, mapping = data.mapping || [], weeks = data.weeks || [], idx = new Map();
+    const nModel = data.n || Math.max(0, ...weeks.map(w => Math.max((w.codes || []).length, ...Object.values(w.vars || {}).map(a => a.length))));
+    const placement = place(sim.scene, nModel);
+    if (placement.ok) sim.buildings.forEach((e, i) => idx.set(e, placement.rank[i]));
+    const walls = mapping.filter(m => m.channel === 'wall'), overlays = mapping.filter(m => m.channel === 'overlay');
+    const r = { sim, data, week: 0, weeks: weeks.length, playing: false, speed: 4, acc: 0, wall: 0, mapping, NO_DATA, placement, error: placement.ok ? null : placement.error };
+    r.entityOf = k => sim.buildings[placement.order[k]];                    // the scene building that draws model building k
+    const value = (m, k) => { const w = weeks[r.week], a = w && w.vars && w.vars[m.variable]; const v = a && k < a.length ? a[k] : NaN; return v === undefined ? NaN : v; };
+    function colourOf(m, v) {
+      if (!(v === v)) return NO_DATA;
+      if (m.scale.type === 'sequential') return sequential(m.scale.colours, m.scale.domain, v);
+      const hit = m.scale.values[key(v)]; return hit && hit.colour ? hit.colour : NO_DATA;
+    }
+    function style(e) {
+      const k = idx.get(e); let data = null; const ov = [];
+      const wm = walls[Math.min(r.wall, walls.length - 1)];
+      if (wm) data = colourOf(wm, value(wm, k));
+      for (const m of overlays) { const v = value(m, k), hit = v === v ? m.scale.values[key(v)] : null; if (hit && hit.overlay) ov.push(hit.overlay); }
+      return { data, overlays: ov };
+    }
+    function paintStates() {                                // with no mapping, the four state codes go onto the scene and the default style draws them
+      const w = weeks[r.week] || {};
+      sim.buildings.forEach(e => {
+        const k = idx.get(e), c = w.codes && w.codes[k];
+        e.src.state = c === undefined ? 'to_do' : (STATES[c] || 'to_do');
+        e.src.investor = !!(w.investor && w.investor[k]);
+      });
+    }
+    r.setWeek = t => { r.week = clamp(Math.round(t) || 0, 0, Math.max(0, weeks.length - 1)); if (placement.ok && !mapping.length) paintStates(); };
+    r.setWall = i => { r.wall = clamp(i | 0, 0, Math.max(0, walls.length - 1)); };
+    r.advance = dt => {
+      if (!r.playing) return;
+      r.acc += dt * r.speed;
+      while (r.acc >= 1) { r.acc -= 1; if (r.week < weeks.length - 1) r.setWeek(r.week + 1); else { r.playing = false; r.acc = 0; } }
+    };
+    r.legend = () => {
+      if (!mapping.length) {
+        const reg = A.REG[sim.theme.reg] || A.REG.colorfigures;
+        return [{ title: 'State', kind: 'swatches', items: (data.states || []).map(s => ({ label: s.label, colour: s.key === 'to_do' ? null : (reg.states[s.key] || null) })) }];
+      }
+      return mapping.map(m => {
+        const title = m.scale.label || m.variable;
+        if (m.scale.type === 'sequential') return { title, kind: 'ramp', colours: m.scale.colours.slice(), domain: m.scale.domain.slice(), noData: NO_DATA };
+        const items = Object.keys(m.scale.values).map(k => { const v = m.scale.values[k]; return m.channel === 'wall' ? { label: v.label, colour: v.colour } : { label: v.label, overlay: v.overlay }; });
+        if (m.channel === 'wall') items.push({ label: 'No data', colour: NO_DATA });
+        return { title, kind: 'swatches', items };
+      });
+    };
+    if (placement.ok && mapping.length) sim.buildingStyle = style;
+    if (placement.ok) r.setWeek(0);
+    return r;
+  }
+
+  root.Replay = { create, place, sequential, NO_DATA };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
 /* camera.js: the viewer's camera. No DOM, so it can be tested in Node.
  *
  * The camera looks at a point (cx, cy) on the ground plane, in metres, at `scale` pixels per metre. The isometric projection is
@@ -2537,6 +2643,7 @@
   const regSel = document.getElementById('region'), lookSel = document.getElementById('look');
   FAMS.families.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.name + ' (' + f.places + ')'; regSel.appendChild(o); });
   const INITIAL = {};                      // { region, look, reg, drive }, set when a page is built for a specific place
+  const REPLAY_DATA = null;               // a model replay (see replay.js), or null for the plain viewer
   const EMBEDDED_SCENE = null;                // a scene object, or null for the placeholder
   let state = Object.assign({ region: 'nw', look: 'brick', reg: 'colorfigures', seed: 11, playing: true }, INITIAL);
   const famOf = () => FAMS.families.find(x => x.id === state.region);
@@ -2585,6 +2692,7 @@
     sim = V.createSim(scene, { seed: state.seed, trafficScale: +document.getElementById('traffic').value,
                                peopleScale: +document.getElementById('people').value, theme: themeNow(), region: state.region, drive: drive === 'auto' ? null : drive, detail: document.getElementById('lDetail').checked });
     finish();
+    attachReplay();
     applyHooks();
     const st2 = sim.stats, why = Object.keys(st2.reasons).map(k => k + ': ' + st2.reasons[k]).join('; ');
     const kinds = {}; sim.trees.forEach(t => kinds[t.kind] = (kinds[t.kind] || 0) + 1);
@@ -2606,7 +2714,8 @@
       V.bindData(sim, 'vehicles', sc, a => A.hash(a.seed));
     } else { V.bindData(sim, 'people', null); V.bindData(sim, 'vehicles', null); }
     // buildings: retrofit state (default style), a numeric output on the walls, or plain walls
-    const bm = document.getElementById('bbind').value;
+    const bm = replay ? 'replay' : document.getElementById('bbind').value;
+    if (bm === 'replay') { /* the replay owns the buildings */ } else
     if (bm === 'seq') { sim.buildingStyle = null; V.bindData(sim, 'buildings', A.scales.sequential(['#f4e9c8', '#e9b44c', '#c8452f', '#6b1d3a'], [0, 1]), e => A.hash(e.seed)); }
     else if (bm === 'plain') { V.bindData(sim, 'buildings', null); sim.buildingStyle = () => ({ data: null, overlays: [] }); }
     else { V.bindData(sim, 'buildings', null); sim.buildingStyle = null; }
@@ -2615,6 +2724,49 @@
       V.setMotion(sim, 'tram', { mode: 'path', loop: true, path: [[0, -40, 258], [70, 790, 258], [80, 790, 262], [150, -40, 262], [160, -40, 258]] });
     } else V.setMotion(sim, 'tram', null);
   }
+  // ---- model replay: a trajectory played through the scene, with a legend made from the scales ----
+  let replay = null, replayData = null;
+  const $ = id => document.getElementById(id);
+  function decodeReplay(d) {                                    // JSON has no NaN: a missing value arrives as null
+    const fix = a => a.map(v => v === null ? NaN : v);
+    return Object.assign({}, d, { weeks: d.weeks.map(w => ({ codes: w.codes, investor: w.investor, vars: Object.fromEntries(Object.entries(w.vars || {}).map(([k, a]) => [k, fix(a)])) })) });
+  }
+  function drawLegend() {
+    const box = $('rpLegend'); box.innerHTML = '';
+    for (const sec of replay.legend()) {
+      const row = document.createElement('div'); row.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center;margin:2px 0';
+      const t = document.createElement('b'); t.textContent = sec.title + ':'; row.appendChild(t);
+      const sw = (colour, text) => { const l = document.createElement('span'); l.style.cssText = 'display:inline-flex;gap:5px;align-items:center'; const b = document.createElement('i'); b.style.cssText = 'width:16px;height:16px;border:1px solid #231e16;border-radius:3px;background:' + (colour || 'repeating-linear-gradient(45deg,#fff 0 3px,#ddd 3px 6px)'); l.appendChild(b); l.appendChild(document.createTextNode(text)); row.appendChild(l); };
+      if (sec.kind === 'ramp') {
+        const r = document.createElement('i'); r.style.cssText = 'width:140px;height:16px;border:1px solid #231e16;border-radius:3px;background:linear-gradient(90deg,' + sec.colours.join(',') + ')'; row.appendChild(document.createTextNode(String(sec.domain[0]))); row.appendChild(r); row.appendChild(document.createTextNode(String(sec.domain[1]))); sw(sec.noData, 'No data');
+      } else for (const it of sec.items) { if (it.overlay !== undefined) { const l = document.createElement('span'); l.textContent = (it.overlay ? it.overlay + ' on the building' : 'no marking') + ' = ' + it.label; row.appendChild(l); } else sw(it.colour, it.label); }
+      box.appendChild(row);
+    }
+  }
+  function syncBar() { $('rpWeek').value = replay.week; $('rpLabel').textContent = 'Week ' + replay.week + ' of ' + (replay.weeks - 1); $('rpPlay').textContent = replay.playing ? 'Pause' : 'Play'; }
+  function attachReplay() {
+    if (!REPLAY_DATA) return;
+    replayData = replayData || decodeReplay(REPLAY_DATA);
+    const keep = replay ? { week: replay.week, speed: replay.speed, wall: replay.wall } : null;
+    replay = Replay.create(sim, replayData);
+    if (replay.error) { const n = $('rpNote'); n.style.display = ''; n.className = 'note err'; n.textContent = 'Cannot show the replay: ' + replay.error; replay = null; return; }
+    if (keep) { replay.speed = keep.speed; replay.setWall(keep.wall); replay.setWeek(keep.week); }
+    for (const id of ['replaybar', 'rpLegend', 'rpNote']) $(id).style.display = '';
+    $('rpNote').textContent = REPLAY_DATA.note || '';
+    $('rpWeek').max = Math.max(0, replay.weeks - 1);
+    const walls = replayData.mapping.filter(m => m.channel === 'wall');
+    $('rpWallLabel').style.display = walls.length > 1 ? '' : 'none';
+    $('rpWall').innerHTML = ''; walls.forEach((m, i) => { const o = document.createElement('option'); o.value = i; o.textContent = m.scale.label || m.variable; $('rpWall').appendChild(o); });
+    $('rpWall').value = replay.wall;
+    $('bbind').parentElement.style.display = 'none';
+    drawLegend(); syncBar();
+  }
+  $('rpPlay').onclick = () => { if (!replay) return; if (!replay.playing && replay.week >= replay.weeks - 1) replay.setWeek(0); replay.playing = !replay.playing; syncBar(); };
+  $('rpWeek').oninput = () => { if (replay) { replay.playing = false; replay.setWeek(+$('rpWeek').value); syncBar(); } };
+  $('rpSpeed').onchange = () => { if (replay) replay.speed = +$('rpSpeed').value; };
+  $('rpWall').onchange = () => { if (replay) replay.setWall(+$('rpWall').value); };
+  window.labReplay = () => replay;                              // a handle for tests and for the browser console
+
   // ink, pixel and fog are read by the renderer each frame, so they switch on a running sim without a rebuild
   function finish() { const o = sim.opts; o.ink = document.getElementById('lInk').checked; o.pixel = document.getElementById('lPixel').checked ? 1.5 : 0; o.posterize = o.pixel ? 12 : 0; o.fog = document.getElementById('lFog').checked; }
   for (const id of ['lInk', 'lPixel', 'lFog']) document.getElementById(id).onchange = finish;
@@ -2623,6 +2775,7 @@
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     if (state.playing) V.stepSim(sim, dt);
+    if (replay && replay.playing) { replay.advance(dt); syncBar(); }
     V.renderFrame(ctx, sim, cam.view(), layers());
     requestAnimationFrame(frame);
   }

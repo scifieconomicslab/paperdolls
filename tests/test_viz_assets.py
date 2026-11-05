@@ -44,3 +44,9 @@ def test_emitted_svg_is_valid_xml(tmp_path):
 def test_camera_and_controls_suite_passes():
     r = subprocess.run([node, str(ROOT / "viz" / "test_camera.js")], capture_output=True, text=True, timeout=120)
     assert r.returncode == 0 and "FAIL" not in r.stdout, r.stdout + r.stderr
+
+
+def test_js_replay_suite_passes():
+    r = subprocess.run([node, str(ROOT / "viz" / "test_replay.js")], capture_output=True, text=True, env=node_env(), timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "FAIL" not in r.stdout and "all passed" in r.stdout

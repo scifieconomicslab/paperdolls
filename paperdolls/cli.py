@@ -105,6 +105,24 @@ def cmd_build(a):
     print(f"wrote {a.out} ({Path(a.out).stat().st_size // 1024} KB)")
 
 
+def cmd_replay(a):
+    """The replay page: the viewer playing the exported trajectory through a scene (the placeholder unless --scene is given)."""
+    sp = _replay_spec(a)
+    from .replay_build import build_page
+    traj = export.load(a.trajectory)
+    want = specmod.mapping_variables(sp)
+    missing = [v for v in want if v not in traj["vars"]]
+    if missing:
+        raise SystemExit(f"cannot continue: the trajectory has no variable {missing[0]}. Run 'paperdolls export' again after adding it to replay.mapping.")
+    scene = json.loads(Path(a.scene).read_text(encoding="utf-8")) if a.scene else None
+    n_model = len(traj["weeks"][0][0]) if traj["weeks"] else 0
+    if scene is not None and len(scene.get("buildings", [])) < n_model:
+        raise SystemExit(f"cannot continue: model has {n_model} buildings, scene has {len(scene.get('buildings', []))}. Use a scene with at least as many buildings.")
+    html = build_page(sp, traj, scene)
+    Path(a.out).write_text(html, encoding="utf-8")
+    print(f"wrote {a.out} ({Path(a.out).stat().st_size // 1024} KB)")
+
+
 def _slug(text):
     import re
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "project"
@@ -315,6 +333,8 @@ def main(argv=None):
     s = sub.add_parser("check"); s.add_argument("spec"); s.set_defaults(f=cmd_check)
     s = sub.add_parser("frames"); s.add_argument("spec"); s.add_argument("trajectory"); s.add_argument("--out", default="frames"); s.set_defaults(f=cmd_frames)
     s = sub.add_parser("build"); s.add_argument("spec"); s.add_argument("trajectory"); s.add_argument("--out", default="replay.html"); s.set_defaults(f=cmd_build)
+    s = sub.add_parser("replay", help="one-file replay page: the viewer playing the trajectory through a scene")
+    s.add_argument("spec"); s.add_argument("trajectory"); s.add_argument("--scene", help="a scene.json from 'paperdolls place' or 'ingest'; the placeholder if omitted"); s.add_argument("--out", default="replay.html"); s.set_defaults(f=cmd_replay)
     s = sub.add_parser("ingest", help="OSM extract (Overpass JSON, OSM XML, GeoJSON) to a scene file and a report")
     s.add_argument("input"); s.add_argument("--out", default="scene.json"); s.add_argument("--rotation", default="auto", help="auto, none, or degrees")
     s.add_argument("--bbox", help="south,west,north,east"); s.add_argument("--boundary-relation", type=int, help="clip to this boundary relation (needs rel(ID) in the extract)")

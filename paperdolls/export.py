@@ -19,6 +19,8 @@ def _read(building, households, path):
     v = getattr(obj, attr, None) if obj is not None else None
     if isinstance(v, bool):
         return 1.0 if v else 0.0
+    if attr == "state" and isinstance(v, str) and v in CODE:        # a state name is read as its code, the same one the exporter keeps for it
+        return float(CODE[v])
     return float(v) if isinstance(v, (int, float, np.integer, np.floating)) else float("nan")
 
 

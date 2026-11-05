@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VIZ = ROOT / "viz"
-LIBS = {"ASSETLIB": "assetlib.js", "BUILDINGLIB": "buildinglib.js", "TREELIB": "treelib.js", "VIZLIB": "vizlib.js", "CAMERA": "camera.js", "CONTROLS": "controls.js"}
+LIBS = {"ASSETLIB": "assetlib.js", "BUILDINGLIB": "buildinglib.js", "TREELIB": "treelib.js", "VIZLIB": "vizlib.js", "REPLAY": "replay.js", "CAMERA": "camera.js", "CONTROLS": "controls.js"}
 
 
 def _read(name):
@@ -29,12 +29,14 @@ def _fill(template, **extra):
     return out
 
 
-def build_viewer(scene=None, initial=None, title="Paperdolls viewer"):
+def build_viewer(scene=None, initial=None, title="Paperdolls viewer", replay=None):
     """The viewer page. With a scene, the page opens on it; without one it shows the synthetic placeholder.
 
-    initial: optional {"region", "look", "reg", "drive"} to start with."""
+    initial: optional {"region", "look", "reg", "drive"} to start with.
+    replay: optional model replay payload (see replay_build.payload); the page then plays it through the scene."""
     esc = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    return _fill(_read("viewer.html"), TITLE=esc, INITIAL=_json_for_script(initial or {}), SCENE=_json_for_script(scene) if scene is not None else "null")
+    return _fill(_read("viewer.html"), TITLE=esc, INITIAL=_json_for_script(initial or {}), SCENE=_json_for_script(scene) if scene is not None else "null",
+                 REPLAYDATA=_json_for_script(replay) if replay is not None else "null")
 
 
 def build_catalogue():
