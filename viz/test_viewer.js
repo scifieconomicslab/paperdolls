@@ -72,8 +72,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   assert(/Placeholder scene/.test(text.textContent), 'the placeholder button restores the placeholder');
   // a frame that throws must not stop the viewer for good: it is skipped, reported, and the next frame is scheduled
   { const real = w.VizLib.renderFrame; let thrown = 0; w.VizLib.renderFrame = function () { thrown++; throw new Error('boom'); };
-    await sleep(300); w.VizLib.renderFrame = real; const f0 = w.labViewer.frames(); await sleep(400);
-    assert(thrown > 2, 'the throwing renderer was called on several frames: ' + thrown); assert(w.labViewer.frames() > f0 + 5, 'frames keep coming after the failures: ' + (w.labViewer.frames() - f0));
+    const until = async (cond, ms) => { const t0 = Date.now(); while (!cond() && Date.now() - t0 < ms) await sleep(25); return cond(); };       // wait for the condition, not for a time: a loaded CI runner is slow
+    assert(await until(() => thrown > 2, 8000), 'the throwing renderer was called on several frames: ' + thrown);
+    w.VizLib.renderFrame = real; const f0 = w.labViewer.frames();
+    assert(await until(() => w.labViewer.frames() > f0 + 5, 8000), 'frames keep coming after the failures: ' + (w.labViewer.frames() - f0));
     assert(/A frame failed and was skipped: boom/.test(stats.textContent), 'the failure is shown: ' + stats.textContent.slice(0, 80)); }
   errs.length = 0;                                                                     // the expected failures above were caught by the page; none may have escaped it
   await sleep(200);
