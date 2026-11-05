@@ -15,10 +15,10 @@
  */
 (function (root) {
   'use strict';
-  function create(el, opts) {
+  function create(canvas, opts) {
     opts = Object.assign({ settleMs: 120, minRatio: 0.3, maxRatio: 8 }, opts || {});
-    let drawn = null, prevScale = NaN, lastChange = -Infinity;
-    const clear = () => { el.style.transform = 'none'; };
+    let el = canvas, drawn = null, prevScale = NaN, lastChange = -Infinity, stretch = 1, stretched = false;
+    const clear = () => { el.style.transform = 'none'; stretch = 1; stretched = false; };
     return {
       // true when the caller should draw a real frame now; false when the canvas has been stretched to match the view instead
       shouldRender(view, now) {
@@ -27,12 +27,18 @@
         if (now - lastChange >= opts.settleMs) return true;
         const r = view.scale / drawn.scale;
         if (r < opts.minRatio || r > opts.maxRatio) return true;
+        stretch = r; stretched = true;
         el.style.transformOrigin = '0 0';
         el.style.transform = 'translate(' + (view.ox - drawn.ox * r) + 'px, ' + (view.oy - drawn.oy * r) + 'px) scale(' + r + ')';
         return false;
       },
       // the caller drew a real frame at this view: it is now the base, and the canvas shows it as it is
       rendered(view) { drawn = { w: view.w, h: view.h, scale: view.scale, ox: view.ox, oy: view.oy }; prevScale = view.scale; clear(); },
+      // how far the drawn picture is stretched now (1 when it is not), and whether it is
+      ratio() { return stretch; },
+      active() { return stretched; },
+      // the transform goes to another canvas from now on (the one that has just been drawn for real); the old one is left as it is
+      rebind(other) { el = other; },
       // forget the base (after the canvas is resized or cleared)
       reset() { drawn = null; prevScale = NaN; lastChange = -Infinity; clear(); }
     };

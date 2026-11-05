@@ -8,6 +8,7 @@ Status: people, vehicles, buildings and trees are in the asset system (`assetlib
 - `buildinglib.js`: buildings as assets (archetypes, facade grammar, roofs, overlays, regional grammar, footprint fitting). Load after `assetlib.js`.
 - `treelib.js`: trees as assets (nine kinds, regional species mixes, foliage colours from the look). Load after `assetlib.js`.
 - `replay.js`: plays an exported trajectory through a scene (placement, mapping, week, legend). Load after `vizlib.js`.
+- `refocus.js`: the zoom's finish: draws the sharp frame on a second canvas while the stretched picture stays up, cross-fades when it is whole, with an optional focus reticle and lens blur. No drawing, tested in Node. Used by `viewer.html`.
 - `zoomhold.js`: smooth zooming: stretches the drawn canvas with a CSS transform while the scale changes, and says when to draw a real frame. No drawing, tested in Node. Used by `viewer.html`.
 - `vizlib.js`: scene schema, road network, ground, agent simulation, renderer. Needs the three libraries above loaded first.
 - `library_catalogue.html` and `viewer.html`: templates. `build_pages.py` inlines the libraries and palettes into `library_catalogue_built.html` and `viewer_built.html`, which run offline.
@@ -182,6 +183,17 @@ Measured in the browser, wheel notches (frames over 50 ms, slowest `requestAnima
 One in four of the 12-notch-in runs showed a 106 ms frame; the rest were 28 to 30 ms, and it did not reproduce. The 12-notch zoom-out is a flick of 6.8 times, past the 0.3 times that the held picture may shrink, so a real frame is drawn mid-gesture at the far scale, where the far layer is still being painted and the buildings are drawn directly.
 
 What is left: a flick that shrinks the picture past 0.3 times still costs one frame of about 120 ms (a bigger shrink limit would avoid it, at the price of a smaller island of picture until the sharp frame arrives); the first frame after a long zoom still builds sprites (8 ms a frame, so a few frames of progressive sharpening); a pan past the layer margin repaints in one go; and a 12,000-building scene was not measured in a browser. Building sprites and layers in a worker with `OffscreenCanvas` would take the rest off the main thread; it is not built. `node viz/zoom_bench.js` times the sprite path in node-canvas, which is not what a browser does.
+
+#### Zoom effects: finishing in focus
+
+The stretched picture (above) and the sharp frame that replaces it are two different pictures, and the swap used to be visible: a pop, and then sprites sharpening over several frames. `refocus.js` hides that, with four switches in the viewer (all on a running viewer; reduced-motion users get no easing, no fade time and no blur):
+
+- **Eased zoom** (`LabControls` `smoothZoom`): a wheel notch no longer jumps; the scale eases toward its target (about 200 ms to 95%), notches add up, the point under the cursor stays under it. The stretch is continuous and the sharp frame arrives as the motion ends.
+- **Crossfade**: when the zoom stops, the real frame is drawn on a second canvas stacked above, invisible, while the stretched picture stays up; each frame it checks whether nothing is left to build (no sprites built, no layer pending) or 500 ms have passed, then fades the new canvas in over 160 ms and swaps the two. You never see a half-drawn frame. Zooming again at any point returns to stretching the picture that was drawn, and hides the second canvas.
+- **Focus reticle**: four corner brackets at the cursor that pulse while the picture is out of focus, then contract and flash green when the sharp frame arrives and fade out. A CSS overlay driven by the same events.
+- **Focus blur** (off by default): the stretched picture is blurred in proportion to the stretch, up to 6 px, like a lens that has lost focus; it is sharp again after the swap. It costs GPU time on a large canvas.
+
+Measured in Chrome (canvas 2770 by 1296, 1,023 buildings, 12 wheel notches, which the easing turns into a zoom to 14 times): the viewer went live, zoom for 65 frames, refine for 29 frames (the sharp frame being built out of sight), fade for 8 frames, live; no page errors; median frame 17 ms and slowest 33 ms, with none over 34 ms. The old build's slowest frames in a similar test were 50 to 120 ms. The second canvas doubles the canvas memory. A screenshot mid-zoom with blur and the reticle on showed the blurred, stretched city with the brackets over the cursor. The lock flash and the cross-fade itself were not caught in a screenshot.
 
 #### Pan and zoom frames
 

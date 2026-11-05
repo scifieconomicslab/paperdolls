@@ -48,6 +48,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   const [ax, ay] = cam.screenToWorld(300, 220), sc = cam.scale;
   const we = new w.Event('wheel', { bubbles: true, cancelable: true }); we.deltaY = -120; we.deltaMode = 0; we.clientX = 300; we.clientY = 220; cv.dispatchEvent(we);
+  await sleep(700);                                                                    // the wheel zoom is eased in over a few frames
   assert(we.defaultPrevented && cam.scale > sc, 'the wheel zooms in and stops the page scrolling');
   assert(Math.abs(px(ax, ay)[0] - 300) < 1e-6 && Math.abs(px(ax, ay)[1] - 220) < 1e-6, 'the point under the cursor stays under the cursor');
 

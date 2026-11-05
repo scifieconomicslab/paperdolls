@@ -52,6 +52,12 @@ def test_js_replay_suite_passes():
     assert "FAIL" not in r.stdout and "all passed" in r.stdout
 
 
+def test_js_refocus_suite_passes():
+    r = subprocess.run([node, str(ROOT / "viz" / "test_refocus.js")], capture_output=True, text=True, env=node_env(), timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "FAIL" not in r.stdout and "all passed" in r.stdout
+
+
 def test_js_zoomhold_suite_passes():
     r = subprocess.run([node, str(ROOT / "viz" / "test_zoomhold.js")], capture_output=True, text=True, env=node_env(), timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr

@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VIZ = ROOT / "viz"
-LIBS = {"ASSETLIB": "assetlib.js", "BUILDINGLIB": "buildinglib.js", "TREELIB": "treelib.js", "VIZLIB": "vizlib.js", "REPLAY": "replay.js", "ZOOMHOLD": "zoomhold.js", "CAMERA": "camera.js", "CONTROLS": "controls.js"}
+LIBS = {"ASSETLIB": "assetlib.js", "BUILDINGLIB": "buildinglib.js", "TREELIB": "treelib.js", "VIZLIB": "vizlib.js", "REPLAY": "replay.js", "ZOOMHOLD": "zoomhold.js", "REFOCUS": "refocus.js", "CAMERA": "camera.js", "CONTROLS": "controls.js"}
 
 
 def _read(name):

@@ -52,4 +52,13 @@ test('a change of size, or reset, draws for real', () => {
   assert.strictEqual(frame(z, big, 32), true); assert.strictEqual(el.style.transform, 'none');
   frame(z, view(2.4, big.ox, big.oy), 48); z.reset(); assert.strictEqual(frame(z, view(2.4), 64), true);
 });
+test('ratio and active say how far the picture is stretched, and rebind moves the transform to another canvas', () => {
+  const { z, el } = mk(); frame(z, view(2), 0);
+  assert.strictEqual(z.active(), false); assert.strictEqual(z.ratio(), 1);
+  frame(z, view(3), 16); assert.strictEqual(z.active(), true); assert.strictEqual(z.ratio(), 1.5);
+  const other = { style: {} }; z.rebind(other); z.rendered(view(3));                                  // the new canvas takes over, showing a sharp frame at 3
+  assert.strictEqual(other.style.transform, 'none'); assert.strictEqual(z.active(), false); assert.strictEqual(z.ratio(), 1);
+  frame(z, view(3.6), 32); assert.ok(other.style.transform.indexOf('scale(' + 3.6 / 3 + ')') > 0, 'later stretches go to the new canvas, from the new base');
+  assert.ok(el.style.transform === 'none' || el.style.transform.indexOf('scale(1.5)') > 0, 'the old canvas is left alone');
+});
 if (failed) { console.log(failed + ' failed'); process.exit(1); } else console.log('all passed');

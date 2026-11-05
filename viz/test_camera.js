@@ -213,5 +213,33 @@ test('destroy removes every listener', () => {
   key(d, 'd'); d.canvas.fire('wheel', { deltaY: -100, clientX: 1, clientY: 1 }); assert.strictEqual(d.cam.cx, cx);
 });
 
+// ---- eased zoom (opt-in: smoothZoom) ----
+test('with smoothZoom a wheel notch zooms by easing, not at once, and lands exactly on the factor with the cursor point fixed', () => {
+  const d = setup({ smoothZoom: true }), px = 420, py = 260, [wx, wy] = d.cam.screenToWorld(px, py), s0 = d.cam.scale, factor = Math.exp(-(-100) * 0.0016);
+  d.canvas.fire('wheel', { deltaY: -100, deltaMode: 0, clientX: px, clientY: py });
+  assert.strictEqual(d.cam.scale, s0, 'nothing moves until the controls tick'); assert(Math.abs(d.controls.pendingZoom() - Math.log(factor)) < 1e-12);
+  let prev = s0; const steps = [];
+  for (let i = 0; i < 90; i++) {
+    d.controls.tick(1 / 60); steps.push(d.cam.scale);
+    assert(d.cam.scale >= prev - 1e-12, 'zooming in never goes back'); prev = d.cam.scale;
+    const p = project(d.cam, wx, wy); near(p[0], px, 1e-6, 'the point under the cursor stays under it'); near(p[1], py, 1e-6);
+  }
+  near(d.cam.scale, s0 * factor, 1e-9, 'it lands exactly on the factor'); assert.strictEqual(d.controls.pendingZoom(), 0);
+  assert(steps[0] > s0 && steps[0] < s0 * factor * 0.9, 'the first frame moves part of the way: ' + steps[0] / s0 + ' of ' + factor);
+  assert(steps[5] > steps[0] && steps[10] - steps[9] < steps[1] - steps[0], 'ease-out: the steps shrink');
+});
+test('with smoothZoom a burst of notches adds up, whatever the frame rate', () => {
+  const run = (frames) => { const d = setup({ smoothZoom: true }); for (let i = 0; i < 4; i++) d.canvas.fire('wheel', { deltaY: -100, deltaMode: 0, clientX: 300, clientY: 200 }); const s0 = d.cam.scale; for (let i = 0; i < frames; i++) d.controls.tick(1.5 / frames); return d.cam.scale / s0; };
+  near(run(90), Math.exp(4 * 0.16), 1e-9); near(run(30), Math.exp(4 * 0.16), 1e-9);
+});
+test('with smoothZoom a zoom into the limit stops there and clears what is left', () => {
+  const d = setup({ smoothZoom: true }); for (let i = 0; i < 80; i++) d.canvas.fire('wheel', { deltaY: -400, deltaMode: 0, clientX: 300, clientY: 200 });
+  for (let i = 0; i < 400; i++) d.controls.tick(1 / 60);
+  near(d.cam.scale, d.cam.maxScale, 1e-9); assert.strictEqual(d.controls.pendingZoom(), 0, 'nothing is left to chase');
+});
+test('without smoothZoom a wheel notch still zooms at once', () => {
+  const d = setup(), s0 = d.cam.scale; d.canvas.fire('wheel', { deltaY: -100, deltaMode: 0, clientX: 300, clientY: 200 }); assert(d.cam.scale > s0);
+});
+
 console.log(passed + ' passed' + (failed ? ', ' + failed + ' FAILED' : ''));
 process.exit(failed ? 1 : 0);
