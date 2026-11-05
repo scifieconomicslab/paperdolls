@@ -21,7 +21,7 @@ def build_page(sp, traj, fams, layout, renderer, codes_fn):
             cells = []
             for w in sp["replay"]["weeks"]:
                 img = renderer.frame(fam, reg, codes_fn(traj, w), f"Week {w}",
-                                     investor=codes_fn(traj, w, "investor"), legend=legend)
+                                     investor=codes_fn(traj, w, "investor"), legend=legend, extras=specmod.retrofit_extras(sp))
                 cells.append(f'<figure><img src="data:image/png;base64,{_png_b64(img)}" alt="{H.escape(fam["name"])}, {reg}, week {w}"><figcaption>Week {w}</figcaption></figure>')
             rows.append(f'<h3>{LABELS[reg]}</h3><div class="row">{"".join(cells)}</div>')
         swatches = "".join(f'<span class="sw" title="{k}" style="background:{fam[k]}"></span>' for k in ("wall","wall2","roof","ground","accent","shadow"))

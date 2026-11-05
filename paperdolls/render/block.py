@@ -97,7 +97,7 @@ class Renderer:
         ImageDraw.Draw(mask).polygon([(p[0]-minx, p[1]-miny) for p in quad], fill=255)
         img.paste(warped, (minx, miny), mask)
 
-    def frame(self, palette_fam, register, codes, week_label="", investor=None, legend=None):
+    def frame(self, palette_fam, register, codes, week_label="", investor=None, legend=None, extras=True):
         """Return a PIL image. codes[i] = state code of building i (see STATE_NAMES).
         investor[i] = 1 if building i is owned by an investor household (purple roof)."""
         pal = family_palette(palette_fam)
@@ -139,8 +139,9 @@ class Renderer:
         for i, fr in enumerate(cars_fr):
             cx = L.cols*fr; cy = L.ROW + (0.2 if i % 2 == 0 else 0.7)
             items.append((cx + 0.25 + cy + 0.13, "car", (cx, cy, i)))
-        items.append((L.cols*0.36 + 0.3 + L.ROW + 0.7 + 0.15, "van", (L.cols*0.36, L.ROW+0.7)))
-        items.append((L.cols*0.74 + 0.3 + L.ROW + 0.2 + 0.15, "van", (L.cols*0.74, L.ROW+0.2)))
+        if extras:                                             # co-op vans belong to the Great Retrofit story, not to every model
+            items.append((L.cols*0.36 + 0.3 + L.ROW + 0.7 + 0.15, "van", (L.cols*0.36, L.ROW+0.7)))
+            items.append((L.cols*0.74 + 0.3 + L.ROW + 0.2 + 0.15, "van", (L.cols*0.74, L.ROW+0.2)))
         items.append((L.cols*0.56 + 0.2 + L.ROW + 0.7 + 0.14, "bike", (L.cols*0.56, L.ROW+0.7)))
         items.append((L.cols*0.18 + 0.2 + L.ROW + 0.2 + 0.14, "bike", (L.cols*0.18, L.ROW+0.2)))
         items.append((L.cols*0.5 + L.ROW + 0.5, "tram", (0.4, L.cols - 0.8, L.ROW + 0.35)))

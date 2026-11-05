@@ -118,6 +118,11 @@ def legend_for(data):
     return RETROFIT_LEGEND
 
 
+def retrofit_extras(data):
+    """True when frames may draw things that belong to the Great Retrofit story (the co-op vans). Only the vendored model has them."""
+    return not (data.get("model") or {}).get("path")
+
+
 def require_confirmed(path):
     """A project made through the intake may be built only after the user said yes to the decision table they were shown.
     A project file written by hand, with no intake section, is not held to this."""

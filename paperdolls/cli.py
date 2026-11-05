@@ -89,7 +89,7 @@ def cmd_frames(a):
             for w in sp["replay"]["weeks"]:
                 codes = export.codes_for_week(traj, w)
                 inv = export.codes_for_week(traj, w, "investor")
-                img = R.frame(fams[pid], reg, codes, f"Week {w}", investor=inv, legend=specmod.legend_for(sp))
+                img = R.frame(fams[pid], reg, codes, f"Week {w}", investor=inv, legend=specmod.legend_for(sp), extras=specmod.retrofit_extras(sp))
                 img.save(out / f"{pid}_{reg}_w{w}.png")
     print(f"wrote frames to {out}")
 

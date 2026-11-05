@@ -172,3 +172,24 @@ def test_legend_must_use_known_states(tmp_path):
     from paperdolls import spec
     with pytest.raises(spec.SpecError, match="replay.legend"):
         spec.load(_replay_spec(tmp_path, legend={"sick": "Sick"}))
+
+
+def test_retrofit_extras_belong_to_the_vendored_model_only(tmp_path):
+    from paperdolls import spec
+    assert spec.retrofit_extras(spec.load(_replay_spec(tmp_path))) is True
+    assert spec.retrofit_extras(spec.load(_replay_spec(tmp_path, model_path="m.py"))) is False
+
+
+def test_frame_draws_co_op_vans_only_when_extras_are_on():
+    import numpy as np
+    from paperdolls.render import block, palettes
+    fam = palettes.load_families()["nw"]
+    calls = []
+    r = block.Renderer(block.Layout(20), seed=1)
+    r._van = lambda *a: calls.append(a)
+    codes = np.zeros(20, dtype=np.int8)
+    r.frame(fam, "colorfigures", codes, "t")
+    assert len(calls) == 2                                   # the default is unchanged: two co-op vans
+    calls.clear()
+    r.frame(fam, "colorfigures", codes, "t", extras=False)
+    assert calls == []
