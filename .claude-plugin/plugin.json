@@ -1,9 +1,13 @@
 {
   "name": "lab-render",
-  "version": "0.5.1",
-  "description": "Replay renders of agent-based economic simulations in a colorfigures-style isometric look. v1: replay only, Python pipeline, Claude-guided Q&A.",
-  "author": {"name": "Sci-Fi Economics Lab (to confirm)"},
+  "version": "0.6.0",
+  "description": "Isometric visuals for policy audiences: replay renders of agent-based economic simulations and scenes of real places built from OpenStreetMap.",
+  "author": {
+    "name": "Sci-Fi Economics Lab",
+    "url": "https://github.com/scifieconomicslab"
+  },
+  "homepage": "https://github.com/scifieconomicslab/lab-render",
+  "repository": "https://github.com/scifieconomicslab/lab-render",
   "license": "CC-BY-4.0",
-  "keywords": ["simulation", "visualisation", "isometric", "policy", "agent-based-model"],
-  "requirements": {"python": ">=3.10", "packages": "requirements.txt"}
+  "keywords": ["simulation", "visualisation", "isometric", "policy", "agent-based-model", "openstreetmap"]
 }

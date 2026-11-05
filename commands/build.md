@@ -2,8 +2,8 @@
 description: Build the single-file replay page after the user has approved the preview.
 ---
 
-Only run this after the user has approved a preview.
+Run this only after the user has approved the frames from the preview.
 
-1. Run `python -m lab_render build sim.yaml trajectory.npz --out replay.html`.
-2. Report the file size and the check results.
-3. State clearly which parts are invented (layout, people, vehicles) and which palettes are proposals.
+1. Run `lab-render build render.yaml trajectory.npz --out replay.html`.
+2. Report the file size and the check results from the preview.
+3. State which parts are invented (layout, people, vehicles, trees, building styles) and that the palettes are proposals.

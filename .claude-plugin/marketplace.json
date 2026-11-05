@@ -1,0 +1,20 @@
+{
+  "name": "scifi-economics-lab",
+  "owner": {
+    "name": "Sci-Fi Economics Lab",
+    "url": "https://github.com/scifieconomicslab"
+  },
+  "metadata": {
+    "description": "Plugins from the Sci-Fi Economics Lab."
+  },
+  "plugins": [
+    {
+      "name": "lab-render",
+      "source": "./",
+      "description": "Isometric visuals for policy audiences: replay renders of agent-based economic simulations and scenes of real places built from OpenStreetMap.",
+      "version": "0.6.0",
+      "license": "CC-BY-4.0",
+      "keywords": ["simulation", "visualisation", "isometric", "policy"]
+    }
+  ]
+}

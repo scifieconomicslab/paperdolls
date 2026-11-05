@@ -19,7 +19,7 @@ Rules:
 - Check that a look reads at small size and in greyscale before delivery.
 - In the formal register the region still shows, as warm or cool and light or dark. Cool gray, warm gray and a few other Carbon tokens are from memory: check them against carbondesignsystem.com before formal material is published.
 
-To add a look, add an entry to `families[].looks` in `assets/palettes.json` with a unique id, a `name` and `note`, four walls, two roofs, three accents, three canopies, `ground`, `road`, `pave`, `grass`, `water`, `shadow`, an optional `bloom` (or `null`) and a `surface`. Run `python -m pytest tests` to validate it. The first look of each family is repeated in the family's `wall`, `wall2`, `roof`, `ground`, `accent` and `shadow` for older code.
+To add a look, add an entry to `families[].looks` in `assets/palettes.json` with a unique id, a `name` and `note`, four walls, two roofs, three accents, three canopies, `ground`, `road`, `pave`, `grass`, `water`, `shadow`, an optional `bloom` (or `null`) and a `surface`. Run `python -m pytest tests -q` to validate it. The first look of each family is repeated in the family's `wall`, `wall2`, `roof`, `ground`, `accent` and `shadow` for older code.
 
 ## Regional people, vehicles, buildings and trees
 

@@ -1,8 +1,10 @@
 ---
-description: Export a run and render keyframes for review. Uses the current sim.yaml.
+description: Export a model run, check it and render keyframes for review. Uses the current render.yaml.
 ---
 
-1. Run `python -m lab_render export sim.yaml --out trajectory.npz`.
-2. Run `python -m lab_render check sim.yaml` and report every line, including WARN lines.
-3. Run `python -m lab_render frames sim.yaml trajectory.npz --out frames/` and show the frame paths.
+The project must be a model replay with a confirmed `render.yaml`.
+
+1. Run `lab-render export render.yaml --out trajectory.npz`.
+2. Run `lab-render check render.yaml` and report every line, including WARN lines. Stop on any FAIL.
+3. Run `lab-render frames render.yaml trajectory.npz --out frames/` and show the frame paths.
 4. Ask for feedback. Do not build the full page until the user approves.

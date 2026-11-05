@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 (packaged as a plugin)
+
+- **Licence**: the plugin is CC BY 4.0. The vendored Great Retrofit model is MIT and carries its own `LICENSE`.
+- **Commands**: `/lab-render:start`, `place`, `preview`, `build` and `doctor`. They replace `new-place` and `ingest`, which referred to the old `sim.yaml` flow.
+- **Skills**: `lab-render-visuals` rewritten around the intake, which writes `render.yaml`, and the two project kinds (model replay and place scene). It was `retrofit-sim-visuals`, and still described the commands the intake replaced. `palettes` updated.
+- **Docs**: `docs/intake-questions.md` (generated from the question bank), `docs/model-interface.md` and `docs/known-issues.md`. The README is shorter and links to them.
+- **Tests**: `tests/test_cli.py` runs the launcher end to end (doctor, looks, intake, place, viewer). `tests/test_plugin.py` checks the manifest, marketplace file, skills, commands and agents. 
+- **Marketplace**: `.claude-plugin/marketplace.json` and `assets/icon.svg`.
+- The `bin/lab-render` launcher is executable.
+- Earlier entries below use the old names `retrofit-sim` for the command line and `retrofit-sim-visuals` for the skill.
+
 ## 0.5.1 (rendering cost)
 
 - **Sprites at the exact scale** once the view has held still: a 1:1 blit on whole device pixels, 2 to 3 times faster than the resample the quarter-pixel buckets forced, and sharper (hairlines, window frames). Rebuilds are budgeted at 150 per frame so settling never stalls. Street-zoom frames on the placeholder: 57 ms to 24 ms; at 3.1 px/m: 46 ms to 16 ms.
