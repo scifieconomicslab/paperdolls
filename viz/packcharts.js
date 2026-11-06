@@ -200,7 +200,9 @@
       const t = hoverT !== null ? hoverT : spec.cursor;
       if (spec.type === 'bar') return '';
       if (t === null || t === undefined) return '';
-      const parts = spec.series.filter(s => !spec.hidden[s.key]).map(s => s.label + ' ' + withUnit(s.values[t], spec.unit));
+      const vis = spec.series.filter(s => !spec.hidden[s.key]), byKey = new Map(vis.map(s => [s.key, s]));
+      // a comparison series reads beside the one it compares with: "S 159 buildings (B 896 buildings)"
+      const parts = vis.filter(s => !(s.b && byKey.has(s.key.replace(/@b$/, '')))).map(s => { const twin = byKey.get(s.key + '@b'); return s.label + ' ' + withUnit(s.values[t], spec.unit) + (twin ? ' (B ' + withUnit(twin.values[t], spec.unit) + ')' : ''); });
       return spec.xUnit + ' ' + t + (hoverT !== null && hoverT !== spec.cursor ? ' (pointer)' : '') + ': ' + (parts.join(' · ') || 'no data');
     }
 

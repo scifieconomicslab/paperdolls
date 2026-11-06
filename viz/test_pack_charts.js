@@ -58,6 +58,10 @@ test('line: a comparison series is dashed, in the colour of the series it compar
   assert.deepStrictEqual(dashed.map(p => p.getAttribute('stroke')), solid.map(p => p.getAttribute('stroke')));
   assert(/Q1 \(B\)/.test(c.legend.textContent));
 });
+test('line: with a comparison the readout puts B beside A on one line', () => {
+  const s = lines().series.slice(0, 2), b = s.map((x, i) => ({ key: x.key + '@b', label: x.label + ' (B)', values: x.values.map(v => v * 2), b: true, colourIndex: i }));
+  const c = PC.create(d, lines({ series: s.concat(b), cursor: 10 })); assert.strictEqual(c.readout.textContent, 'Day 10: Q1 2 % (B 4 %) · Q2 5 % (B 10 %)');
+});
 test('line: the y axis grows to include the comparison run', () => {
   const lo = PC.create(d, lines({ series: [{ key: 'a', label: 'A', values: [0, 10] }], horizon: 1 }));
   const hi = PC.create(d, lines({ series: [{ key: 'a', label: 'A', values: [0, 10] }, { key: 'b', label: 'B', values: [0, 90], b: true }], horizon: 1 }));

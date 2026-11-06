@@ -93,7 +93,7 @@ async function test(name, fn) { try { await fn(); console.log('PASS ' + name); }
     const c = lineBox(), dashed = [...c.querySelectorAll('path[data-b]')], solid = [...c.querySelectorAll('path[data-series]:not([data-b])')];
     assert.strictEqual(dashed.length, 4); assert(dashed.every(p => p.getAttribute('stroke-dasharray'))); assert.deepStrictEqual(dashed.map(p => p.getAttribute('stroke')), solid.map(p => p.getAttribute('stroke')));
     assert(/I \(B\)/.test(c.querySelector('.pc-legend').textContent));
-    const rd = c.querySelector('.pc-readout').textContent; assert(/I \(B\)/.test(rd) && /I \d+ buildings/.test(rd), rd);
+    const rd = c.querySelector('.pc-readout').textContent; assert(/I \d+ buildings \(B \d+ buildings\)/.test(rd) && !/I \(B\)/.test(rd), rd);
     const bI = cmp.B.series('counts').map(p => p[2]); assert(Math.max(...bI) < Math.max(...colA(2)), 'a full lockdown flattens the curve');
   });
   await test('compare: the bar chart gets dashed outlines for B and a legend that explains them', () => {
