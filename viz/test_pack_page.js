@@ -1,5 +1,5 @@
 /* Drives a built pack page headlessly (jsdom): the manifest becomes controls, a moved slider re-runs the model and changes the map's data, presets apply,
- * the timeline scrubs and plays, the legend is made from the mapping, and the page says its placement is invented.
+ * the timeline scrubs and plays, the legend is made from the mapping, and the page says where the model's buildings stand (on the scene buildings they were made from).
  * Usage: node viz/test_pack_page.js toy.html     Needs jsdom and canvas (npm ci). Prints SKIP when jsdom is not installed. */
 let JSDOM, VirtualConsole;
 try { ({ JSDOM, VirtualConsole } = require('jsdom')); } catch (e) { console.log('SKIP (jsdom not installed)'); process.exit(0); }
@@ -74,9 +74,9 @@ async function test(name, fn) { try { await fn(); console.log('PASS ' + name); }
     for (const t of ['Infection state', 'Susceptible', 'Exposed', 'Infectious', 'Recovered', 'No data', 'Exposure today', 'marker on the building']) assert(text.includes(t), 'legend has ' + t);
     const sel = d.querySelector('[data-wall]'); assert(sel && sel.options.length === 2); sel.value = '1'; fire(sel, 'change'); assert.strictEqual(ctl.wall, 1);
   });
-  await test('page: the display switches are there and the banner says placement is invented', () => {
+  await test('page: the display switches are there and the banner says the model buildings stand on their scene buildings', () => {
     for (const l of ['people', 'vehicles', 'ink outline', 'pixel', 'fog']) assert(d.getElementById('right').textContent.includes(l), l);
-    const b = d.getElementById('banner').textContent; assert(b.includes(M.banner) && /Placement invented/.test(b), b);
+    const b = d.getElementById('banner').textContent; assert(b.includes(M.banner) && /stands on the scene building it was made from/.test(b) && !/Placement invented/.test(b), b);
     assert.strictEqual(d.getElementById('problem').textContent, '');
   });
   // ---- picking, hover, selection, inspector, keys ----
@@ -126,7 +126,7 @@ async function test(name, fn) { try { await fn(); console.log('PASS ' + name); }
     assert.strictEqual(typeof P.sim.frameVersion, 'number');
   });
   await test('page: the renderer is styled from the store, and the page draws without errors', async () => {
-    assert.strictEqual(typeof P.sim.buildingStyle, 'function'); assert.strictEqual(P.binding.count, 600);
+    assert.strictEqual(typeof P.sim.buildingStyle, 'function'); assert(P.binding.bound && P.binding.count > 0 && P.binding.count === P.binding.placed, 'bound ' + P.binding.count + ' placed ' + P.binding.placed);
     await sleep(400);
     assert.strictEqual(errs.length, 0, 'no page errors: ' + errs.slice(0, 2).join(' | ').slice(0, 300));
   });

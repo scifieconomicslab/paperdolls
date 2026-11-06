@@ -1,6 +1,6 @@
 /* packworker.js: runs a pack's `js` runtime off the main thread, behind the same interface as the runtime adapter (packruntime.js), made asynchronous.
  *
- *   const rt = PackWorker.create(manifest, { sources: { runtime, entry }, mode: 'auto' });   // mode: 'auto' | 'worker' | 'inline'
+ *   const rt = PackWorker.create(manifest, { sources: { runtime, entry }, mode: 'auto', counts, attrs });   // mode: 'auto' | 'worker' | 'inline'; counts and attrs from PackRuntime.bindScene
  *   rt.async === true; rt.mode  // 'worker' or 'inline' (the same-thread fallback: node, jsdom, or a page whose worker will not start)
  *   await rt.start(params, seed)            -> frame 0
  *   await rt.setParams(params)              -> { restarted, frame }       ('rerun' starts again, 'continue' keeps the state)
@@ -31,7 +31,7 @@
       init(m) {
         const impl = (opts.impl) || (root.PaperDolls && root.PaperDolls.getRuntime(m.manifest.id));
         if (!impl) throw new Error('the runtime did not register itself as ' + m.manifest.id);
-        rt = root.PackRuntime.create(m.manifest, impl);
+        rt = root.PackRuntime.create(m.manifest, impl, { counts: m.counts || null, attrs: m.attrs || null });
         return { policy: rt.policy, horizon: rt.horizon, entities: rt.entities, canInspect: rt.canInspect, canSnapshot: rt.canSnapshot };
       },
       start(m) { epoch++; return { frame: rt.start(m.params, m.seed) }; },
@@ -117,7 +117,7 @@
       });
     }
     open();
-    const init = call('init', { manifest }).then(m => { ready = true; for (const k of ['policy', 'horizon', 'entities', 'canInspect', 'canSnapshot']) { info[k] = m[k]; a[k] = m[k]; } return m; });
+    const init = call('init', { manifest, counts: o.counts || null, attrs: o.attrs || null }).then(m => { ready = true; for (const k of ['policy', 'horizon', 'entities', 'canInspect', 'canSnapshot']) { info[k] = m[k]; a[k] = m[k]; } return m; });
     init.catch(() => {});                                        // a failure surfaces through the requests that wait on it
     Object.assign(a, {
       ready: () => init,

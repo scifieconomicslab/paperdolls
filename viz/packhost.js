@@ -3,11 +3,11 @@
  *
  *   const ctl  = PackHost.createController({ manifest, runtime, store, immediate });   // runs the model; ctl.flush() re-runs if a parameter moved
  *   PackHost.mountUI({ manifest, store, controller: ctl, doc, regions: { left, right, bottom }, display: [...] });
- *   PackHost.bindRenderer({ manifest, store, controller: ctl, sim });                  // sim.buildingStyle reads the store's bound typed arrays; sim.frameVersion follows the store
+ *   PackHost.bindRenderer({ manifest, store, controller: ctl, sim, bound });                  // sim.buildingStyle reads the store's bound typed arrays; sim.frameVersion follows the store
  *   PackHost.bindInteraction({ manifest, store, sim, binding, pick: Pick.create(sim), box, camera, doc, tip, controller });   // hover, click, Esc, arrows
  *
- * Only the first entity that has a wall or overlay mapping is drawn, one entity to one scene building in a fixed order (Replay.place). That placement is
- * invented and the page says so; binding model entities to real buildings is a later phase. Pure helpers (legendFor, scaleFor) have no DOM.
+ * Only the first entity that has a wall or overlay mapping is drawn. When the pack's runtime has a bindScene, entity k stands on the scene building it names
+ * (PackRuntime.bindScene); otherwise one entity to one scene building in a fixed order (Replay.place), which is invented and the page says so. Pure helpers (legendFor, scaleFor) have no DOM.
  */
 (function (root) {
   'use strict';
@@ -132,10 +132,15 @@
   function bindRenderer(o) {
     const { manifest, store, controller: ctl, sim } = o, R = o.Replay || root.Replay, en = drawnEntity(manifest);
     if (!en) return { ok: false, error: 'the manifest maps nothing to the map' };
-    const count = (manifest.entities[en] || {}).count || 0, placement = R.place(sim.scene, count);
-    if (!placement.ok) return { ok: false, error: placement.error };
+    // With a bindScene result (o.bound, from PackRuntime.bindScene) entity k stands on the scene building the pack named (pos[k], -1: not drawn); without one,
+    // the invented fixed order (Replay.place).
+    const bound = o.bound && o.bound.bound && o.bound.pos[en] ? o.bound : null;
+    const count = bound ? bound.counts[en] : (manifest.entities[en] || {}).count || 0;
+    let placement = null;
+    if (!bound) { placement = R.place(sim.scene, count); if (!placement.ok) return { ok: false, error: placement.error }; }
     const nScene = sim.buildings.length, index = new Int32Array(count), modelOf = new Int32Array(nScene).fill(-1);
-    for (let k = 0; k < count; k++) { index[k] = placement.order[k]; modelOf[placement.order[k]] = k; }
+    for (let k = 0; k < count; k++) { index[k] = bound ? bound.pos[en][k] : placement.order[k]; if (index[k] >= 0) modelOf[index[k]] = k; }
+    const placed = bound ? modelOf.reduce((n, v) => n + (v >= 0 ? 1 : 0), 0) : count;
     sim.buildings.forEach((e, i) => { e._si = i; });
     store.bindScene(en, { count: nScene, index });
     // for each mapping: a code per value (0 is "no data") and a table from code to colour or overlay bit
@@ -176,8 +181,8 @@
     };
     sync();
     const offs = ['time', 'frames', 'view'].map(t => store.subscribe(t, sync));
-    const entityOf = k => sim.buildings[placement.order[k]];
-    return { ok: true, placement, entityOf, count, entity: en, index, modelOf, nScene, sync,
+    const entityOf = bound ? (k => (index[k] >= 0 ? sim.buildings[index[k]] : null)) : (k => sim.buildings[placement.order[k]]);
+    return { ok: true, bound: !!bound, placement, entityOf, count, placed, warnings: bound ? bound.warnings : [], entity: en, index, modelOf, nScene, sync,
              styleCount: () => table.size, dispose() { offs.forEach(f => f()); sim.buildingStyle = null; sim.frameVersion = undefined; } };
   }
 
@@ -386,7 +391,7 @@
       if (hover >= 0 && !(sel && sel.id === hover)) items.push([hover, true]);
       if (sel && sel.entity === en && sel.id < binding.count) items.push([sel.id, false]);
       for (const [k, dashed] of items) {
-        const si = binding.index[k], sh = pick.silhouette(si), P = (p, z) => V.proj(view, p[0], p[1], z);
+        const si = binding.index[k]; if (si < 0) continue; const sh = pick.silhouette(si), P = (p, z) => V.proj(view, p[0], p[1], z);
         ctx.save(); ctx.lineJoin = 'round'; ctx.lineWidth = dashed ? 1.5 : 2.5; ctx.strokeStyle = dashed ? 'rgba(20,20,20,0.7)' : '#1d4ed8'; ctx.setLineDash(dashed ? [4, 3] : []);
         for (const z of [0, sh.h]) { ctx.beginPath(); sh.footprint.forEach((p, j) => { const q = P(p, z); if (j) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); ctx.stroke(); }
         ctx.beginPath(); for (const p of sh.footprint) { const a = P(p, 0), b = P(p, sh.h); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); } ctx.stroke();

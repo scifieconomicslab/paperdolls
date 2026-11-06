@@ -4,7 +4,7 @@
  * Each entity is a building in one of four states (0 S, 1 E, 2 I, 3 R). Every day each susceptible building draws `contacts` contacts, some of them
  * nearby in the entity list and the rest anywhere; each infectious contact passes the infection with probability beta times the policy factor.
  * Exposed buildings turn infectious after `incubation_days`, and recover after `infectious_days`.
- * Where an entity stands on the map is decided by the page (placement is invented), so "nearby" means nearby in the list, not on the street.
+ * With a scene, bindScene makes one entity per residential building and the page draws it there; "nearby" still means nearby in the list, not on the street.
  * Deterministic: the same parameters and seed always give the same frames. It never uses Math.random.
  * It sends frame 0 whole and every later frame as a patch, and answers inspect() from a log of when each building changed state.
  */
@@ -38,7 +38,28 @@
   }
   const NAMES = ['Susceptible', 'Exposed', 'Infectious', 'Recovered'];
 
+  // Reference bindScene: one model building per residential scene building. A scene from the ingest says which ('residential' or 'probable'); an older
+  // scene or the placeholder has no class, so every building that is not a shed counts. Order is the scene's. Buildings with no id are addressed as "#<index>".
+  // The model also gets each building's area, storeys, whether the storeys were assumed, and its neighbours (as entity indices) in entities.building.attrs.
+  function bindScene(scene) {
+    const key = PackRuntime.sceneKey, ids = [], at = { area: [], levels: [], levels_assumed: [], neighbours: [] }, entityOfKey = new Map();
+    (scene.buildings || []).forEach((b, i) => {
+      const dwelling = b.residential !== undefined ? b.residential !== 'other' : b.archetype !== 'shed';
+      if (!dwelling) return;
+      entityOfKey.set(key(b, i), ids.length); ids.push(key(b, i));
+      at.area.push(b.area !== undefined ? b.area : footprintArea(b.footprint)); at.levels.push(b.levels); at.levels_assumed.push(b.levels_assumed === undefined ? null : b.levels_assumed);
+    });
+    (scene.buildings || []).forEach((b, i) => {
+      const k = entityOfKey.get(key(b, i)); if (k === undefined) return;
+      at.neighbours[k] = (b.neighbours || []).map(n => entityOfKey.get(n)).filter(j => j !== undefined);
+    });
+    if (!ids.length) throw new Error('the scene has no residential buildings to bind to');
+    return { entities: { building: { count: ids.length, attrs: at } }, sceneIndex: { building: ids } };
+  }
+  function footprintArea(ring) { let a = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; a += p[0] * q[1] - q[0] * p[1]; } return Math.abs(a) / 2; }
+
   PaperDolls.registerRuntime('toy-epidemic', {
+    bindScene,
     init(p, ents, seed) {
       const n = ents.building.count;
       const h = { p: Object.assign({}, p), n, t: 0, s: seed | 0, state: new Int8Array(n), timer: new Int16Array(n), exposure: new Float32Array(n),

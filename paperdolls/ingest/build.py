@@ -4,7 +4,7 @@ import math
 import random
 from collections import Counter
 
-from . import __version__, classify, readers
+from . import __version__, adjacency, classify, readers
 from .geo import (DEG, LocalFrame, axis_deviation_deg, dominant_angle, min_rect, point_in_ring, resample_line, ring_area,
                   ring_centroid, simplify_ring)
 
@@ -12,6 +12,7 @@ ATTRIBUTION = "© OpenStreetMap contributors (ODbL)"
 FIT = {"max_dev_deg": 12.0, "min_rectangularity": 0.82, "min_side": 3.0}      # mirrors AssetLib.FIT in buildinglib.js
 MIN_BUILDING_M2, MIN_LANDUSE_M2 = 8.0, 20.0
 SCATTER_CAP_POLYGON, SCATTER_CAP_TOTAL = 300, 4000
+ASSUMED_SOURCES = ("type-default", "global-default")           # osm.levels_source values that mean the storey count was not read from the data
 LAND_ORDER = {"park": 0, "garden": 1, "water": 2, "square": 3}
 
 
@@ -251,7 +252,13 @@ def ingest(path, rotation="auto", bbox=None, boundary_relation=None, name=None, 
         arch = classify.building_archetype(f.tags, levels, assume)
         if arch == "shed":
             levels = 1
+        area = ring_area(ring)
+        cx, cy = ring_centroid(ring)
+        h_tag = classify.parse_num(f.tags.get("height"))
+        height = h_tag if (h_tag is not None and 0 < h_tag <= 400) else levels * classify.M_PER_LEVEL
         b = {"id": f.id, "footprint": [[round(x, 2), round(y, 2)] for x, y in ring], "levels": levels, "archetype": arch, "state": "none", "investor": False,
+             "area": round(area, 1), "centroid": [round(cx, 2), round(cy, 2)], "height": round(height, 1), "levels_assumed": src in ASSUMED_SOURCES,
+             "residential": classify.residential_class(f.tags, arch, area, assume),
              "osm": {"building": f.tags.get("building"), "levels_source": src}}
         if f.tags.get("name"):
             b["osm"]["name"] = f.tags["name"]
@@ -259,6 +266,11 @@ def ingest(path, rotation="auto", bbox=None, boundary_relation=None, name=None, 
         rotated_info[f.id] = _rect_info(ring)
     if holes_ignored:
         assume.add("courtyards", "buildings with inner rings (courtyards): drawn as solid footprints", holes_ignored)
+    nb_lists = adjacency.neighbours([[tuple(p) for p in b["footprint"]] for b in bld_out])
+    for b, nl in zip(bld_out, nb_lists):
+        b["neighbours"] = [bld_out[j]["id"] for j in nl]
+    n_with_nb = sum(1 for b in bld_out if b["neighbours"])
+    assume.add("neighbours", f"buildings within {adjacency.NEIGHBOUR_M:g} m of each other (edge to edge) are neighbours: {n_with_nb} buildings have at least one", n_with_nb) if n_with_nb else None
 
     # ---- landuse ----
     land_out, scatter_src = [], []
@@ -356,5 +368,9 @@ def ingest(path, rotation="auto", bbox=None, boundary_relation=None, name=None, 
                                   "unrotated": round(share(0.0), 3)},
         "extent_m": ext, "skipped": {k: v for k, v in skipped.items() if v}, "assumptions": assume.table(), "warnings": warnings,
         "levels_sources": dict(Counter(b["osm"]["levels_source"] for b in bld_out)),
+        "levels_assumed": sum(1 for b in bld_out if b["levels_assumed"]),
+        "residential": dict(Counter(b["residential"] for b in bld_out)),
+        "neighbours": {"threshold_m": adjacency.NEIGHBOUR_M, "buildings_with_neighbours": n_with_nb, "links": sum(len(b["neighbours"]) for b in bld_out) // 2,
+                       "max_per_building": max((len(b["neighbours"]) for b in bld_out), default=0)},
     }
     return scene, report

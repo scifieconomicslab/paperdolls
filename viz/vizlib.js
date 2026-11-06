@@ -272,7 +272,17 @@
       if (!(num(b.levels) && b.levels >= 1)) bad('building ' + i + ' (' + b.id + '): levels must be a number of at least 1');
       if (b.archetype !== undefined && b.archetype !== 'auto' && !A.ARCH[b.archetype]) bad('building ' + i + ': unknown archetype ' + b.archetype);
       if (b.id !== undefined) { if (ids.has(b.id)) bad('building id ' + b.id + ' appears twice'); ids.add(b.id); }
+      // optional fields written by the ingest (scene entity table); old scenes without them stay valid
+      if (b.area !== undefined && !(num(b.area) && b.area >= 0)) bad('building ' + i + ' (' + b.id + '): area must be a number of at least 0');
+      if (b.centroid !== undefined && !pt(b.centroid)) bad('building ' + i + ' (' + b.id + '): centroid must be [x, y]');
+      if (b.height !== undefined && !(num(b.height) && b.height > 0)) bad('building ' + i + ' (' + b.id + '): height must be a number above 0');
+      if (b.levels_assumed !== undefined && typeof b.levels_assumed !== 'boolean') bad('building ' + i + ' (' + b.id + '): levels_assumed must be true or false');
+      if (b.residential !== undefined && !['residential', 'probable', 'other'].includes(b.residential)) bad('building ' + i + ' (' + b.id + '): residential must be residential, probable or other');
+      if (b.neighbours !== undefined && !(Array.isArray(b.neighbours) && b.neighbours.every(n => typeof n === 'string' || num(n)))) bad('building ' + i + ' (' + b.id + '): neighbours must be a list of building ids');
     });
+    let dangling = 0;
+    scene.buildings.forEach(b => { if (b && Array.isArray(b.neighbours)) for (const n of b.neighbours) if (!ids.has(n)) dangling++; });
+    if (dangling) warnings.push(dangling + ' neighbour id(s) name no building in the scene');
     scene.landuse.forEach((l, i) => { if (!l || !['park', 'garden', 'square', 'water'].includes(l.kind)) bad('landuse ' + i + ': unknown kind ' + (l && l.kind)); else if (!Array.isArray(l.footprint) || l.footprint.length < 3 || !l.footprint.every(pt)) bad('landuse ' + i + ': needs a footprint'); });
     scene.trees.forEach((t, i) => { if (!pt(t)) bad('tree ' + i + ': needs [x, y]'); else if (t[2] && !A.TREES[t[2]]) bad('tree ' + i + ': unknown kind ' + t[2]); else if (t[3] !== undefined && t[3] !== null && !(num(t[3]) && t[3] > 0)) bad('tree ' + i + ': bad scale'); });
     const B = sceneBounds(scene);

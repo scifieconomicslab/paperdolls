@@ -139,7 +139,6 @@
       if (e.count !== undefined && !(isInt(e.count) && e.count >= 1)) err(at + '.count', 'must be a whole number of at least 1');
       if (e.from !== undefined && e.from !== 'scene') err(at + '.from', 'must be "scene"');
       if (e.count === undefined && e.from === undefined) err(at, 'needs count (how many the model makes) or from: scene');
-      if (e.from === 'scene') warn(at + '.from', 'binding to scene buildings by id is planned; for now entities are placed in a fixed order');
       if (!isObj(e.fields) || !keysOf(e.fields).length) { err(at + '.fields', 'required: at least one field'); continue; }
       for (const [fn, f] of Object.entries(e.fields)) {
         const fat = at + '.fields.' + fn;

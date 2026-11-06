@@ -30,6 +30,16 @@ def report_markdown(scene, rep):
     L += ["### Storeys", "",
           _table([[k, v, f"{round(v / tot * 100)}%"] for k, v in sorted(ls.items(), key=lambda kv: -kv[1])], ["source", "buildings", "share"]), "",
           "Storey counts decide building height and, through the region, which archetype a building gets. Where the share from `tag` is low, heights are mostly assumed.", ""]
+    n_b = c["buildings"] or 1
+    res, nb = rep.get("residential", {}), rep.get("neighbours", {})
+    L += ["### Fields for the model binding", "",
+          f"Each building also carries `area` (m2), `centroid`, `height` (m: the height tag, else storeys x 3.1 m), `levels_assumed` (storeys not read from the data: "
+          f"**{rep.get('levels_assumed', 0)}** of {c['buildings']}, {round(rep.get('levels_assumed', 0) / n_b * 100)}%), `residential` and `neighbours`.", "",
+          _table([[k, res.get(k, 0), f"{round(res.get(k, 0) / n_b * 100)}%"] for k in ("residential", "probable", "other")], ["residential class", "buildings", "share"]), "",
+          "`residential`: a dwelling type (house, terrace, apartments, residential, ...). `probable`: a generic `building=yes` with no use tag and at least 30 m2: probably a dwelling, but a guess. "
+          "`other`: a non-dwelling type, a use tag (shop, amenity, office, craft, industrial, tourism, healthcare, ...), a shed, or an outbuilding under 30 m2.", "",
+          f"`neighbours`: buildings whose footprints touch or come within {nb.get('threshold_m', '?')} m: {nb.get('buildings_with_neighbours', 0)} buildings have at least one, "
+          f"{nb.get('links', 0)} links, at most {nb.get('max_per_building', 0)} for one building.", ""]
     L += ["## Left out", ""]
     L += [_table(sorted(rep["skipped"].items(), key=lambda kv: -kv[1]), ["what", "how many"])] if rep["skipped"] else ["Nothing was skipped."]
     L += ["", "## Warnings", ""]

@@ -253,6 +253,46 @@ test('pick: 12,000 buildings, 1,000 queries: the index is built once and a query
   assert(per < 0.1, 'a query costs ' + (per * 1000).toFixed(1) + ' us'); console.log('     (index of ' + sim.buildings.length + ' buildings built in ' + build.toFixed(0) + ' ms; a query ' + (per * 1000).toFixed(1) + ' us)');
 });
 
+// ---------- a pack bound to the scene: picking, patch frames and the inspector together ----------
+if (!toyJson) skip('bound pack: all together', 'no manifest given');
+else {
+  const TOY = JSON.parse(toyJson);
+  const modes = [['same thread', () => ({ mode: 'inline' }), true]];
+  if (wt) modes.push(['real worker', () => ({ mode: 'worker', sources: { runtime: read('packruntime.js'), worker: read('packworker.js'), entry: read('../packs/toy-epidemic/runtime.js') } }), false]);
+  for (const [label, opts] of modes) test('bound pack (' + label + '): entities on the buildings the pack named, patch frames, picking and the inspector agree', async () => {
+    const scene = V.makePlaceholderScene(7), impl = PD.getRuntime('toy-epidemic') || (vm.runInContext(read('../packs/toy-epidemic/runtime.js'), g), PD.getRuntime('toy-epidemic'));
+    const bound = PR.bindScene(TOY, impl, scene); assert(bound.ok && bound.bound, bound.error); const n = bound.counts.building, pos = bound.pos.building;
+    assert(n > 0 && n < scene.buildings.length, 'some buildings (sheds) have no entity: ' + n);
+    const store = PStore.create(TOY), runtime = PW.create(TOY, Object.assign({ counts: bound.counts, attrs: bound.attrs }, opts(), label === 'real worker' ? fakes : {}));
+    try {
+      const ctl = PH.createController({ manifest: TOY, runtime, store, immediate: true }); await ctl.start(); assert.strictEqual(ctl.error, null, ctl.error);
+      assert.strictEqual(runtime.mode, label === 'real worker' ? 'worker' : 'inline'); assert.strictEqual(store.length(), TOY.time.steps + 1);
+      assert.strictEqual(store.frame().entities.building.state.length, n, 'the worker made one entity per bound building');
+      assert(store.frameAt(7).patch && store.frameAt(7).entities, 'patch frames came through');
+      const sim = V.createSim(scene, { seed: 5, theme: A.theme(fam, undefined, 'colorfigures'), region: 'nw' }), b = PH.bindRenderer({ manifest: TOY, store, controller: ctl, sim, bound });
+      assert(b.ok && b.bound && b.count === n && b.placed === n, b.error);
+      store.setTime(1); store.setTime(2);                                                   // one step on to a patch: the bound arrays follow by the patch alone
+      const bo = store.bound('building'); assert(bo.stats.patch >= 1, 'followed a patch: ' + JSON.stringify(bo.stats));
+      const st2 = store.frame().entities.building.state; for (const k of [0, 3, n - 1]) assert.strictEqual(bo.fields.state[pos[k]], st2[k], 'entity ' + k + ' is on scene building ' + pos[k]);
+      const shed = sim.buildings.findIndex((e, i) => b.modelOf[i] < 0); assert(shed >= 0 && bo.fields.state[shed] === -1, 'a building without an entity holds no data');
+      store.setTime(40);
+      const pick = Pick.create(sim), view = { scale: 3, ox: 600, oy: 350 }; let tried = 0, found = 0;
+      for (let k = 0; k < n && found < 5; k++) {
+        const e = b.entityOf(k), q = V.proj(view, e.fit.cx, e.fit.cy, V.entityHeight(e) * 0.5), si = pick.hit(view, q[0], q[1]); tried++;
+        if (si !== pos[k]) continue;                                                        // covered by a building in front: try another
+        found++; assert.strictEqual(b.modelOf[si], k, 'the pick maps back to entity ' + k);
+        store.select({ entity: 'building', id: k });
+        const d = await ctl.inspect(store.selection()); assert(d && new RegExp('^Building ' + (k + 1) + ' ').test(d.title), JSON.stringify(d));
+        const word = ['Susceptible', 'Exposed', 'Infectious', 'Recovered'][st40(store, k)]; assert(d.title.endsWith(word) && d.fields[0].value === word, 'the inspector and the frame agree at day 40: ' + d.title + ' / ' + word);
+        assert.strictEqual(PH.entityRows(TOY, store, store.selection())[0].value.length > 0, true);
+      }
+      assert(found >= 5, 'five buildings could be picked: ' + found + ' of ' + tried);
+      const inspectShed = await ctl.inspect({ entity: 'building', id: n + 5 }); assert.strictEqual(inspectShed, null, 'no such entity: nothing to say');
+    } finally { runtime.dispose(); }
+  });
+}
+function st40(store, k) { return store.frame().entities.building.state[k]; }
+
 (async () => {
   for (const [name, fn] of queue) { try { await fn(); console.log('PASS ' + name); } catch (e) { failed++; console.log('FAIL ' + name + '\n  ' + (e && e.stack || e)); } }
   if (failed) { console.log(failed + ' failed'); process.exit(1); }

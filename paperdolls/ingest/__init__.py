@@ -6,4 +6,4 @@
 The ingest never invents a quiet default: every assumption (storeys from a building type, an archetype from a tag, a width
 from a lane count, trees scattered into a park) is counted and listed in the report for the user to confirm.
 """
-__version__ = "0.1.0"
+__version__ = "0.2.0"

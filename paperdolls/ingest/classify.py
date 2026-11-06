@@ -57,6 +57,46 @@ def building_levels(tags, assume):
     return GLOBAL_LEVELS, "global-default"
 
 
+# ---------- residential class ----------
+# Rule (documented in docs/pack-spec.md, counted in the ingest report):
+#   residential : building is a dwelling type (RESIDENTIAL_TYPES)
+#   other       : building is a non-dwelling type (house of worship, school, industry, ...), or carries a non-residential use tag
+#                 (shop, amenity, office, craft, industrial, tourism, healthcare, ...), or its archetype is 'shed'
+#   probable    : building=yes (a generic value, GENERIC_TYPES) with no such evidence, and at least PROBABLE_MIN_M2 of footprint.
+#                 This is the big class in Brussels: OSM often leaves dwellings as plain building=yes. It is a guess; the report counts it.
+RESIDENTIAL_TYPES = {"house", "detached", "semidetached_house", "terrace", "row_house", "residential", "apartments", "bungalow", "villa", "cabin",
+                     "dormitory", "duplex", "flats", "townhouse", "static_caravan", "houseboat"}
+NON_RESIDENTIAL_TYPES = {"commercial", "retail", "supermarket", "kiosk", "office", "industrial", "warehouse", "garage", "garages", "carport", "shed", "barn",
+                         "greenhouse", "hangar", "farm_auxiliary", "service", "stable", "cowshed", "storage_tank", "school", "kindergarten", "university", "college",
+                         "hospital", "church", "chapel", "cathedral", "mosque", "temple", "synagogue", "religious", "public", "civic", "government", "train_station",
+                         "transportation", "parking", "hotel", "sports_hall", "stadium", "fire_station", "toilets", "bridge", "silo", "tank"}
+GENERIC_TYPES = {"yes", "unclassified", "building"}      # says nothing about use; any other value not in the dwelling list is some named non-dwelling type
+USE_TAGS = ("shop", "amenity", "office", "craft", "industrial", "tourism", "healthcare", "leisure", "man_made", "public_transport", "railway", "power")
+PROBABLE_MIN_M2 = 30.0
+RESIDENTIAL_CLASSES = ("residential", "probable", "other")
+
+
+def residential_class(tags, archetype, area, assume):
+    """('residential' | 'probable' | 'other'), counted as an assumption with the reason."""
+    b = tags.get("building", "yes")
+    if b in RESIDENTIAL_TYPES:
+        c, why = "residential", f"building={b}: a dwelling type"
+    elif b in NON_RESIDENTIAL_TYPES:
+        c, why = "other", f"building={b}: not a dwelling type"
+    elif any(k in tags for k in USE_TAGS):
+        c, why = "other", f"building={b} with a use tag ({next(k for k in USE_TAGS if k in tags)}=*)"
+    elif b not in GENERIC_TYPES:
+        c, why = "other", f"building={b}: a named type that is not a dwelling"
+    elif archetype == "shed":
+        c, why = "other", f"building={b} drawn as a shed"
+    elif area < PROBABLE_MIN_M2:
+        c, why = "other", f"building={b} under {PROBABLE_MIN_M2:.0f} m2 and no use tag: an outbuilding"
+    else:
+        c, why = "probable", f"building={b} with no use tag, {PROBABLE_MIN_M2:.0f} m2 or more: probably a dwelling (a guess)"
+    assume.add("residential", f"{c}: {why}")
+    return c
+
+
 _HOUSES = {"house", "detached", "bungalow", "villa", "cabin"}
 _TERRACES = {"terrace", "semidetached_house", "row_house"}
 _SHEDS = {"industrial", "warehouse", "garage", "garages", "shed", "barn", "greenhouse", "hangar", "farm_auxiliary", "service", "storage_tank", "stable", "cowshed"}

@@ -1,4 +1,4 @@
-"""Overpass QL for an extract the ingest can read. The bounding-box form has been run against the live service once (2026-11-05) and worked; the relation form has not, so run it and report any error."""
+"""Overpass QL for an extract the ingest can read. Both forms have been run against the live service: the bounding box on 2026-11-05, the relation form (Jette, relation 58258) on 2026-11-06 (see docs/jette-commune-ingest.md)."""
 
 LEISURE = "park|garden|playground|pitch|recreation_ground|nature_reserve|common|dog_park"
 LANDUSE = "grass|meadow|forest|orchard|cemetery|recreation_ground|village_green|allotments|reservoir|basin|plaza|flowerbed"

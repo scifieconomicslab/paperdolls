@@ -243,8 +243,6 @@ def validate(m):
             err(f"{at}.from", 'must be "scene"')
         if "count" not in e and "from" not in e:
             err(at, "needs count (how many the model makes) or from: scene")
-        if e.get("from") == "scene":
-            warn(f"{at}.from", "binding to scene buildings by id is planned; for now entities are placed in a fixed order")
         if not _obj(e.get("fields")) or not e["fields"]:
             err(f"{at}.fields", "required: at least one field")
             continue

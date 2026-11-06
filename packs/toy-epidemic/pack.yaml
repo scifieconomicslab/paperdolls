@@ -31,7 +31,8 @@ presets:
 
 entities:
   building:
-    count: 600
+    count: 600          # used when the runtime has no bindScene or the page has no scene
+    from: scene
     fields:
       state:    {type: category, values: [S, E, I, R]}
       exposure: number
@@ -72,4 +73,4 @@ layout:
   right:  [{control: legend}, {control: display}]
   bottom: [{control: timeline}]
 
-banner: "A toy model on the synthetic placeholder map. Geometry is not a real place, placement of the model's buildings is invented, and nothing here is evidence about any disease."
+banner: "A toy model: one model building per residential building of the loaded scene (the synthetic placeholder unless a real one is given). The contact network is not the street network, and nothing here is evidence about any disease."
