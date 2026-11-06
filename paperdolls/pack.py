@@ -15,9 +15,10 @@ NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 RUNTIMES = ["js", "pyodide", "remote"]
 PARAM_TYPES = ["number", "integer", "boolean", "enum"]
 FIELD_TYPES = ["category", "number", "int", "boolean"]
-CHANNELS = ["wall", "overlay"]
-PLANNED_CHANNELS = ["segments", "height", "outline", "halo", "insulation", "ground"]
-OVERLAYS = ["scaffold", "solar", "band", "marker"]
+CHANNELS = ["wall", "overlay", "segments"]
+PLANNED_CHANNELS = ["height", "outline", "halo", "ground"]
+OVERLAYS = ["scaffold", "solar", "band", "marker", "insulation", "community"]
+SEG_MAX = 12
 REGIONS = ["left", "right", "bottom"]
 CONTROLS = ["params", "presets", "timeline", "legend", "display"]
 PLANNED_ITEMS = ["chart", "kpis", "table"]
@@ -283,7 +284,7 @@ def validate(m):
             err(at, "must be a mapping")
             continue
         for k in mp:
-            if k not in ("entity", "field", "channel", "scale"):
+            if k not in ("entity", "field", "channel", "scale", "total", "max"):
                 err(f"{at}.{k}", "unknown key")
         if mp.get("channel") in PLANNED_CHANNELS:
             warn(f"{at}.channel", f"{mp['channel']} is a planned channel and is ignored for now")
@@ -299,6 +300,30 @@ def validate(m):
             err(f"{at}.field", f"entity {mp['entity']} has no field {mp.get('field')}")
             continue
         sc = mp.get("scale")
+        if mp["channel"] == "segments":  # k of n units: the field holds k, mp["total"] names the field that holds n
+            if f.get("type") == "category":
+                err(f"{at}.field", f"a segments channel needs a number or int field (units done), {mp['field']} is a category")
+            if not _is_str(mp.get("total")):
+                err(f"{at}.total", "required: the field that holds the number of units")
+            else:
+                tf = field_spec(mp["entity"], mp["total"])
+                if not _obj(tf):
+                    err(f"{at}.total", f"entity {mp['entity']} has no field {mp['total']}")
+                elif tf.get("type") == "category":
+                    err(f"{at}.total", f"must be a number or int field, {mp['total']} is a category")
+            mx = mp.get("max")
+            if "max" in mp and not (isinstance(mx, int) and not isinstance(mx, bool) and 2 <= mx <= SEG_MAX):
+                err(f"{at}.max", f"must be a whole number from 2 to {SEG_MAX}")
+            if not _obj(sc) or sc.get("type") != "segments":
+                err(f"{at}.scale.type", "must be segments")
+                continue
+            if not (isinstance(sc.get("colour"), str) and HEX.match(sc["colour"])):
+                err(f"{at}.scale.colour", "needs a #rrggbb colour")
+            if "todo" in sc and not (isinstance(sc["todo"], str) and HEX.match(sc["todo"])):
+                err(f"{at}.scale.todo", "must be a #rrggbb colour")
+            if not _is_str(sc.get("label")):
+                warn(f"{at}.scale.label", "missing: the legend will show the field name")
+            continue
         if not _obj(sc) or sc.get("type") not in ("categorical", "sequential"):
             err(f"{at}.scale.type", "must be categorical or sequential")
             continue

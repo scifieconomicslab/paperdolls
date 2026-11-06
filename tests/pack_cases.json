@@ -132,6 +132,19 @@
       }
      }
     }
+   },
+   {
+    "entity": "thing",
+    "field": "load",
+    "channel": "segments",
+    "total": "load",
+    "max": 8,
+    "scale": {
+     "type": "segments",
+     "label": "Units retrofitted",
+     "colour": "#2e9d6a",
+     "todo": "#e6e0d0"
+    }
    }
   ],
   "series": {
@@ -573,11 +586,11 @@
   {
    "name": "a planned channel warns and is skipped",
    "patch": {
-    "mappings.2.channel": "segments"
+    "mappings.2.channel": "height"
    },
    "errors": [],
    "warnings": [
-    "mappings[2].channel: segments is a planned channel"
+    "mappings[2].channel: height is a planned channel"
    ]
   },
   {
@@ -844,6 +857,101 @@
    "errors": [
     "banner: must be a string"
    ],
+   "warnings": []
+  },
+  {
+   "name": "a segments mapping is accepted",
+   "patch": {},
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "segments need the field that holds the number of units",
+   "patch": {
+    "mappings.3.total": "$delete"
+   },
+   "errors": [
+    "mappings[3].total: required"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "segments total must be a real field",
+   "patch": {
+    "mappings.3.total": "ghost"
+   },
+   "errors": [
+    "mappings[3].total: entity thing has no field ghost"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "segments total cannot be a category",
+   "patch": {
+    "mappings.3.total": "kind"
+   },
+   "errors": [
+    "mappings[3].total: must be a number or int field"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "segments field cannot be a category",
+   "patch": {
+    "mappings.3.field": "kind"
+   },
+   "errors": [
+    "mappings[3].field: a segments channel needs a number or int field"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "segments max is a whole number from 2 to 12",
+   "patch": {
+    "mappings.3.max": 40
+   },
+   "errors": [
+    "mappings[3].max: must be a whole number from 2 to 12"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "segments need the segments scale and a colour",
+   "patch": {
+    "mappings.3.scale": {
+     "type": "categorical",
+     "values": {
+      "a": {
+       "label": "A",
+       "colour": "#112233"
+      }
+     }
+    }
+   },
+   "errors": [
+    "mappings[3].scale.type: must be segments"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "segments colour must be hex",
+   "patch": {
+    "mappings.3.scale.colour": "green"
+   },
+   "errors": [
+    "mappings[3].scale.colour: needs a #rrggbb colour"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "the insulation and community overlays are accepted",
+   "patch": {
+    "mappings.2.scale.values.a.overlay": "insulation",
+    "mappings.2.scale.values.b.overlay": "community"
+   },
+   "errors": [],
    "warnings": []
   }
  ]

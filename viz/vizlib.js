@@ -955,6 +955,9 @@
   function entityHeight(e) { return e.params ? A_().buildingHeight(e.kind, e.params.N) : e.levels * (LIB.buildings[e.kind] || LIB.buildings.terrace).storeyH; }
 
   // A building: an asset sprite when its footprint fits a slot, otherwise the generic extrusion.
+  // A style may carry seg: { n, k, done, todo } ("k of n units"). Zoomed in (view.scale >= SEG_MIN_SCALE, sim.opts.segMinScale) the wall is divided into
+  // sections; zoomed out, and on a building drawn as a generic extrusion, there is nothing to divide, so the data colour is mixed toward `done` by the share k/n.
+  const SEG_MIN_SCALE = 1.4;
   function drawBuildingEntity(ctx, view, reg, pal, shadowCol, sim, e) {
     const A = A_(), areg = A.REG[pal.reg] || A.REG.colorfigures;
     // Fast path: with the default style and no binding, a building only changes when its state, owner or the theme does.
@@ -964,16 +967,22 @@
     if (fastOk && e._fast && e._th === pal && e._st === e.state && e._inv === e.investor) { drawBuildingSprite(ctx, view, A, areg, e); return; }
     // A style with a frame version (sim.frameVersion, a number) is asked again only when the number has changed: no style call, no key string, no allocation.
     const ver = sim.buildingStyle && typeof sim.frameVersion === 'number' ? sim.frameVersion : null;
-    if (ver !== null && !bound && e._fv === ver && e._th === pal) { if (e._asset) drawBuildingSprite(ctx, view, A, areg, e); else drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, e._fdata); return; }
+    const segOn = view.scale >= (sim.opts.segMinScale === undefined ? SEG_MIN_SCALE : sim.opts.segMinScale);
+    if (ver !== null && !bound && e._fv === ver && e._th === pal && (!e._seg || e._sm === segOn)) { if (e._asset) drawBuildingSprite(ctx, view, A, areg, e); else drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, e._fdata); return; }
     const wall = A.wallFor(pal, e.seed);
     const style = (sim.buildingStyle || retrofitStyle)(e, areg, pal, wall) || {};
-    let data = style.data || null;
+    let data = style.data || null, seg = null;
     for (const b of sim.bindings) if (b.match(e)) { data = b.scale.colour(b.value(e)); break; }   // a data binding wins over the style
+    if (style.seg) {
+      seg = A.segmentsFor(style.seg.n, style.seg.k);
+      if (seg && !(segOn && e.params)) { data = A.mix(data || wall, style.seg.done, 0.85 * style.seg.k / style.seg.n); seg = null; }
+    }
+    e._seg = !!style.seg; e._sm = segOn;
     if (!e.params) { e._fv = ver; e._th = pal; e._asset = null; e._fdata = data || wall; drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, data || wall); return; }
-    const ov = style.overlays || [], key = pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + wall + '|' + data + '|' + ov.join(',');
+    const ov = style.overlays || [], key = pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + wall + '|' + data + '|' + ov.join(',') + (seg ? '|' + seg[0] + ':' + seg[1] + ':' + style.seg.done + ':' + (style.seg.todo || '') : '');
     if (e._ck !== key) {
-      e._cols = A.buildingColours(areg, pal, { wall, data, seed: e.seed });
-      e._asset = A.getAsset('buildings', e.kind, e.fit.heading, A.buildingExtra(e.params, ov));
+      e._cols = A.buildingColours(areg, pal, { wall, data, seed: e.seed, seg: seg ? style.seg : null });
+      e._asset = A.getAsset('buildings', e.kind, e.fit.heading, A.buildingExtra(e.params, ov, seg));
       e._ck = key;
     }
     e._fast = fastOk; e._th = pal; e._st = e.state; e._inv = e.investor; e._fv = ver;

@@ -15,13 +15,16 @@
   const fieldOf = (manifest, en, fn) => { const f = ((manifest.entities || {})[en] || { fields: {} }).fields[fn]; return typeof f === 'string' ? { type: f } : f; };
   const wallMaps = manifest => (manifest.mappings || []).filter(m => m.channel === 'wall');
   const overlayMaps = manifest => (manifest.mappings || []).filter(m => m.channel === 'overlay');
-  const drawnEntity = manifest => { const m = (manifest.mappings || []).find(x => x.channel === 'wall' || x.channel === 'overlay'); return m ? m.entity : null; };
+  const segMaps = manifest => (manifest.mappings || []).filter(m => m.channel === 'segments');
+  const DRAWN = ['wall', 'overlay', 'segments'];
+  const drawnEntity = manifest => { const m = (manifest.mappings || []).find(x => DRAWN.includes(x.channel)); return m ? m.entity : null; };
   const num = v => (Math.round(v * 1000) / 1000);
 
   // ---- legend: made from the mappings, so it can describe only what is drawn ----
   function legendFor(manifest) {
-    return (manifest.mappings || []).filter(m => m.channel === 'wall' || m.channel === 'overlay').map(m => {
+    return (manifest.mappings || []).filter(m => DRAWN.includes(m.channel)).map(m => {
       const f = fieldOf(manifest, m.entity, m.field), title = m.scale.label || (f && f.label) || m.field;
+      if (m.channel === 'segments') return { title, kind: 'swatches', items: [{ label: 'Done: the first units of the building, drawn as sections of its walls', colour: m.scale.colour }, { label: 'Not yet', colour: m.scale.todo || null }] };
       if (m.scale.type === 'sequential') return { title, kind: 'ramp', colours: m.scale.colours.slice(), domain: m.scale.domain.slice(), noData: NO_DATA };
       const order = f && f.type === 'category' ? f.values.filter(v => v in m.scale.values) : Object.keys(m.scale.values);
       let items;
@@ -127,7 +130,7 @@
   // The store keeps per-building values as typed arrays indexed by scene building (store.bindScene / store.bound). sim.buildingStyle reads them and returns one of a
   // small table of shared style objects (a wall colour and a set of overlays), so a draw allocates nothing. sim.frameVersion is the store's version of "what the map
   // shows": the renderer asks for a building's style again, and repaints its far-zoom layer, only when that number moves.
-  const OVERLAYS = ['scaffold', 'solar', 'band', 'marker'];
+  const OVERLAYS = ['scaffold', 'solar', 'band', 'marker', 'insulation', 'community'];       // the bit of an overlay in a style's mask is its position here: only ever append
   const LEVELS = 128;                                       // a sequential scale is read in this many steps: a table of colours, not a string per building
   function bindRenderer(o) {
     const { manifest, store, controller: ctl, sim } = o, R = o.Replay || root.Replay, en = drawnEntity(manifest);
@@ -160,12 +163,19 @@
       return { field: m.field, code, cols, bits };
     };
     const walls = wallMaps(manifest).filter(m => m.entity === en).map(reader), overlays = overlayMaps(manifest).filter(m => m.entity === en).map(reader);
-    const NONE = { data: null, overlays: [] }, table = new Map();
-    const styleOf = (w, code, mask) => {                    // one shared object per (wall mapping, wall code, overlay set)
-      const key = (w * 1024 + code) * 16 + mask; let st = table.get(key);
+    // segments: k of n units. Both come from the frame; n is capped for drawing (AssetLib.segmentsFor) and the style carries the capped pair, so there are at most
+    // 12 * 13 + 1 distinct values per mapping and the style objects stay shared. Only the first segments mapping of the drawn entity is used.
+    const sm = segMaps(manifest).find(m => m.entity === en) || null, segCap = sm ? Math.min(sm.max || 12, (R && root.AssetLib ? root.AssetLib.SEG_MAX : 12)) : 0;
+    const segOf = sm ? (i => {
+      const n = F[sm.total][i], k = F[sm.field][i]; if (!(n >= 2) || !(k >= 0)) return 0;
+      const sg = root.AssetLib.segmentsFor(Math.min(n, 1e6), k, segCap); return sg ? sg[0] * 13 + sg[1] + 1 : 0;
+    }) : null;
+    const NONE = { data: null, overlays: [], seg: null }, table = new Map();
+    const styleOf = (w, code, mask, sg) => {                // one shared object per (wall mapping, wall code, overlay set, segment pair)
+      const key = ((w * 1024 + code) * 64 + mask) * 256 + sg; let st = table.get(key);
       if (!st) {
         const ov = []; for (let b = 0; b < OVERLAYS.length; b++) if (mask & (1 << b)) ov.push(OVERLAYS[b]);
-        st = { data: walls[w] ? walls[w].cols[code] : null, overlays: ov }; table.set(key, st);
+        st = { data: walls[w] ? walls[w].cols[code] : null, overlays: ov, seg: sg ? { n: Math.floor((sg - 1) / 13), k: (sg - 1) % 13, done: sm.scale.colour, todo: sm.scale.todo || null } : null }; table.set(key, st);
       }
       return st;
     };
@@ -176,8 +186,9 @@
       if (!live || modelOf[i] < 0) return NONE;
       const w = Math.min(ctl ? ctl.wall : 0, walls.length - 1);
       let mask = 0; for (let j = 0; j < overlays.length; j++) { const ov = overlays[j]; mask |= ov.bits[ov.code(F[ov.field][i])]; }
-      if (w < 0) return mask ? styleOf(0, 0, mask) : NONE;
-      return styleOf(w, walls[w].code(F[walls[w].field][i]), mask);
+      const sg = segOf ? segOf(i) : 0;
+      if (w < 0) return mask || sg ? styleOf(0, 0, mask, sg) : NONE;
+      return styleOf(w, walls[w].code(F[walls[w].field][i]), mask, sg);
     };
     sync();
     const offs = ['time', 'frames', 'view'].map(t => store.subscribe(t, sync));

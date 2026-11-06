@@ -138,12 +138,37 @@ mappings:
 ```
 
 - `channel: wall` colours the building's data surface. Categorical entries need `label` and `colour` (`#rrggbb`); sequential needs `domain` `[low, high]` and at least two `colours`. Several wall mappings give a "Colour walls by" chooser.
-- `channel: overlay` marks the building: `overlay` is `null` or one of `scaffold`, `solar`, `band`, `marker`. A sequential scale cannot be an overlay.
+- `channel: overlay` marks the building: `overlay` is `null` or one of `scaffold`, `solar`, `band`, `marker`, `insulation`, `community`. A sequential scale cannot be an overlay.
 - A value with no entry is drawn as "no data" (walls) or unmarked (overlays), and the validator warns. A missing value (NaN, -1) is drawn as "no data", never as zero.
-- `segments`, `height`, `outline`, `halo`, `insulation` and `ground` are reserved (P6): they validate with a warning and are ignored.
+- `channel: overlay` also takes `insulation` and `community` (see [Visual channels](#visual-channels-p6)).
+- `segments` is described under [Visual channels](#visual-channels-p6). `height`, `outline`, `halo` and `ground` are reserved (P6): they validate with a warning and are ignored until their section lands.
 - The legend is made from these mappings, so it can describe only what is drawn. Every entry needs a label.
 
-Only the first entity that has a wall or overlay mapping is drawn.
+Only the first entity that has a wall, overlay or segments mapping is drawn.
+
+### Visual channels (P6)
+
+Mappings beyond `wall` and `overlay`. All of them are drawn from the typed arrays of the frame on screen, none of them allocates per draw, and the legend lists each one from its scale.
+
+#### `segments`: k of n units
+
+A building's walls are divided into `n` sections and the first `k` are drawn in a second colour: "2 of 6 units retrofitted" in a block.
+
+```yaml
+entities: {building: {fields: {units: int, units_done: int}}}
+mappings:
+  - entity: building
+    field: units_done            # k: a number or int field
+    channel: segments
+    total: units                 # n: the field that holds the number of units
+    max: 8                       # optional, 2 to 12 (default 12): the most sections drawn
+    scale: {type: segments, label: Units retrofitted, colour: "#2e9d6a", todo: "#e6e0d0"}   # todo is optional: default is a tint of the wall
+```
+
+- `n` below 2 (a single dwelling), or a missing value (NaN), draws nothing extra. More than `max` units are drawn as `max` sections with `k` scaled to match (`AssetLib.segmentsFor`); a partial block never rounds to empty or complete.
+- Near (`view.scale` at least 1.4, `sim.opts.segMinScale`) the walls carry the sections: a coloured panel on every wall, under the windows and doors, so the facade stays readable and the colour of the wall that carries the wall mapping still frames it. Far, there is nothing to divide, so the wall colour is mixed toward `colour` by `0.85 * k / n`. A building drawn as a generic extrusion (a footprint that does not fit an asset) always gets the mixed colour.
+- Cache: `n` and `k` are part of the asset id and `colour` and `todo` of the colour set, so a sprite is shared by every building with the same shape, `n`, `k` and colours: at most 78 sections-states per shape and heading (n = 2..12, k = 0..n), not one per building. It works with patch frames: a patch that changes `units_done` moves the version, and only the buildings whose pair changed fetch a different sprite.
+- Only the first `segments` mapping of the drawn entity is used. It combines with `wall`, `overlay`, and the insulation overlay (the sections are drawn over the cladding).
 
 ### `series`
 

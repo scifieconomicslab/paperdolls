@@ -8,7 +8,9 @@
  *   frame        local x along the frontage, y depth, z up. The front faces local +y.
  *   data surface the walls (role "data"). A simulation recolours them to show an output. Roofs, doors, glass, trim keep
  *                their own colours.
- *   overlays     scaffold, solar, band, marker: discrete geometry a simulation switches on (retrofit story, ownership).
+ *   overlays     scaffold, solar, band, marker, insulation, community: discrete geometry a simulation switches on (retrofit story, ownership).
+ *   segments     seg = [n, k]: every wall is divided into n sections and the first k are drawn in a second colour (roles segdone and segtodo),
+ *                for "k of n units retrofitted" in a block. n is capped at SEG_MAX. Part of the cache key, so it stays one sprite per (shape, n, k, colours).
  *
  * fitFootprint() decides which real footprints can use these assets: near-rectangular, within 12 degrees of an axis. The
  * rest are reported, and the scene renderer falls back to a generic extrusion. Nothing is silently approximated.
@@ -44,6 +46,7 @@
     const a = ARCH[kind]; if (!a) throw new Error('unknown building ' + kind);
     const W = o.W, D = o.D, N = o.N, hw = W / 2, hd = D / 2, H = heightOf(kind, N);
     const fs = o.fs || {}, winK = fs.winK || 1, ov = o.ov || [];
+    const seg = Array.isArray(o.seg) && o.seg[0] >= 2 ? [Math.min(SEG_MAX, o.seg[0] | 0), Math.max(0, Math.min(Math.min(SEG_MAX, o.seg[0] | 0), o.seg[1] | 0))] : null;
     const rnd = rngSeed((o.variant | 0) * 7919 + A.hashStr(kind));
     const nbF = clamp(Math.round(W / a.bayW), a.minBays, a.maxBays), bwF = W / nbF;
     const nbS = clamp(Math.round(D / a.bayW), 1, 10), bwS = D / nbS;
@@ -173,6 +176,17 @@
       }
     }
 
+    // ---- walls: cladding (insulation) and unit segments ----
+    // Both sit just proud of the wall at layer 1: above the data surface (layer 0), below windows, doors and everything that stands out (layer 5 and up), so the facade
+    // stays readable and the colour of the wall that carries the model's data still frames them. Segments are drawn after cladding where both are on.
+    if (ov.includes('insulation')) for (const side of ['front', 'back', 'right', 'left']) {
+      const L = SIDE[side].L; parts.push(panel(side, rect(-L / 2 + 0.12, L / 2 - 0.12, 0.5, H - 0.25), 'insul', { layer: 1, bias: 0.05 }));
+    }
+    if (seg) for (const side of ['front', 'back', 'right', 'left']) {
+      const L = SIDE[side].L, w = L / seg[0];
+      for (let i = 0; i < seg[0]; i++) parts.push(panel(side, rect(-L / 2 + i * w + 0.08, -L / 2 + (i + 1) * w - 0.08, 0.3, H - 0.2), i < seg[1] ? 'segdone' : 'segtodo', { layer: 1, bias: 0.1 }));
+    }
+
     // ---- roof ----
     let roofKind = a.style === 'shed' ? 'pitchlow' : (a.style === 'tower' ? 'flat' : (fs.roof || a.roof));
     if (N >= 6 && a.style !== 'shed') roofKind = 'flat';
@@ -251,6 +265,34 @@
       }
     }
     if (ov.includes('marker')) parts.push({ t: 'box', b: [-0.7, -0.7, top - (rh > 0 ? 0.2 : 0), 0.7, 0.7, top + 0.5], role: 'marker', layer: 4 });
+    // insulation, roof side: a slab on a flat roof, a band along the eaves of a pitched or hipped one (the cladding of the walls is above)
+    if (ov.includes('insulation')) {
+      if (roofKind === 'flat') parts.push({ t: 'box', b: [-hw + 0.3, -hd + 0.3, H, hw - 0.3, hd - 0.3, H + 0.14], role: 'insulroof', layer: 1, bias: 0.05 });
+      else if (rh > 0) {
+        const tt = 0.38;
+        if (roofKind === 'hip') {
+          const bx = hw + 0.35, by = hd + 0.35, rl = Math.max(0, W - D) / 2, lx = tt * (bx - rl);
+          for (const sg of [1, -1]) {
+            const e = sg * by * (1 - tt);
+            parts.push({ t: 'face', pts: sg > 0 ? [[-bx, by, H + 0.06], [bx, by, H + 0.06], [bx - lx, e, H + rh * tt + 0.06], [-bx + lx, e, H + rh * tt + 0.06]]
+                                               : [[bx, -by, H + 0.06], [-bx, -by, H + 0.06], [-bx + lx, e, H + rh * tt + 0.06], [bx - lx, e, H + rh * tt + 0.06]], n: [0, sg * rh, by], role: 'insulroof', layer: 3 });
+          }
+        } else {
+          const by = hd + 0.35;
+          for (const sg of [1, -1]) {
+            const x0 = -hw - 0.02, x1 = hw + 0.02, e = sg * by * (1 - tt), zt = H + rh * tt + 0.06;
+            parts.push({ t: 'face', pts: sg > 0 ? [[x0, by, H + 0.06], [x1, by, H + 0.06], [x1, e, zt], [x0, e, zt]] : [[x1, -by, H + 0.06], [x0, -by, H + 0.06], [x0, e, zt], [x1, e, zt]], n: [0, sg * rh, by], role: 'insulroof', layer: 3 });
+          }
+        }
+      }
+    }
+    // community: a small pavilion on the roof with a flag, in the colour of cooperatives (reg.coop)
+    if (ov.includes('community')) {
+      const z0 = top - (rh > 0 ? 0.2 : 0);
+      parts.push({ t: 'box', b: [-1.0, -1.0, z0, 1.0, 1.0, z0 + 0.8], role: 'community', layer: 4 });
+      parts.push({ t: 'box', b: [-0.07, -0.07, z0 + 0.8, 0.07, 0.07, z0 + 3.4], role: 'frame', layer: 4 });
+      parts.push({ t: 'flat', side: 'both', y: 0.03, poly: [[0.07, z0 + 3.4], [1.8, z0 + 2.9], [0.07, z0 + 2.4]], role: 'community', layer: 4 });
+    }
 
     return { parts, meta: { H, top, roof: roofKind, bays: nbF } };
   }
@@ -377,7 +419,23 @@
     return { kind, W: clamp(Math.round(fit.W), 3, 80), D: clamp(Math.round(fit.D / 2) * 2, 4, 60), N, variant: Math.floor(r() * 12),
              fs: { shutters: r() < rg.shutters, awning: r() < rg.awning, ac: r() < rg.ac, chimney: r() < rg.chimney, balcony: Math.round(rg.balcony * 20) / 20, winK: Math.round(rg.winK * 20) / 20, roof } };
   }
-  function buildingExtra(params, overlays) { return { W: params.W, D: params.D, N: params.N, variant: params.variant, fs: params.fs, ov: (overlays || []).slice().sort() }; }
+  // seg: [n, k] or null. It is part of the asset id (JSON of this object), so each (shape, n, k) is one asset and, with the colours, one cached sprite.
+  function buildingExtra(params, overlays, seg) {
+    const x = { W: params.W, D: params.D, N: params.N, variant: params.variant, fs: params.fs, ov: (overlays || []).slice().sort() };
+    if (seg && seg[0] >= 2) x.seg = [Math.min(SEG_MAX, seg[0] | 0), Math.max(0, Math.min(Math.min(SEG_MAX, seg[0] | 0), seg[1] | 0))];
+    return x;
+  }
+  // The number of sections a block can be drawn in; more units are shown as k/n scaled to this many (segmentsFor).
+  const SEG_MAX = 12;
+  // n units of which k are done -> [sections, done sections] for the asset (at most cap, default SEG_MAX), or null when there is nothing to divide (fewer than two units, or missing data).
+  function segmentsFor(n, k, cap) {
+    cap = Math.max(2, Math.min(SEG_MAX, cap | 0 || SEG_MAX));
+    if (!(n >= 2) || !(k >= 0)) return null;
+    n = Math.round(n); k = Math.min(n, Math.round(k));
+    if (n <= cap) return [n, k];
+    let d = Math.round(k / n * cap); if (k > 0 && d === 0) d = 1; if (k < n && d === cap) d = cap - 1;     // a partial block never looks empty or complete
+    return [cap, d];
+  }
 
   // ---------- colours ----------
   // wall colour for one building: a weighted pick from the look's four wall colours, with a slight tone variation
@@ -394,9 +452,12 @@
     return Object.assign(c, {
       data: o.data || wall, roof, roofflat: pal.roofflat || mix(pal.ground, '#6e6e6e', 0.55), trim: mix(wall, '#ffffff', 0.5), door: reg.id === 'formal' ? shade(wall, 0.55) : shade(wall, 0.42),
       shutter: o.shutter || acc, awning: o.awning || acc, chimney: shade(wall, 0.8), solar: reg.id === 'formal' ? A.CARBON.blue[80] : '#2e3c5c', scaffold: reg.id === 'formal' ? A.CARBON.gray[60] : '#9a8a64',
-      glassdark: shade(c.glass || reg.glass, 0.68), band: reg.states.queued, marker: reg.states.investor, frame: reg.id === 'formal' ? A.CARBON.gray[70] : '#4b4b50'
+      glassdark: shade(c.glass || reg.glass, 0.68), band: reg.states.queued, marker: reg.states.investor, frame: reg.id === 'formal' ? A.CARBON.gray[70] : '#4b4b50',
+      // cladding: the wall pushed toward the look's "finished" green; a roof slab or band a darker step of it; community: the cooperative colour; segments: o.seg or defaults
+      insul: mix(wall, reg.states.finished, 0.62), insulroof: shade(mix(wall, reg.states.finished, 0.8), 0.86), community: reg.coop,
+      segdone: (o.seg && o.seg.done) || reg.states.finished, segtodo: (o.seg && o.seg.todo) || mix(wall, '#ffffff', 0.35)
     });
   }
 
-  Object.assign(A, { ARCH, FIT, roadIndex, buildingParts: (kind, extra) => buildingDef(kind, extra).parts, fitFootprint, pickArchetype, buildingParams, buildingExtra, buildingColours, buildingHeight: heightOf, wallFor });
+  Object.assign(A, { ARCH, FIT, roadIndex, buildingParts: (kind, extra) => buildingDef(kind, extra).parts, fitFootprint, pickArchetype, buildingParams, buildingExtra, buildingColours, buildingHeight: heightOf, wallFor, segmentsFor, SEG_MAX });
 })(typeof window !== 'undefined' ? window : globalThis);
