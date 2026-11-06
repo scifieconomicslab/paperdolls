@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VIZ = ROOT / "viz"
 LIBS = {"ASSETLIB": "assetlib.js", "BUILDINGLIB": "buildinglib.js", "TREELIB": "treelib.js", "VIZLIB": "vizlib.js", "REPLAY": "replay.js", "ZOOMHOLD": "zoomhold.js", "REFOCUS": "refocus.js", "CAMERA": "camera.js", "CONTROLS": "controls.js",
-        "PACKVALIDATE": "packvalidate.js", "PACKSTORE": "packstore.js", "PACKRUNTIME": "packruntime.js", "PACKHOST": "packhost.js", "PACKPICK": "packpick.js", "PACKWORKER": "packworker.js"}
+        "PACKVALIDATE": "packvalidate.js", "PACKSTORE": "packstore.js", "PACKRUNTIME": "packruntime.js", "PACKHOST": "packhost.js", "PACKPICK": "packpick.js", "PACKWORKER": "packworker.js", "PACKCHARTS": "packcharts.js"}
 
 
 def _read(name):
