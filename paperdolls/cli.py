@@ -283,26 +283,41 @@ def cmd_viewer(a):
 
 
 def cmd_pack(a):
-    """pack check: validate a model pack's manifest. pack build: write its one-file page."""
+    """pack check: validate a model pack (manifest, then the runtime). pack build: its one-file page. pack dev: a local server with hot reload."""
     from . import pack as packmod
+    include = getattr(a, "include", None) or []
     if a.pcmd == "check":
-        errors, warnings = packmod.check(a.path)
+        from . import packcheck
+        res = packcheck.run(a.path, scene_path=a.scene, include=include, steps=a.steps, strict=a.strict, skip_runtime=a.manifest_only,
+                            parity=a.runtime_parity, cases=a.cases, golden=a.golden, update_golden=a.update_golden)
         if a.json:
-            print(json.dumps({"ok": not errors, "errors": errors, "warnings": warnings}, indent=2))
+            print(json.dumps(res.as_dict(), indent=2))
         else:
-            for w in warnings:
-                print(f"warning: {w}")
-            for e in errors:
-                print(f"error: {e}")
-            print(f"{a.path}: " + (f"{len(errors)} error(s), {len(warnings)} warning(s)" if errors else f"ok ({len(warnings)} warning(s))"))
-        raise SystemExit(1 if errors else 0)
-    scene = json.loads(Path(a.scene).read_text(encoding="utf-8")) if a.scene else None
+            print(res.render(a.path))
+        raise SystemExit(res.exit_code())
+    if a.pcmd == "dev":
+        from . import packdev
+        try:
+            packdev.serve(a.path, scene_path=a.scene, port=a.port, include=include, max_bytes=int(a.max_mb * 1048576), trim=_trim_list(a.trim))
+        except OSError as e:
+            raise SystemExit(f"cannot start the server on port {a.port}: {e}")
+        return
     try:
-        html = packmod.build_page(a.path, scene)
+        scene = packmod.load_scene(a.scene) if a.scene else None
+        html, info = packmod.build(a.path, scene, include, max_bytes=int(a.max_mb * 1048576), trim=_trim_list(a.trim))
     except packmod.PackError as e:
         raise SystemExit(f"cannot continue: {e}")
     Path(a.out).write_text(html, encoding="utf-8")
-    print(f"wrote {a.out} ({Path(a.out).stat().st_size // 1024} KB)")
+    msg = f"wrote {a.out} ({info['bytes'] / 1048576:.2f} MB"
+    if scene is not None:
+        msg += f"; scene {info['buildings']} buildings, {info['scene_bytes'] / 1048576:.2f} MB"
+    print(msg + ")")
+    for t in info["trimmed"]:
+        print(f"trimmed ({t['stage']}): {t['lost']}")
+
+
+def _trim_list(text):
+    return [t.strip() for t in text.split(",") if t.strip()] if text else []
 
 
 def cmd_ingest(a):
@@ -381,9 +396,26 @@ def main(argv=None):
     s = sub.add_parser("place", help="get the OSM extract, ingest it, and write the scene and its report (place_scene projects)")
     s.add_argument("spec"); s.add_argument("--refetch", action="store_true"); s.add_argument("--no-fetch", action="store_true"); s.set_defaults(f=cmd_place)
     s = sub.add_parser("viewer", help="write a one-file viewer page for the project's place"); s.add_argument("spec"); s.set_defaults(f=cmd_viewer)
-    s = sub.add_parser("pack", help="model packs: check a pack.yaml, build a pack's one-file page"); psub = s.add_subparsers(dest="pcmd", required=True)
-    i = psub.add_parser("check", help="validate the manifest (a pack folder or a pack.yaml); exits 1 on errors"); i.add_argument("path"); i.add_argument("--json", action="store_true")
-    i = psub.add_parser("build", help="write the pack's one-file page"); i.add_argument("path"); i.add_argument("--scene"); i.add_argument("--out", default="pack.html")
+    s = sub.add_parser("pack", help="model packs: check, build, or serve a pack with hot reload"); psub = s.add_subparsers(dest="pcmd", required=True)
+    def _pack_args(i, scene_help):
+        i.add_argument("path", help="a pack folder (with pack.yaml) or a pack.yaml")
+        i.add_argument("--scene", help=scene_help)
+        i.add_argument("--include", action="append", metavar="FILE", help="a runtime source file to load before the entry (repeatable), such as a shared prng.js")
+    i = psub.add_parser("check", help="validate the manifest, then run the runtime (determinism, frames against the manifest); exits 1 on errors")
+    _pack_args(i, "a scene.json: the runtime is bound to it (bindScene) and run on its buildings")
+    i.add_argument("--json", action="store_true"); i.add_argument("--strict", action="store_true", help="warnings fail the check too")
+    i.add_argument("--steps", type=int, default=48, help="how many steps of the run to check (default 48, at most the horizon)")
+    i.add_argument("--manifest-only", action="store_true", help="skip running the runtime (no node needed)")
+    i.add_argument("--runtime-parity", metavar="PYMODULE", help="a Python reference (module name or .py file) to compare the JS runtime with; see docs/pack-authoring.md")
+    i.add_argument("--cases", help="parity cases JSON (default: tests/parity_cases.json in the pack)"); i.add_argument("--golden", metavar="DIR", help="golden trajectories from the reference, one JSON per case")
+    i.add_argument("--update-golden", action="store_true", help="write the reference's output to --golden instead of comparing with it")
+    i = psub.add_parser("build", help="write the pack's one-file offline page")
+    _pack_args(i, "a scene.json from 'paperdolls ingest' (embedded compactly)")
+    i.add_argument("--out", default="pack.html"); i.add_argument("--max-mb", type=float, default=16, help="the page size limit; a scene is trimmed (and the trim reported) to fit")
+    i.add_argument("--trim", help="trim stages to apply regardless of size (precision, centroid, osm, height, neighbours)")
+    i = psub.add_parser("dev", help="serve the pack on 127.0.0.1 and reload the page when pack.yaml, runtime.js or bind.js change")
+    _pack_args(i, "a scene.json to draw the pack on")
+    i.add_argument("--port", type=int, default=8765); i.add_argument("--max-mb", type=float, default=16); i.add_argument("--trim", help="trim stages (see pack build)")
     s.set_defaults(f=cmd_pack)
     a = ap.parse_args(argv)
     a.f(a)

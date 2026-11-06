@@ -447,16 +447,143 @@ def _json_for_script(obj):
     return json.dumps(obj, separators=(",", ":")).replace("</", "<\\/").replace("<!--", "<\\!--")
 
 
-def build_page(path, scene=None):
-    """One self-contained page: the pack host, the renderer, the manifest and the runtime source."""
-    from .viewer_build import VIZ, ROOT, _fill, _read
+# ---- the sources a page is built from ----
+
+def runtime_files(path, include=()):
+    """The files inlined as the pack's runtime, in order: --include files, the runtime.entry, then bind.js when it sits beside it.
+
+    `bind.js` is a convention, not a manifest key: a pack that keeps its bindScene in a second file gets it loaded after the entry
+    (it may use what the entry exposes). Returns a list of Paths (not checked for existence here)."""
+    base = manifest_path(path).parent
+    files = [Path(f) for f in include]
+    m = load(path)
+    rt = m.get("runtime") if _obj(m) else None
+    if _obj(rt) and _is_str(rt.get("entry")):
+        entry = base / rt["entry"]
+        files.append(entry)
+        bind = base / "bind.js"
+        if bind.is_file() and bind.resolve() != entry.resolve():
+            files.append(bind)
+    return files
+
+
+def watched_files(path, include=(), scene_path=None):
+    """Everything whose change should rebuild the page: the manifest, the runtime sources and the scene."""
+    files = [manifest_path(path), *runtime_files(path, include)]
+    if scene_path:
+        files.append(Path(scene_path))
+    return files
+
+
+def runtime_source(path, include=()):
+    parts = []
+    for f in runtime_files(path, include):
+        if not f.is_file():
+            raise PackError(f"runtime file {f} does not exist")
+        src = f.read_text(encoding="utf-8")
+        if "</script" in src.lower() or "<!--" in src:
+            raise PackError(f"{f.name} contains </script> or <!--, which cannot be inlined in a page")
+        parts.append(src)
+    return "\n;\n".join(parts)
+
+
+# ---- the scene: embedded compactly, trimmed only when the page would be too big ----
+
+DEFAULT_MAX_BYTES = 16 * 1024 * 1024
+# Applied in this order, one at a time, only while the page is over budget (or when asked for by name). Each says what is lost.
+# Never trimmed: id, footprint, levels, archetype, state, investor (the renderer), area, residential, levels_assumed (what bindScene rules use).
+TRIM_STAGES = [
+    ("precision", "coordinates rounded to 0.1 m (from 0.01 m) in footprints, roads, landuse and trees"),
+    ("centroid", "building.centroid dropped (it can be recomputed from the footprint)"),
+    ("osm", "building.osm tags dropped (building type and levels_source: a bindScene that reads them loses them)"),
+    ("height", "building.height dropped (a pack that reads height falls back to levels)"),
+    ("neighbours", "building.neighbours dropped (a pack that builds a contact network from them has none)"),
+]
+TRIM_NAMES = [n for n, _ in TRIM_STAGES]
+
+
+def _round_coords(v, nd):
+    if isinstance(v, float):
+        return round(v, nd)
+    if isinstance(v, list):
+        return [_round_coords(x, nd) for x in v]
+    return v
+
+
+def _round_item(it):
+    """A road, landuse area or tree with every list of coordinates rounded to 0.1 m (other values untouched)."""
+    if isinstance(it, list):
+        return _round_coords(it, 1)
+    return {k: (_round_coords(v, 1) if isinstance(v, list) else v) for k, v in it.items()} if isinstance(it, dict) else it
+
+
+def trim_scene(scene, stage):
+    """A copy of the scene with one trim stage applied (see TRIM_STAGES)."""
+    out = dict(scene)
+    if stage == "precision":
+        for k in ("roads", "landuse", "trees"):
+            if isinstance(out.get(k), list):
+                out[k] = [_round_item(it) for it in out[k]]
+        out["buildings"] = [dict(b, footprint=_round_coords(b["footprint"], 1)) if "footprint" in b else b for b in scene.get("buildings", [])]
+    else:
+        key = {"centroid": ["centroid"], "osm": ["osm"], "height": ["height"], "neighbours": ["neighbours"]}[stage]
+        out["buildings"] = [{k: v for k, v in b.items() if k not in key} for b in scene.get("buildings", [])]
+    return out
+
+
+def load_scene(path):
+    try:
+        scene = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as e:
+        raise PackError(f"cannot read the scene {path}: {e}") from e
+    except json.JSONDecodeError as e:
+        raise PackError(f"{path} is not valid JSON: {e}") from e
+    if not isinstance(scene, dict) or not isinstance(scene.get("buildings"), list):
+        raise PackError(f"{path} is not a scene file: expected an object with a buildings list")
+    return scene
+
+
+def build(path, scene=None, include=(), max_bytes=DEFAULT_MAX_BYTES, trim=()):
+    """The pack page, and what went into it. Returns (html, info) where info has bytes, scene_bytes, buildings, trimmed (list of the stages applied
+    and what each lost) and over_budget. `trim` names stages to apply regardless of size; otherwise stages are applied in order while the page is over max_bytes.
+    Raises PackError when the page is still over budget after every stage."""
+    from .viewer_build import _fill, _read
     errors, _ = check(path)
     if errors:
         raise PackError("the pack does not validate: " + errors[0] + (f" (and {len(errors) - 1} more)" if len(errors) > 1 else ""))
+    for t in trim:
+        if t not in TRIM_NAMES:
+            raise PackError(f"unknown trim stage {t} (known: {', '.join(TRIM_NAMES)})")
     m = load(path)
-    src = (manifest_path(path).parent / m["runtime"]["entry"]).read_text(encoding="utf-8")
-    if "</script" in src.lower() or "<!--" in src:
-        raise PackError("runtime source contains </script> or <!--, which cannot be inlined in a page")
+    src = runtime_source(path, include)
     title = m["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     page = _read("packhost.html").replace("/*__PACKRUNTIMESRC__*/", src)
-    return _fill(page, TITLE=title, PACK=_json_for_script(m), SCENE=_json_for_script(scene) if scene is not None else "null")
+    manifest_js = _json_for_script(m)
+    trimmed, cur = [], scene
+
+    def render(sc):
+        sj = _json_for_script(sc) if sc is not None else "null"
+        return _fill(page, TITLE=title, PACK=manifest_js, SCENE=sj), len(sj.encode("utf-8"))
+
+    for t in trim:
+        cur = trim_scene(cur, t); trimmed.append({"stage": t, "lost": dict(TRIM_STAGES)[t]})
+    html, sbytes = render(cur)
+    if cur is not None:
+        for name, lost in TRIM_STAGES:
+            if len(html.encode("utf-8")) <= max_bytes:
+                break
+            if any(x["stage"] == name for x in trimmed):
+                continue
+            cur = trim_scene(cur, name); trimmed.append({"stage": name, "lost": lost})
+            html, sbytes = render(cur)
+    size = len(html.encode("utf-8"))
+    if size > max_bytes:
+        raise PackError(f"the page is {size / 1048576:.1f} MB, over the {max_bytes / 1048576:.0f} MB limit" + (" even after trimming the scene" if trimmed else "") + ". Use a smaller scene (ingest --max-buildings or --bbox)")
+    info = {"bytes": size, "scene_bytes": sbytes if cur is not None else 0, "buildings": len(cur["buildings"]) if cur is not None else 0,
+            "trimmed": trimmed, "sources": [str(f) for f in runtime_files(path, include)]}
+    return html, info
+
+
+def build_page(path, scene=None, include=()):
+    """One self-contained page: the pack host, the renderer, the manifest and the runtime source."""
+    return build(path, scene, include)[0]

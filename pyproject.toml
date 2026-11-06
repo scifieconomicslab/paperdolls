@@ -16,3 +16,6 @@ paperdolls = "paperdolls.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["paperdolls*"]
+
+[tool.setuptools.package-data]
+paperdolls = ["*.js"]
