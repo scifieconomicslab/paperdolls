@@ -140,6 +140,13 @@ function bindBlocks(manifest) {
   const b = PackHost.bindRenderer({ manifest, store, controller: { wall: 0 }, sim }); assert(b.ok, b.error);
   return { store, sim, b, st: k => sim.buildingStyle(b.entityOf(k), reg, sim.theme, '#aaa') };
 }
+test('overlays in a pack: insulation and community combine in one style, from two fields, and share objects', () => {
+  const M2 = JSON.parse(J(BLOCKS)); M2.mappings.push({ entity: 'block', field: 'cannot', channel: 'overlay', scale: { type: 'categorical', label: 'Community', values: { true: { overlay: 'community', label: 'Community hub' }, false: { overlay: null, label: 'No' } } } });
+  const store = PStore.create(M2), sim = mkSim(), fr = mkFrames(); store.pushFrames(fr.concat([{ t: 2, patch: { block: { cannot: { idx: Int32Array.from([2]), val: Int8Array.from([1]) } } }, series: {} }]), { replace: true });
+  const b = PackHost.bindRenderer({ manifest: M2, store, controller: { wall: 0 }, sim }); assert(b.ok, b.error), st = k => sim.buildingStyle(b.entityOf(k), reg, sim.theme, '#aaa');
+  store.setTime(2); assert.strictEqual(J(st(2).overlays), J(['insulation', 'community'])); assert.strictEqual(J(st(3).overlays), J(['community'])); assert.strictEqual(J(st(5).overlays), J([]));
+  assert.strictEqual(PackHost.legendFor(M2).find(x => x.title === 'Community').items.length, 2); b.dispose();
+});
 test('segments in a pack: the style carries the (n, k) from the frame and follows a patch without allocating', () => {
   const { store, sim, b, st } = bindBlocks(BLOCKS);
   const s0 = st(1); assert(s0.seg && s0.seg.n === 6 && s0.seg.k === 0 && s0.seg.done === '#00aa55' && s0.seg.todo === '#e6e0d0', JSON.stringify(s0.seg));
@@ -163,6 +170,37 @@ if (createCanvas) test('segments in a pack: rendered through the real path (vers
   const far = V.fitView(sim.scene, 900, 600, 0.06); settle(far, 120);
   assert(sim._far, 'the far layer is kept'); assert(!e1._asset.prims.some(p => p.role === 'segdone'), 'no sections far'); assert.strictEqual(e1._cols.data, A.mix('#c9c2b0', '#00aa55', 0.85 * 3 / 6), 'the wall colour of the state, mixed toward done by 3 of 6');
   b.dispose();
+});
+
+// ================= insulation and community overlays =================
+test('insulation: cladding on every wall and a roof slab or band on flat, pitched and hipped roofs; the data surface stays', () => {
+  for (const roof of ['flat', 'pitch', 'hip']) for (const kind of ['terrace', 'villa', 'shophouse', 'block']) {
+    const p0 = bparams('nw', kind, ...SAMPLE[kind].slice(0, 2), Math.min(SAMPLE[kind][2], 3), 3), p = Object.assign({}, p0, { fs: Object.assign({}, p0.fs, { roof }) });
+    for (let h = 0; h < 4; h++) {
+      const a = basset(kind, h, p, ['insulation']), none = basset(kind, h, p, []);
+      assert(count(a, 'insul') >= 1, kind + ' ' + roof + ' h' + h + ': cladding'); assert(count(a, 'insulroof') >= 1, kind + ' ' + roof + ' h' + h + ': roof ' + roof);
+      assert(!none.prims.some(x => x.role === 'insul' || x.role === 'insulroof'));
+      assert.strictEqual(a.prims.filter(x => A.isData(x.role)).length, none.prims.filter(x => A.isData(x.role)).length, 'the data surface is all still there');
+    }
+  }
+  const p = bparams('nw', 'block', 26, 14, 5, 3), c = A.buildingColours(reg, BPAL, { wall: fam.wall });
+  assert.notStrictEqual(c.insul, fam.wall, 'cladding is a visibly different colour from the wall'); assert.notStrictEqual(c.insulroof, c.roof);
+  const both = basset('block', 0, p, ['insulation', 'scaffold', 'solar', 'band', 'marker', 'community']); for (const r of ['insul', 'insulroof', 'scaffold', 'solar', 'band', 'marker', 'community']) assert(count(both, r) > 0, 'all six overlays together: ' + r);
+});
+test('community: a pavilion and a flag on the roof, in its own colour, on every archetype', () => {
+  for (const kind of Object.keys(A.ARCH)) { const [W, D, N] = SAMPLE[kind], p = bparams('nw', kind, W, D, N, 3);
+    for (let h = 0; h < 4; h++) { const a = basset(kind, h, p, ['community']); assert(count(a, 'community') >= 1, kind + ' h' + h); assert(a.prims.length > basset(kind, h, p, []).prims.length, kind + ' h' + h + ': it adds geometry'); } }
+  const c = A.buildingColours(reg, BPAL, { wall: fam.wall }); assert.strictEqual(c.community, reg.coop); assert.notStrictEqual(c.community, c.marker);
+});
+if (createCanvas) test('insulation render: a retrofitted building looks different, and the overlay is a cached sprite like any other', () => {
+  A.sprites.factory = (w, h) => createCanvas(w, h); A.sprites.cache.clear(); A.sprites.pixels = 0;
+  const s = mkSim(), ctx = createCanvas(1000, 700).getContext('2d'); let on = false; s.frameVersion = 1; s.buildingStyle = () => ({ data: null, overlays: on ? ['insulation'] : [] });
+  const px = () => ctx.getImageData(0, 0, 1000, 700).data;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 1000, 700); V.renderFrame(ctx, s, nearView, ONLY_B); const a = Buffer.from(px());
+  on = true; s.frameVersion = 2; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 1000, 700); V.renderFrame(ctx, s, nearView, ONLY_B); const b = px(); let diff = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 40) diff++;
+  assert(diff > 3000, 'many pixels change colour: ' + diff);
+  for (let i = 0; i < 4; i++) V.renderFrame(ctx, s, nearView, ONLY_B);          // the first frames sharpen
+  const n = A.sprites.cache.size; s.frameVersion = 3; V.renderFrame(ctx, s, nearView, ONLY_B); assert.strictEqual(A.sprites.cache.size, n, 'drawing again builds no new sprites');
 });
 
 // ================= outline and halo =================

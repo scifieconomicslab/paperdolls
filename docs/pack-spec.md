@@ -191,6 +191,22 @@ mappings:
 - The legend lists each highlighted value with a bordered (outline) or glowing (halo) swatch; plain values are not listed. Several outline mappings may be given: for a building the first that has a colour wins.
 - Drawn by `PackHost.bindInteraction(...).drawHighlight`, which the page already calls every frame; a page that does not create the interaction layer shows no highlights.
 
+#### `overlay: insulation` and `overlay: community`
+
+Two more markings for `channel: overlay`, next to `scaffold`, `solar`, `band` and `marker` (several can be on at once, from one or several overlay mappings):
+
+```yaml
+- entity: building
+  field: insulated
+  channel: overlay
+  scale: {type: categorical, label: Insulation, values: {true: {overlay: insulation, label: Insulated}, false: {overlay: null, label: Not yet}}}
+```
+
+- `insulation` is the visible change of a retrofit: the walls get a cladding colour (the wall pushed toward the look's "finished" green, a panel on every wall inset 0.12 m and clear of the plinth and parapet, under the windows and doors, so the wall colour of the data surface still frames it) and the roof a slab (flat roofs) or a band along the eaves (pitched and hipped roofs) in a darker step of it.
+- `community` is a small pavilion with a flag on the roof, in the look's cooperative colour: a building that belongs to an energy community, a cooperative, a shared installation.
+- Both are asset geometry in their own roles (`insul`, `insulroof`, `community`, plus `frame` for the pole), part of the asset id like the older overlays, so the cost is one sprite per (shape, heading, overlay set, colours), shared by every building in that state. A building drawn as a generic extrusion (its footprint fits no asset) has no overlays, as before.
+- In a style's overlay mask the bits are appended after the older four (`scaffold` 1, `solar` 2, `band` 4, `marker` 8, `insulation` 16, `community` 32), so existing packs are unaffected.
+
 ### `series`
 
 ```yaml
