@@ -134,11 +134,27 @@
       "items": {
         "type": "object",
         "properties": {
-          "control": { "enum": ["params", "presets", "timeline", "legend", "display"] },
+          "control": { "enum": ["params", "presets", "compare", "timeline", "legend", "display"] },
           "groups": { "type": "array", "items": { "type": "string" } },
-          "chart": { "type": "string" }, "kpis": {}, "table": {}, "series": { "type": "string" }
+          "items": { "type": "array", "uniqueItems": true, "items": { "enum": ["people", "vehicles", "ink", "pixel", "fog"] } },
+          "chart": { "enum": ["line", "area", "bar"] },
+          "series": { "type": "string" },
+          "y": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "title": { "type": "string", "minLength": 1 }, "unit": { "type": "string", "minLength": 1 }, "x": { "type": "string", "minLength": 1 },
+          "compare": { "type": "boolean" },
+          "kpis": {
+            "type": "array", "minItems": 1,
+            "items": {
+              "type": "object", "required": ["label", "series"], "additionalProperties": false,
+              "properties": {
+                "label": { "type": "string", "minLength": 1 }, "series": { "type": "string" }, "y": { "type": "string" },
+                "at": { "enum": ["now", "final", "max", "min"] }, "unit": { "type": "string", "minLength": 1 }, "decimals": { "type": "integer", "minimum": 0, "maximum": 6 }
+              }
+            }
+          },
+          "table": {}
         },
-        "oneOf": [{ "required": ["control"] }, { "required": ["chart"] }, { "required": ["kpis"] }, { "required": ["table"] }]
+        "oneOf": [{ "required": ["control"] }, { "required": ["chart", "series"] }, { "required": ["kpis"] }, { "required": ["table"] }]
       }
     }
   }

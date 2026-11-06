@@ -8,7 +8,7 @@ This is the interactive-model work, phases P1 (the shell), P2 (live rendering) a
 
 | Works (P1) | Planned |
 |---|---|
-| `js` runtimes, run in a Web Worker (with a same-thread fallback); patch frames; manifest, schema and validators; store with typed arrays bound to scene buildings; shell with parameter groups, presets, play/pause/speed/timeline, legend, display switches; `wall` and `overlay` channels; hover, click selection, tooltip, inspector, Esc and arrow keys; `paperdolls pack check` and `pack build` | binding to real scene buildings (P3, **done**: see [Binding to the scene](#binding-to-the-scene-bindscene)), charts, KPIs, A/B (P5), new channels (P6), terrain (P7), `pyodide` and `remote` runtimes (P9), custom components (P10) |
+| `js` runtimes, run in a Web Worker (with a same-thread fallback); patch frames; manifest, schema and validators; store with typed arrays bound to scene buildings; shell with parameter groups, presets, play/pause/speed/timeline, legend, display switches; `wall` and `overlay` channels; hover, click selection, tooltip, inspector, Esc and arrow keys; `paperdolls pack check` and `pack build` | binding to real scene buildings (P3, **done**: see [Binding to the scene](#binding-to-the-scene-bindscene)), charts, KPI tiles, presets bar and A/B compare (P5, **done**: see [Dashboard](#dashboard-p5)), new channels (P6), terrain (P7), `pyodide` and `remote` runtimes (P9), custom components (P10) |
 
 A pack whose runtime has **no** `bindScene` has its entities drawn on scene buildings in a **fixed, invented order** (the same rule as `paperdolls replay`, `Replay.place`): where an entity stands carries no meaning, and
 the page says so. A pack with `bindScene` makes its entities from the real scene and each stands on the building it came from (below). See [`pack-architecture-findings.md`](pack-architecture-findings.md) for how this fits the renderer.
@@ -156,7 +156,7 @@ series:
 ```
 
 A named time series: each frame carries one point per series, an array with one number per name in `y`. The store keeps the whole series; the timeline bar shows the latest point
-("Buildings by state: S 539 · E 0 · I 0 · R 61"). Charts are P5.
+("Buildings by state: S 539 · E 0 · I 0 · R 61"). Charts and KPI tiles read it too (see [Dashboard](#dashboard-p5)); `x` is the label of the time axis (default: the time unit, plural).
 
 ### `layout`
 
@@ -167,8 +167,43 @@ layout:
   bottom: [{control: timeline}]
 ```
 
-Regions `left`, `right`, `bottom`; controls `params` (optionally only some `groups`), `presets`, `timeline`, `legend`, `display` (the viewer's own switches: people, vehicles, ink, pixel, fog).
-Without a layout these are the defaults. `chart`, `kpis`, `table` and `inspector` are reserved (P4, P5): they validate with a warning and are not drawn. A group not listed in `params.groups` is hidden (the validator checks the names exist).
+Regions `left`, `right`, `bottom`, each a list drawn top to bottom (the bottom region is a grid: the timeline and KPI tiles take the whole row, charts sit side by side). Components:
+
+| Item | |
+|---|---|
+| `{control: params, groups: [..]}` | the parameter controls, optionally only some groups (a group not listed is hidden) |
+| `{control: presets}` | the preset buttons, with a Reset button |
+| `{control: compare}` | the A/B compare panel |
+| `{control: timeline}`, `{control: legend}` | as before |
+| `{control: display, items: [fog, ink]}` | the viewer's own switches (`people`, `vehicles`, `ink`, `pixel`, `fog`). `items` reduces and reorders them; without it all five show. A switch the pack leaves out is not removed from the viewer: it keeps its state |
+| `{chart: line\|area\|bar, series, y, title, unit, x, compare}` | a chart of a series (below) |
+| `{kpis: [{label, series, y, at, unit, decimals}], title}` | KPI tiles (below) |
+
+Without a layout these are the defaults (`compare` is not in them: a pack opts in). `table` and `inspector` are reserved: they validate with a warning and are not drawn. Unknown keys in an item are errors.
+
+## Dashboard (P5)
+
+Charts, KPI tiles and the compare panel read the store's series (`viz/packdash.js`) and draw with `viz/packcharts.js`, a dependency-free SVG module (no CDN, nothing fetched; the page stays one offline file).
+
+**Charts.** `chart` is the type, `series` the series it draws (required), `y` an optional subset of that series' value names (default all), `title` (default the series label), `unit` (default the series unit), `x` the time-axis label (default the series `x`, else the time unit in plural). `compare: false` keeps the chart from showing B.
+
+- `line`: one line per value over time 0 to the horizon.
+- `area`: the values stacked (they should add up to something meaningful, such as buildings by state).
+- `bar`: one bar per value name **on the day shown** (a quintile, a delivery mode), so the bars move with the timeline. A series like `rebate_per_euro: {y: [Q1, Q2, Q3, Q4, Q5]}` becomes a bar chart of five quintiles. A missing value (NaN) says "no data" and is never drawn as zero.
+
+Every chart has a title, a text description for screen readers (`<desc>`: first, last and highest value of each series, or the bars), a legend of real buttons (they hide and show a series) and a readout line. Series are told apart by marker shape and by name, not only by colour. The default palette is colour-blind safe: Okabe-Ito (the pale hues darkened to keep 3:1 on white) in the `colorfigures` register and IBM Carbon's categorical order in the `formal` register; open the page with `#register=formal` for the second. Charts are sized by a viewBox and scale with their region.
+
+**Hover and the timeline.** The cursor of every time chart sits at the time on screen, and the readout under the title gives each value there. Moving the pointer over one chart shows a dotted cursor and the values at that time on all of them; leaving clears it; a click moves the timeline there (and pauses).
+
+**KPI tiles.** Each tile reads one value of one series: `at: now` (the day shown, the default), `final` (the end of the run), `max` or `min` over the run. `y` is needed when the series has several values. `unit` defaults to the series unit; `decimals` fixes the digits (0 to 6).
+
+**A/B compare.** `{control: compare}` draws a panel: a switch, what B is (a preset or a snapshot), "Hold current settings" (keeps A's parameters as a snapshot and makes it B), which run the map shows (A or B; the **B** key flips), and where B differs from A in words. A is always the current settings; B is held until changed. While compare is on:
+
+- B is drawn on every chart as **dashed** lines (outlined, dashed bars) in the colour of the series it compares with, and named in the legend ("I (B)");
+- KPI tiles add a line "B 12 buildings · ▼ −30 (−71%) vs A": the sign and the arrow carry the direction, not colour;
+- the map shows A, or B after the flip (a badge says "Map shows B: ..."). The tooltip, the inspector and the legend follow the run on screen.
+
+*How it runs.* B is a second store and a **second runtime handle** (a second worker), created when compare is first switched on. A moved slider re-runs only A; selecting another B re-runs only B. The alternative, one handle with `snapshot`/`restore`, would have to re-run or restore it every time the picture changes, and the charts want both complete runs at once; the price of two handles is a second copy of the model in memory. `snapshot`/`restore` are not used for this. `PackDash.createCompare` returns a `viewStore` (the same methods as the store; frames, series and the bound arrays come from the run on screen, everything else is A's), which `bindRenderer`, `bindInteraction` and `mountUI` are given, so the renderer needs no change. B's clock follows A's.
 
 ### `banner`
 

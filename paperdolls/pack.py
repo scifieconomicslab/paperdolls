@@ -19,8 +19,13 @@ CHANNELS = ["wall", "overlay"]
 PLANNED_CHANNELS = ["segments", "height", "outline", "halo", "insulation", "ground"]
 OVERLAYS = ["scaffold", "solar", "band", "marker"]
 REGIONS = ["left", "right", "bottom"]
-CONTROLS = ["params", "presets", "timeline", "legend", "display"]
-PLANNED_ITEMS = ["chart", "kpis", "table"]
+CONTROLS = ["params", "presets", "compare", "timeline", "legend", "display"]
+PLANNED_ITEMS = ["table"]
+ITEM_KINDS = ["control", "chart", "kpis", "table"]
+CHART_TYPES = ["line", "area", "bar"]
+DISPLAY_IDS = ["people", "vehicles", "ink", "pixel", "fog"]
+KPI_AT = ["now", "final", "max", "min"]
+ITEM_KEYS = {"control": ["control", "groups", "items"], "chart": ["chart", "series", "y", "title", "unit", "x", "compare"], "kpis": ["kpis", "title"], "table": ["table", "series"]}
 TOP = ["spec", "id", "title", "description", "runtime", "time", "params", "presets", "entities", "mappings", "series", "layout", "banner"]
 
 
@@ -381,9 +386,69 @@ def validate(m):
                     if not _obj(it):
                         err(iat, "must be a mapping")
                         continue
-                    kind = [k for k in ["control", *PLANNED_ITEMS] if k in it]
+                    kind = [k for k in ITEM_KINDS if k in it]
                     if len(kind) != 1:
                         err(iat, "needs exactly one of control, chart, kpis, table")
+                        continue
+                    for k in it:
+                        if k not in ITEM_KEYS[kind[0]]:
+                            err(f"{iat}.{k}", f"unknown key for a {kind[0]} component")
+                    if kind[0] == "chart":
+                        if it["chart"] not in CHART_TYPES:
+                            err(f"{iat}.chart", "must be one of " + ", ".join(CHART_TYPES))
+                        sr = series.get(it["series"]) if _is_str(it.get("series")) else None
+                        if not _is_str(it.get("series")):
+                            err(f"{iat}.series", "required: the series to draw")
+                        elif sr is None:
+                            err(f"{iat}.series", f"unknown series {it['series']}")
+                        if "y" in it:
+                            y = it["y"]
+                            if not isinstance(y, list) or not y or not all(_is_str(v) for v in y) or len(set(y)) != len(y):
+                                err(f"{iat}.y", "must be a list of unique value names from the series")
+                            elif _obj(sr) and isinstance(sr.get("y"), list):
+                                for n in y:
+                                    if n not in sr["y"]:
+                                        err(f"{iat}.y", f"no value {n} in series {it['series']} ({', '.join(sr['y'])})")
+                        for k in ("title", "unit", "x"):
+                            if k in it and not _is_str(it[k]):
+                                err(f"{iat}.{k}", "must be a non-empty string")
+                        if "compare" in it and not isinstance(it["compare"], bool):
+                            err(f"{iat}.compare", "must be true or false")
+                        continue
+                    if kind[0] == "kpis":
+                        if "title" in it and not _is_str(it["title"]):
+                            err(f"{iat}.title", "must be a non-empty string")
+                        if not isinstance(it["kpis"], list) or not it["kpis"]:
+                            err(f"{iat}.kpis", "must be a non-empty list of tiles")
+                            continue
+                        for j, k in enumerate(it["kpis"]):
+                            kat = f"{iat}.kpis[{j}]"
+                            if not _obj(k):
+                                err(kat, "must be a mapping")
+                                continue
+                            for key in k:
+                                if key not in ("label", "series", "y", "at", "unit", "decimals"):
+                                    err(f"{kat}.{key}", "unknown key")
+                            if not _is_str(k.get("label")):
+                                err(f"{kat}.label", "required: the tile text")
+                            sr = series.get(k["series"]) if _is_str(k.get("series")) else None
+                            if not _is_str(k.get("series")):
+                                err(f"{kat}.series", "required")
+                            elif sr is None:
+                                err(f"{kat}.series", f"unknown series {k['series']}")
+                            if "y" in k and not _is_str(k["y"]):
+                                err(f"{kat}.y", "must be a value name from the series")
+                            elif _obj(sr) and isinstance(sr.get("y"), list):
+                                if "y" not in k and len(sr["y"]) > 1:
+                                    err(f"{kat}.y", f"required: series {k['series']} has several values ({', '.join(sr['y'])})")
+                                elif "y" in k and k["y"] not in sr["y"]:
+                                    err(f"{kat}.y", f"no value {k['y']} in series {k['series']} ({', '.join(sr['y'])})")
+                            if "at" in k and k["at"] not in KPI_AT:
+                                err(f"{kat}.at", "must be one of " + ", ".join(KPI_AT))
+                            if "unit" in k and not _is_str(k["unit"]):
+                                err(f"{kat}.unit", "must be a non-empty string")
+                            if "decimals" in k and not (_is_int(k["decimals"]) and 0 <= k["decimals"] <= 6):
+                                err(f"{kat}.decimals", "must be a whole number from 0 to 6")
                         continue
                     if kind[0] != "control":
                         warn(iat, kind[0] + " components are planned and are not drawn yet")
@@ -402,6 +467,15 @@ def validate(m):
                             for g in it["groups"]:
                                 if g not in groups:
                                     err(f"{iat}.groups", f"no parameter is in group {g} (groups: {', '.join(groups) or 'none'})")
+                    if "items" in it:
+                        if it["control"] != "display":
+                            err(f"{iat}.items", "only the display control has items")
+                        elif not isinstance(it["items"], list) or len({str(v) for v in it["items"]}) != len(it["items"]):
+                            err(f"{iat}.items", "must be a list of unique switch names (" + ", ".join(DISPLAY_IDS) + ")")
+                        else:
+                            for n in it["items"]:
+                                if n not in DISPLAY_IDS:
+                                    err(f"{iat}.items", f"unknown switch {n} (" + ", ".join(DISPLAY_IDS) + ")")
     if "banner" in m and not isinstance(m["banner"], str):
         err("banner", "must be a string")
     if not m.get("banner"):

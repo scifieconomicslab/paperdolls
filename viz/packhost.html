@@ -8,7 +8,7 @@
  button,select { font:inherit; padding:3px 8px; border:1px solid #9d978a; border-radius:6px; background:#fff; color:var(--ink); }
  button.on { background:var(--ink); color:#fff; }
  button:focus-visible,input:focus-visible,select:focus-visible { outline:2px solid #2a5fb0; outline-offset:1px; }
- .pk { display:grid; grid-template-columns:minmax(250px,320px) minmax(0,1fr) minmax(190px,260px); grid-template-rows:auto minmax(0,1fr) auto; height:100vh; }
+ .pk { display:grid; grid-template-columns:minmax(250px,320px) minmax(0,1fr) minmax(220px,360px); grid-template-rows:auto minmax(0,1fr) auto; height:100vh; }
  .pk > header { grid-column:1/-1; padding:10px 18px 8px; border-bottom:1px solid var(--line); }
  h1 { font-size:19px; margin:0 0 2px; }
  .note { color:#8a2a2a; font-size:12.5px; max-width:1100px; }
@@ -51,6 +51,25 @@
  .pk-inspector header { display:flex; justify-content:space-between; align-items:center; gap:8px; } .pk-inspector header button { padding:0 7px; line-height:1.3; }
  .pk-fields { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:6px 0 0; font-size:13px; } .pk-fields dt { color:var(--muted); } .pk-fields dd { margin:0; font-variant-numeric:tabular-nums; }
  .pk-extra { border-top:1px solid var(--line); padding-top:6px; } .pk-extra:empty { display:none; } .pk-note { margin:6px 0 0; color:var(--muted); font-size:12px; } .pk-note:empty { display:none; }
+
+ /* dashboard (P5): charts, KPI tiles, A/B compare, presets */
+ .pk-item { margin:0 0 12px; min-width:0; } .pk-item-title { display:block; margin:0 0 4px; }
+ .pk-chart { background:#fff; border:1px solid var(--line); border-radius:8px; padding:6px 10px 8px; }
+ .pc { margin:0; font-family:var(--pc-font,inherit); color:var(--pc-ink,var(--ink)); } .pc-title { font-weight:600; font-size:13px; margin:0 0 2px; }
+ .pc-readout { min-height:1.35em; font-size:12.5px; color:var(--pc-muted,var(--muted)); font-variant-numeric:tabular-nums; } .pc-svg { max-height:300px; touch-action:none; }
+ .pc-legend { list-style:none; display:flex; flex-wrap:wrap; gap:2px 10px; margin:2px 0 0; padding:0; } .pc-legend[hidden] { display:none; }
+ .pc-key { display:inline-flex; gap:5px; align-items:center; border:0; background:none; padding:2px 3px; font-size:12.5px; color:inherit; cursor:pointer; border-radius:4px; } .pc-key:disabled { cursor:default; } .pc-key.off { opacity:.45; text-decoration:line-through; }
+ .pc[data-register=formal] .pc-title { font-weight:400; letter-spacing:.01em; }
+ .pc-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; } .pc-kpis[hidden] { display:none; }
+ .pc-kpi { background:#fff; border:1px solid var(--line); border-radius:8px; padding:8px 10px; } .pc-kpi-label { font-size:12.5px; color:var(--muted); }
+ .pc-kpi-value { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; line-height:1.2; } .pc-kpi-unit { font-size:12.5px; font-weight:400; color:var(--muted); }
+ .pc-kpi-cmp { font-size:12.5px; color:var(--ink); border-top:1px dashed var(--line); margin-top:4px; padding-top:3px; font-variant-numeric:tabular-nums; }
+ .pk-compare { background:#fff; border:1px solid var(--line); border-radius:8px; padding:8px 10px; } .pk-cmprow { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:6px 0; }
+ .pk-cmprow select { flex:1 1 130px; min-width:0; } .pk-diff { margin:4px 0 0; padding-left:18px; font-size:12.5px; color:var(--muted); } .pk-diff:empty { display:none; }
+ .pk-presets { margin:0 0 10px; } .pk-btns button[aria-pressed=true] { box-shadow:inset 0 0 0 1px #fff; } .pk-reset { margin-left:auto; border-style:dashed; }
+ #bottom { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:8px 14px; align-items:start; } #bottom > .pk-timeline, #bottom > .pk-kpis { grid-column:1/-1; } #bottom > .pk-item { margin:0; }
+ #mapbadge { position:absolute; left:10px; top:10px; z-index:4; background:#231e16; color:#fff; font-size:12.5px; padding:3px 9px; border-radius:5px; pointer-events:none; } #mapbadge[hidden] { display:none; }
+ :root[data-register=formal] body, body[data-register=formal] { --ink:#161616; --paper:#f4f4f4; --muted:#525252; --line:#e0e0e0; }
  @media (max-width: 860px) { .pk { grid-template-columns:minmax(0,1fr); grid-template-rows:auto 56vh auto auto auto; height:auto; } #left,#right { border:0; } }
 </style></head><body>
 <div class="pk">
@@ -60,8 +79,8 @@
     <div class="err" id="problem" role="alert"></div>
   </header>
   <aside id="left" aria-label="Model controls"></aside>
-  <div id="stagebox"><canvas id="stage"></canvas><canvas id="stage2"></canvas><canvas id="hilite"></canvas><div id="tip" hidden role="tooltip"></div><button id="fit" title="Show the whole scene">Fit</button><div id="reticle"><i></i><i></i><i></i><i></i></div></div>
-  <aside id="right" aria-label="Legend and display"></aside>
+  <div id="stagebox"><canvas id="stage"></canvas><canvas id="stage2"></canvas><canvas id="hilite"></canvas><div id="tip" hidden role="tooltip"></div><div id="mapbadge" hidden role="status"></div><button id="fit" title="Show the whole scene">Fit</button><div id="reticle"><i></i><i></i><i></i><i></i></div></div>
+  <aside id="right" aria-label="Legend, charts and display"></aside>
   <div id="bottom"></div>
 </div>
 <script>
@@ -101,7 +120,13 @@
 /*__PACKRUNTIME__*/
 </script>
 <script>
+/*__PACKCHARTS__*/
+</script>
+<script>
 /*__PACKHOST__*/
+</script>
+<script>
+/*__PACKDASH__*/
 </script>
 <script>
 /*__PACKPICK__*/
@@ -137,8 +162,15 @@
   if (!bound.ok) { problem('This pack could not bind to the scene: ' + bound.error); return; }
   // the runtime runs in a Web Worker made from the page's own text; where there is none (or it will not start) the same code runs on this thread. #worker=0 forces this thread.
   const store = PackStore.create(MANIFEST), text = id => document.getElementById(id).textContent;
-  const runtime = PackWorker.create(MANIFEST, { counts: bound.counts, attrs: bound.attrs, mode: /worker=0/.test(location.hash) ? 'inline' : 'auto', sources: { runtime: text('pk-src-runtime'), worker: text('pk-src-worker'), entry: text('pk-src-entry') } });
+  const makeRuntime = () => PackWorker.create(MANIFEST, { counts: bound.counts, attrs: bound.attrs, mode: /worker=0/.test(location.hash) ? 'inline' : 'auto', sources: { runtime: text('pk-src-runtime'), worker: text('pk-src-worker'), entry: text('pk-src-entry') } });
+  const runtime = makeRuntime();
   const ctl = PackHost.createController({ manifest: MANIFEST, runtime, store, schedule: () => setTimeout(() => ctl.flush(), 0) });
+  // the A/B compare (P5): B is a second store and a second runtime handle, made when the comparison is first switched on; `view` reads A or B (the run the map shows)
+  const compare = PackDash.createCompare({ manifest: MANIFEST, store, createRuntime: makeRuntime, schedule: () => setTimeout(() => compare.flush(), 0) });
+  const view = compare.viewStore, origInspect = ctl.inspect;
+  ctl.inspect = sel => compare.inspect(sel, origInspect);
+  const register = /register=formal/.test(location.hash) ? 'formal' : 'colorfigures';
+  document.body.setAttribute('data-register', register);
 
   // ---- the renderer: the existing one, on the synthetic placeholder unless a scene is embedded ----
   const fam = FAMS.families.find(f => f.id === 'nw'), look = (fam.looks.find(k => k.id === 'brick') || fam.looks[0]).id;
@@ -160,7 +192,7 @@
     for (const [c, x] of [...ctxOf, [hilite, hctx]]) { c.width = canvas.clientWidth * dpr; c.height = canvas.clientHeight * dpr; x.setTransform(dpr, 0, 0, dpr, 0, 0); }
     rf.reset(); rf.anchor(canvas.clientWidth / 2, canvas.clientHeight / 2); cam.resize(canvas.clientWidth || 1200, canvas.clientHeight || 700);
   }
-  const binding = PackHost.bindRenderer({ manifest: MANIFEST, store, controller: ctl, sim, bound });
+  const binding = PackHost.bindRenderer({ manifest: MANIFEST, store: view, controller: ctl, sim, bound });
   if (!binding.ok) problem('Cannot draw the model on this scene: ' + binding.error);
 
   // ---- the page: banner, controls, legend, timeline ----
@@ -179,12 +211,15 @@
     { id: 'fog', label: 'fog', checked: false, onchange: v => { fog = v; apply(); } },
   ];
   const pick = binding.ok ? Pick.create(sim) : null;
-  const inter = binding.ok ? PackHost.bindInteraction({ manifest: MANIFEST, store, sim, binding, pick, box, camera: cam, doc: document, tip: $('tip'), controller: ctl }) : null;
-  const ui = PackHost.mountUI({ manifest: MANIFEST, store, controller: ctl, doc: document, regions: { left: $('left'), right: $('right'), bottom: $('bottom') }, display });
+  const inter = binding.ok ? PackHost.bindInteraction({ manifest: MANIFEST, store: view, sim, binding, pick, box, camera: cam, doc: document, tip: $('tip'), controller: ctl }) : null;
+  const ui = PackHost.mountUI({ manifest: MANIFEST, store: view, controller: ctl, compare, register, doc: document, regions: { left: $('left'), right: $('right'), bottom: $('bottom') }, display });
+  const badge = $('mapbadge'), drawBadge = () => { badge.hidden = !(compare.enabled && compare.showing === 'b'); badge.textContent = badge.hidden ? '' : 'Map shows B: ' + compare.labelOf(compare.bSource); };
+  compare.onChange(w => { if (w === 'showing' || w === 'enabled' || w === 'b') { drawBadge(); } }); drawBadge();
+  compare.onChange(w => { if (w === 'error') problem(compare.error); });
   ctl.onRun = c => { if (c.error) problem('The model failed: ' + c.error); else if ($('problem').textContent.startsWith('The model failed')) problem(''); };
   ctl.start().then(() => { if (ctl.error) problem('The model failed: ' + ctl.error); });
   ui.refresh();
-  window.labPack = { manifest: MANIFEST, store, controller: ctl, runtime, sim, binding, ui, pick, interaction: inter, tip: $('tip') };       // a handle for tests and for the browser console
+  window.labPack = { manifest: MANIFEST, store, view, compare, register, controller: ctl, runtime, sim, binding, ui, pick, interaction: inter, tip: $('tip') };       // a handle for tests and for the browser console
   window.labViewer = { camera: cam, controls, refocus: rf, sim };
 
   let last = performance.now(), lastFailure = '';
@@ -193,6 +228,7 @@
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
       V.stepSim(sim, dt);
       ctl.flush();                                        // a moved slider re-runs the model once per frame, however many input events came
+      compare.flush();
       ctl.advance(dt);
       const view = cam.view();
       rf.frame(view, now, c => V.renderFrame(ctxOf.get(c), sim, view, layers));

@@ -204,6 +204,8 @@
   const entityTitle = sel => sel.entity.charAt(0).toUpperCase() + sel.entity.slice(1) + ' ' + (sel.id + 1);
 
   // ---- UI ----
+  // o.display: the viewer's own switches [{id, label, checked, onchange}] for the Display control, which a layout item may reduce and reorder (items: [ink, fog]).
+  // o.compare / o.register: the A/B compare (packdash.js) and the chart register ('colorfigures' or 'formal'). Charts and KPI tiles are made by PackDash.components.
   function mountUI(o) {
     const { manifest, store, controller: ctl, doc } = o, reg = o.regions || {};
     const el = (tag, attrs, ...kids) => {
@@ -249,9 +251,10 @@
       },
       presets() {
         const list = manifest.presets || []; if (!list.length) return null;
-        const btns = list.map(pr => { const b = el('button', { type: 'button', 'data-preset': pr.id, title: pr.help || null, text: pr.label }); b.onclick = () => store.applyPreset(pr.id); return b; });
-        refreshers.push(() => btns.forEach((b, i) => b.classList.toggle('on', store.isPreset(list[i].id))));
-        return el('div', { class: 'pk-presets' }, el('b', { text: 'Presets' }), el('div', { class: 'pk-btns' }, ...btns));
+        const btns = list.map(pr => { const b = el('button', { type: 'button', 'data-preset': pr.id, 'aria-pressed': 'false', title: pr.help || pr.label, text: pr.label }); b.onclick = () => store.applyPreset(pr.id); return b; });
+        const reset = el('button', { type: 'button', 'data-reset': '', class: 'pk-reset', title: 'Return every setting to its default', text: 'Reset' }); reset.onclick = () => store.resetParams();
+        refreshers.push(() => btns.forEach((b, i) => { const on = store.isPreset(list[i].id); b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }));
+        return el('div', { class: 'pk-presets', role: 'group', 'aria-label': 'Presets' }, el('b', { text: 'Presets' }), el('div', { class: 'pk-btns' }, ...btns, reset));
       },
       legend() {
         const box = el('div', { class: 'pk-legend' });
@@ -270,9 +273,10 @@
         }
         return box;
       },
-      display() {
-        if (!o.display || !o.display.length) return null;
-        return el('fieldset', { class: 'pk-display' }, el('legend', { text: 'Display' }), ...o.display.map(d => { const c = el('input', { type: 'checkbox', id: id(d.id), checked: !!d.checked }); c.onchange = () => d.onchange(c.checked); return el('label', { class: 'pk-check', for: c.id }, c, ' ' + d.label); }));
+      display(item) {
+        const all = o.display || [], list = item && item.items ? item.items.map(n => all.find(d => d.id === n)).filter(Boolean) : all;       // the pack may reduce and reorder the viewer's switches; the ones it leaves out keep their state
+        if (!list.length) return null;
+        return el('fieldset', { class: 'pk-display' }, el('legend', { text: 'Display' }), ...list.map(d => { const c = el('input', { type: 'checkbox', id: id(d.id), checked: !!d.checked }); c.onchange = () => d.onchange(c.checked); return el('label', { class: 'pk-check', for: c.id }, c, ' ' + d.label); }));
       },
       timeline() {
         const tm = manifest.time, play = el('button', { type: 'button', 'data-play': '' }), slider = el('input', { type: 'range', min: 0, max: tm.steps, step: 1, value: 0, 'aria-label': tm.unit, 'data-time': '' });
@@ -328,16 +332,23 @@
       root0.destroy = () => offs2.forEach(f => f());
       return root0;
     }
+    // dashboard components (P5, viz/packdash.js): charts and KPI tiles named by the layout, and the A/B compare panel
+    const dash = root.PackDash ? root.PackDash.components({ manifest, store, controller: ctl, compare: o.compare, doc, el, id, refreshers, register: o.register }) : null;
+    components.compare = item => (dash ? dash.compare(item) : null);
+    const mounted = [];
     for (const region of ['left', 'right', 'bottom']) {
       const host = reg[region]; if (!host) continue;
-      for (const item of layout[region] || []) { if (!item.control) continue; const n = components[item.control] && components[item.control](item); if (n) host.appendChild(n); }
+      for (const item of layout[region] || []) {
+        const make = item.control ? components[item.control] : item.chart ? (dash && dash.chart) : item.kpis ? (dash && dash.kpis) : null;
+        const n = make && make(item); if (n) { n.setAttribute('data-item', item.control || (item.chart ? 'chart' : 'kpis')); host.appendChild(n); mounted.push(n); }
+      }
     }
     const ihost = reg.inspector || reg.right;
     if (ihost) ihost.appendChild(inspector());
     const refresh = () => refreshers.forEach(f => f());
     const offs = [store.subscribe('params', refresh), store.subscribe('time', refresh), store.subscribe('frames', refresh)];
     refresh();
-    return { refresh, destroy() { offs.forEach(f => f()); } };
+    return { refresh, destroy() { offs.forEach(f => f()); for (const n of mounted) if (n.destroy) n.destroy(); if (dash) dash.destroy(); } };
   }
 
   // ---- interaction: hover, click, keys ----
