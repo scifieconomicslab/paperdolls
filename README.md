@@ -87,6 +87,10 @@ paperdolls intake next render.yaml
 paperdolls intake answer render.yaml ID "value"
 paperdolls intake show render.yaml
 
+# model packs: interactive models with live sliders (docs/pack-spec.md)
+paperdolls pack check packs/toy-epidemic
+paperdolls pack build packs/toy-epidemic --out toy.html
+
 # model replay
 paperdolls export render.yaml --out trajectory.npz
 paperdolls check render.yaml
@@ -127,8 +131,9 @@ The full list of open problems, including the Great Retrofit model's, is in [doc
 - `agents/fleet-researcher.md`: researches a place's vehicle fleet, with sources and dates.
 - `bin/paperdolls`: the launcher.
 - `paperdolls/`: the Python pipeline. `paperdolls/ingest/` is the OpenStreetMap ingest; `replay_build.py` builds the replay page.
-- `viz/`: the isometric library and viewer, including `replay.js`. See [viz/README.md](viz/README.md).
-- `docs/`: the model interface, the replay mapping, the intake questions, known issues, and the design and plan the replay work followed (`docs/superpowers/`).
+- `viz/`: the isometric library and viewer, including `replay.js` and the model-pack shell (`pack*.js`, `packhost.html`). See [viz/README.md](viz/README.md).
+- `packs/`: model packs (a manifest and a runtime): `toy-epidemic` is the worked example. `schemas/pack.schema.json` is the manifest's JSON Schema; `paperdolls/pack.py` validates and builds.
+- `docs/`: the model-pack spec (`pack-spec.md`) and what the renderer allows (`pack-architecture-findings.md`), the model interface, the replay mapping, the intake questions, known issues, and the design and plan the replay work followed (`docs/superpowers/`).
 - `.github/workflows/tests.yml`: runs the Python and JavaScript tests on Python 3.10 and 3.12.
 - `vendor/greatretrofit_v2/`: the vendored model and its licence.
 - `assets/`: palettes, the intake question bank, the demo configuration and the icon.

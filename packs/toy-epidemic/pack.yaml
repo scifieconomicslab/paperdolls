@@ -1,0 +1,75 @@
+spec: 1
+id: toy-epidemic
+title: Toy epidemic
+description: >
+  A small stochastic S-E-I-R model on a contact network of buildings. It exists to prove the model-pack loop (manifest, runtime, shared store,
+  controls, map), not to say anything about disease.
+
+runtime: {type: js, entry: runtime.js, seed: 7, on_params: rerun}
+time: {unit: day, steps: 160, speeds: [5, 20, 60], speed: 20}
+
+params:
+  beta:            {type: number,  min: 0, max: 1,  step: 0.01, default: 0.08, unit: share, label: Transmission per contact, group: Disease,
+                    help: "Chance that one contact with an infectious building passes the infection."}
+  incubation_days: {type: integer, min: 1, max: 10, default: 3, unit: days, label: Incubation, group: Disease,
+                    help: "Days between catching it and becoming infectious."}
+  infectious_days: {type: integer, min: 2, max: 14, default: 6, unit: days, label: Infectious period, group: Disease}
+  contacts:        {type: integer, min: 1, max: 12, default: 5, label: Contacts per day, group: Population}
+  local_share:     {type: number,  min: 0, max: 1,  step: 0.05, default: 0.7, unit: share, label: Nearby contacts, group: Population,
+                    help: "Share of contacts drawn from nearby buildings in the model's list rather than from anywhere."}
+  immunity:        {type: number,  min: 0, max: 0.9, step: 0.05, default: 0.1, unit: share, label: Starting immunity, group: Population}
+  initial_cases:   {type: integer, min: 1, max: 20, default: 3, label: Initial cases, group: Population}
+  lockdown:        {type: enum, values: [{value: none, label: None}, {value: partial, label: Partial}, {value: full, label: Full}], default: none, label: Lockdown, group: Policy,
+                    help: "Scales transmission: partial cuts it by a quarter, full by 60 percent."}
+  masks:           {type: boolean, default: false, label: Masks, group: Policy, help: "Cuts transmission by a fifth."}
+
+presets:
+  - {id: baseline,   label: Baseline,           params: {}}
+  - {id: lockdown,   label: Full lockdown,      params: {lockdown: full}}
+  - {id: vaccinated, label: 35% immune,         params: {immunity: 0.35}}
+  - {id: light,      label: Masks and partial lockdown, params: {masks: true, lockdown: partial}}
+
+entities:
+  building:
+    count: 600
+    fields:
+      state:    {type: category, values: [S, E, I, R]}
+      exposure: number
+
+mappings:
+  - entity: building
+    field: state
+    channel: wall
+    scale:
+      type: categorical
+      label: Infection state
+      values:
+        S: {colour: "#a9c5a0", label: Susceptible}
+        E: {colour: "#e9b44c", label: Exposed}
+        I: {colour: "#c8452f", label: Infectious}
+        R: {colour: "#5b8db8", label: Recovered}
+  - entity: building
+    field: exposure
+    channel: wall
+    scale: {type: sequential, label: Exposure today, domain: [0, 1], colours: ["#f4e9c8", "#e9b44c", "#c8452f"]}
+  - entity: building
+    field: state
+    channel: overlay
+    scale:
+      type: categorical
+      label: Infectious
+      values:
+        S: {overlay: null,   label: Susceptible}
+        E: {overlay: null,   label: Exposed}
+        I: {overlay: marker, label: Infectious}
+        R: {overlay: null,   label: Recovered}
+
+series:
+  counts: {label: Buildings by state, unit: buildings, y: [S, E, I, R]}
+
+layout:
+  left:   [{control: params}, {control: presets}]
+  right:  [{control: legend}, {control: display}]
+  bottom: [{control: timeline}]
+
+banner: "A toy model on the synthetic placeholder map. Geometry is not a real place, placement of the model's buildings is invented, and nothing here is evidence about any disease."

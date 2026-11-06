@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/scifieconomicslab/paperdolls/schemas/pack.schema.json",
+  "title": "paperdolls model pack manifest (pack.yaml)",
+  "description": "The structure of pack.yaml. Rules that need two parts of the file at once (a mapping naming a field that exists, a preset value inside the parameter's range, a layout group that some parameter has) are checked by the validators in paperdolls/pack.py and viz/packvalidate.js, not here. See docs/pack-spec.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "runtime", "time", "params"],
+  "properties": {
+    "spec": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "runtime": {
+      "type": "object", "additionalProperties": false, "required": ["type"],
+      "properties": {
+        "type": { "enum": ["js", "pyodide", "remote"] },
+        "entry": { "type": "string", "minLength": 1 },
+        "seed": { "type": "integer" },
+        "on_params": { "enum": ["rerun", "continue"] },
+        "options": { "type": "object" }
+      },
+      "if": { "properties": { "type": { "const": "js" } } }, "then": { "required": ["entry"] }
+    },
+    "time": {
+      "type": "object", "additionalProperties": false, "required": ["unit", "steps"],
+      "properties": {
+        "unit": { "type": "string", "minLength": 1 },
+        "steps": { "type": "integer", "minimum": 1 },
+        "speeds": { "type": "array", "minItems": 1, "items": { "type": "number", "exclusiveMinimum": 0 } },
+        "speed": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "params": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/param" }
+    },
+    "presets": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "label", "params"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "label": { "type": "string", "minLength": 1 },
+          "help": { "type": "string" },
+          "params": { "type": "object", "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" } }
+        }
+      }
+    },
+    "entities": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false, "required": ["fields"],
+        "properties": {
+          "count": { "type": "integer", "minimum": 1 },
+          "from": { "const": "scene" },
+          "fields": { "type": "object", "minProperties": 1, "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" }, "additionalProperties": { "$ref": "#/$defs/field" } }
+        },
+        "anyOf": [{ "required": ["count"] }, { "required": ["from"] }]
+      }
+    },
+    "mappings": { "type": "array", "items": { "$ref": "#/$defs/mapping" } },
+    "series": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false, "required": ["y"],
+        "properties": {
+          "label": { "type": "string", "minLength": 1 }, "unit": { "type": "string", "minLength": 1 }, "x": { "type": "string", "minLength": 1 },
+          "y": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "properties": {
+        "left": { "$ref": "#/$defs/items" }, "right": { "$ref": "#/$defs/items" }, "bottom": { "$ref": "#/$defs/items" },
+        "inspector": { "type": ["object", "array"] }
+      },
+      "additionalProperties": false
+    },
+    "banner": { "type": "string" }
+  },
+  "$defs": {
+    "param": {
+      "type": "object", "required": ["type", "default"],
+      "properties": {
+        "type": { "enum": ["number", "integer", "boolean", "enum"] },
+        "min": { "type": "number" }, "max": { "type": "number" }, "step": { "type": "number", "exclusiveMinimum": 0 },
+        "default": {},
+        "values": { "type": "array", "minItems": 1, "items": { "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "object", "required": ["value"], "properties": { "value": { "type": "string", "minLength": 1 }, "label": { "type": "string" } }, "additionalProperties": false }] } },
+        "unit": { "type": "string", "minLength": 1 }, "label": { "type": "string", "minLength": 1 }, "group": { "type": "string", "minLength": 1 }, "help": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        { "if": { "properties": { "type": { "enum": ["number", "integer"] } } }, "then": { "required": ["min", "max"], "properties": { "default": { "type": "number" } } } },
+        { "if": { "properties": { "type": { "const": "boolean" } } }, "then": { "properties": { "default": { "type": "boolean" } }, "not": { "anyOf": [{ "required": ["min"] }, { "required": ["max"] }, { "required": ["step"] }, { "required": ["values"] }] } } },
+        { "if": { "properties": { "type": { "const": "enum" } } }, "then": { "required": ["values"], "properties": { "default": { "type": "string" } }, "not": { "anyOf": [{ "required": ["min"] }, { "required": ["max"] }, { "required": ["step"] }] } } }
+      ]
+    },
+    "field": {
+      "oneOf": [
+        { "enum": ["number", "int", "boolean"] },
+        { "type": "object", "additionalProperties": false, "required": ["type"],
+          "properties": { "type": { "enum": ["category", "number", "int", "boolean"] }, "label": { "type": "string" }, "values": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } } },
+          "if": { "properties": { "type": { "const": "category" } } }, "then": { "required": ["values"] } }
+      ]
+    },
+    "mapping": {
+      "type": "object", "required": ["entity", "field", "channel"],
+      "properties": {
+        "entity": { "type": "string" }, "field": { "type": "string" },
+        "channel": { "enum": ["wall", "overlay", "segments", "height", "outline", "halo", "insulation", "ground"] },
+        "scale": {
+          "type": "object", "required": ["type"],
+          "properties": {
+            "type": { "enum": ["categorical", "sequential"] }, "label": { "type": "string" },
+            "domain": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } },
+            "colours": { "type": "array", "minItems": 2, "items": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" } },
+            "values": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "object", "required": ["label"], "properties": { "label": { "type": "string", "minLength": 1 }, "colour": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }, "overlay": { "enum": ["scaffold", "solar", "band", "marker", null] } }, "additionalProperties": false } }
+          },
+          "allOf": [
+            { "if": { "properties": { "type": { "const": "sequential" } } }, "then": { "required": ["domain", "colours"] } },
+            { "if": { "properties": { "type": { "const": "categorical" } } }, "then": { "required": ["values"] } }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "control": { "enum": ["params", "presets", "timeline", "legend", "display"] },
+          "groups": { "type": "array", "items": { "type": "string" } },
+          "chart": { "type": "string" }, "kpis": {}, "table": {}, "series": { "type": "string" }
+        },
+        "oneOf": [{ "required": ["control"] }, { "required": ["chart"] }, { "required": ["kpis"] }, { "required": ["table"] }]
+      }
+    }
+  }
+}

@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>/*__TITLE__*/</title>
+<style>
+ :root { --ink:#231e16; --paper:#f4f1ea; --muted:#5d5950; --line:#d6d1c4; --accent:#231e16; }
+ * { box-sizing:border-box; }
+ body { margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink); background:var(--paper); }
+ button,select { font:inherit; padding:3px 8px; border:1px solid #9d978a; border-radius:6px; background:#fff; color:var(--ink); }
+ button.on { background:var(--ink); color:#fff; }
+ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px solid #2a5fb0; outline-offset:1px; }
+ .pk { display:grid; grid-template-columns:minmax(250px,320px) minmax(0,1fr) minmax(190px,260px); grid-template-rows:auto minmax(0,1fr) auto; height:100vh; }
+ .pk > header { grid-column:1/-1; padding:10px 18px 8px; border-bottom:1px solid var(--line); }
+ h1 { font-size:19px; margin:0 0 2px; }
+ .note { color:#8a2a2a; font-size:12.5px; max-width:1100px; }
+ .err { color:#a2191f; font-size:13px; }
+ aside { overflow:auto; padding:10px 14px; background:#f7f5ef; }
+ #left { border-right:1px solid var(--line); } #right { border-left:1px solid var(--line); }
+ #stagebox { position:relative; overflow:hidden; background:#f2efe7; cursor:grab; touch-action:none; min-height:240px; }
+ #stagebox.dragging { cursor:grabbing; }
+ #stagebox canvas { position:absolute; left:0; top:0; display:block; width:100%; height:100%; will-change:transform, opacity; pointer-events:none; }
+ #fit { position:absolute; right:10px; top:10px; z-index:4; }
+ #reticle { position:absolute; left:50%; top:50%; width:96px; height:96px; margin:-48px 0 0 -48px; pointer-events:none; opacity:0; transition:opacity .35s ease; z-index:3; }
+ #reticle i { position:absolute; width:22px; height:22px; border:2px solid rgba(35,30,22,.85); }
+ #reticle i:nth-child(1) { left:0; top:0; border-right:0; border-bottom:0; } #reticle i:nth-child(2) { right:0; top:0; border-left:0; border-bottom:0; }
+ #reticle i:nth-child(3) { left:0; bottom:0; border-right:0; border-top:0; } #reticle i:nth-child(4) { right:0; bottom:0; border-left:0; border-top:0; }
+ #reticle.seek { opacity:1; animation:rseek .9s ease-in-out infinite; }
+ #reticle.lock { opacity:1; transform:scale(.82); transition:transform .18s cubic-bezier(.2,1.5,.4,1), opacity .35s ease; }
+ #reticle.lock i { border-color:#2ea36b; box-shadow:0 0 7px rgba(46,163,107,.65); }
+ @keyframes rseek { 0%,100% { transform:scale(1.55); } 50% { transform:scale(1.18); } }
+ @media (prefers-reduced-motion: reduce) { #reticle.seek { animation:none; transform:scale(1.3); } #reticle, #reticle.lock { transition:none; } }
+ #bottom { grid-column:1/-1; border-top:1px solid var(--line); background:#f7f5ef; padding:8px 18px; }
+ fieldset { border:1px solid var(--line); border-radius:8px; margin:0 0 10px; padding:6px 10px 8px; background:#fff; }
+ legend { font-weight:600; padding:0 4px; }
+ .pk-row { display:grid; grid-template-columns:1fr auto; gap:1px 8px; align-items:center; margin:6px 0; }
+ .pk-row label { grid-column:1/-1; font-size:13px; }
+ .pk-row input[type=range] { width:100%; margin:0; } .pk-row select { grid-column:1/-1; }
+ .pk-row.pk-bool { grid-template-columns:auto 1fr; } .pk-row.pk-bool label { grid-column:2; grid-row:1; } .pk-row.pk-bool input { grid-column:1; grid-row:1; }
+ .pk-row small { grid-column:1/-1; color:var(--muted); font-size:12px; line-height:1.3; }
+ .pk-val { font-variant-numeric:tabular-nums; min-width:3.2em; text-align:right; }
+ .pk-btns { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 10px; }
+ .pk-legrow { display:flex; flex-wrap:wrap; gap:3px 12px; align-items:center; margin:6px 0 10px; font-size:13px; } .pk-legrow > b { flex-basis:100%; }
+ .pk-sw { display:inline-flex; gap:5px; align-items:center; } .pk-sw i,.pk-ramp i { display:inline-block; width:16px; height:16px; border:1px solid var(--ink); border-radius:3px; }
+ .pk-ramp { display:inline-flex; gap:5px; align-items:center; } .pk-ramp i { width:110px; }
+ .pk-check { display:flex; gap:6px; align-items:center; margin:3px 0; font-size:13px; }
+ .pk-timeline { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; }
+ .pk-timeline input[type=range] { flex:1 1 220px; min-width:140px; } .pk-time { min-width:8.5em; font-variant-numeric:tabular-nums; }
+ .pk-readout { flex-basis:100%; color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums; }
+ @media (max-width: 860px) { .pk { grid-template-columns:minmax(0,1fr); grid-template-rows:auto 56vh auto auto auto; height:auto; } #left,#right { border:0; } }
+</style></head><body>
+<div class="pk">
+  <header>
+    <h1 id="title">/*__TITLE__*/</h1>
+    <div class="note" id="banner"></div>
+    <div class="err" id="problem" role="alert"></div>
+  </header>
+  <aside id="left" aria-label="Model controls"></aside>
+  <div id="stagebox"><canvas id="stage"></canvas><canvas id="stage2"></canvas><button id="fit" title="Show the whole scene">Fit</button><div id="reticle"><i></i><i></i><i></i><i></i></div></div>
+  <aside id="right" aria-label="Legend and display"></aside>
+  <div id="bottom"></div>
+</div>
+<script>
+/*__ASSETLIB__*/
+</script>
+<script>
+/*__BUILDINGLIB__*/
+</script>
+<script>
+/*__TREELIB__*/
+</script>
+<script>
+/*__VIZLIB__*/
+</script>
+<script>
+/*__REPLAY__*/
+</script>
+<script>
+/*__ZOOMHOLD__*/
+</script>
+<script>
+/*__REFOCUS__*/
+</script>
+<script>
+/*__CAMERA__*/
+</script>
+<script>
+/*__CONTROLS__*/
+</script>
+<script>
+/*__PACKVALIDATE__*/
+</script>
+<script>
+/*__PACKSTORE__*/
+</script>
+<script>
+/*__PACKRUNTIME__*/
+</script>
+<script>
+/*__PACKHOST__*/
+</script>
+<script>
+/*__PACKRUNTIMESRC__*/
+</script>
+<script>
+(function () {
+  const V = window.VizLib, A = window.AssetLib, $ = id => document.getElementById(id);
+  A.sprites.factory = (w, hh) => { const c = document.createElement('canvas'); c.width = w; c.height = hh; return c; };
+  A.sprites.dpr = window.devicePixelRatio || 1;
+  const FAMS = /*__PALETTES__*/;
+  const MANIFEST = /*__PACK__*/;
+  const EMBEDDED_SCENE = /*__SCENE__*/;                 // a scene object, or null for the synthetic placeholder
+  const problem = msg => { $('problem').textContent = msg; };
+
+  // ---- the pack: validate it, find its runtime, start the store ----
+  const check = PackSpec.validate(MANIFEST);
+  if (!check.ok) { problem('This pack does not validate: ' + check.errors.slice(0, 3).join('; ') + (check.errors.length > 3 ? ' (and ' + (check.errors.length - 3) + ' more)' : '')); return; }
+  const impl = PaperDolls.getRuntime(MANIFEST.id);
+  if (!impl) { problem('The pack’s runtime did not register itself as ' + MANIFEST.id + '.'); return; }
+  const store = PackStore.create(MANIFEST), runtime = PackRuntime.create(MANIFEST, impl);
+  const ctl = PackHost.createController({ manifest: MANIFEST, runtime, store, schedule: () => setTimeout(() => ctl.flush(), 0) });
+
+  // ---- the renderer: the existing one, on the synthetic placeholder unless a scene is embedded ----
+  const fam = FAMS.families.find(f => f.id === 'nw'), look = (fam.looks.find(k => k.id === 'brick') || fam.looks[0]).id;
+  const theme = A.theme(fam, look, 'colorfigures');
+  const scene = EMBEDDED_SCENE || V.makePlaceholderScene(7);
+  const sim = V.createSim(scene, { seed: 11, theme, region: 'nw' });
+  const canvas = $('stage'), canvas2 = $('stage2'), ctx = canvas.getContext('2d'), ctx2 = canvas2.getContext('2d'), ctxOf = new Map([[canvas, ctx], [canvas2, ctx2]]);
+  const cam = LabCamera.create({ bounds: V.sceneBounds(scene), width: canvas.clientWidth || 1200, height: canvas.clientHeight || 700 });
+  const box = $('stagebox'), hold = ZoomHold.create(canvas, { settleMs: 120 });
+  const calm = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const controls = LabControls.attach(box, cam, { smoothZoom: !calm });
+  const rf = Refocus.create({ hold, front: canvas, back: canvas2, reticle: $('reticle'), fadeMs: calm ? 0 : 160, blur: false,
+                              isDone: () => A.sprites.builds === 0 && !sim._groundP && !sim._farP });
+  box.addEventListener('wheel', e => { const r = box.getBoundingClientRect(); rf.anchor(e.clientX - r.left, e.clientY - r.top); }, { passive: true, capture: true });
+  $('fit').onclick = () => cam.fitAll();
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    for (const [c, x] of ctxOf) { c.width = canvas.clientWidth * dpr; c.height = canvas.clientHeight * dpr; x.setTransform(dpr, 0, 0, dpr, 0, 0); }
+    rf.reset(); rf.anchor(canvas.clientWidth / 2, canvas.clientHeight / 2); cam.resize(canvas.clientWidth || 1200, canvas.clientHeight || 700);
+  }
+  const binding = PackHost.bindRenderer({ manifest: MANIFEST, store, controller: ctl, sim });
+  if (!binding.ok) problem('Cannot draw the model on this scene: ' + binding.error);
+
+  // ---- the page: banner, controls, legend, timeline ----
+  $('banner').textContent = (MANIFEST.banner || '') + (binding.ok ? ' Placement invented: each model building is drawn on a scene building in a fixed order, so where it stands carries no meaning. People, vehicles and trees are decoration.' : '');
+  const layers = { buildings: true, vehicles: true, people: true };
+  let ink = false, pixel = false, fog = false;
+  const apply = () => { sim.opts.ink = ink; sim.opts.pixel = pixel ? 1.5 : 0; sim.opts.posterize = pixel ? 12 : 0; sim.opts.fog = fog; };
+  const display = [
+    { id: 'people', label: 'people', checked: true, onchange: v => { layers.people = v; } },
+    { id: 'vehicles', label: 'vehicles', checked: true, onchange: v => { layers.vehicles = v; } },
+    { id: 'ink', label: 'ink outline', checked: false, onchange: v => { ink = v; apply(); } },
+    { id: 'pixel', label: 'pixel', checked: false, onchange: v => { pixel = v; apply(); } },
+    { id: 'fog', label: 'fog', checked: false, onchange: v => { fog = v; apply(); } },
+  ];
+  const ui = PackHost.mountUI({ manifest: MANIFEST, store, controller: ctl, doc: document, regions: { left: $('left'), right: $('right'), bottom: $('bottom') }, display });
+  ctl.onRun = c => { if (c.error) problem('The model failed: ' + c.error); else if ($('problem').textContent.startsWith('The model failed')) problem(''); };
+  ctl.start();
+  if (ctl.error) problem('The model failed: ' + ctl.error);
+  ui.refresh();
+  window.labPack = { manifest: MANIFEST, store, controller: ctl, runtime, sim, binding, ui };       // a handle for tests and for the browser console
+  window.labViewer = { camera: cam, controls, refocus: rf, sim };
+
+  let last = performance.now(), lastFailure = '';
+  function frame(now) {
+    try {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      V.stepSim(sim, dt);
+      ctl.flush();                                        // a moved slider re-runs the model once per frame, however many input events came
+      ctl.advance(dt);
+      const view = cam.view();
+      rf.frame(view, now, c => V.renderFrame(ctxOf.get(c), sim, view, layers));
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      if (msg !== lastFailure) { lastFailure = msg; console.error(e); problem('A frame failed and was skipped: ' + msg); }
+      try { rf.reset(); } catch (_) { /* nothing more to do */ }
+    } finally { requestAnimationFrame(frame); }
+  }
+  window.addEventListener('resize', resize);
+  resize(); cam.fitAll();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body></html>

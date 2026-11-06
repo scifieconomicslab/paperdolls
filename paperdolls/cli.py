@@ -282,6 +282,29 @@ def cmd_viewer(a):
     print("Open it in a browser. Drag or A and D pan; the wheel or W and S zoom. The Fit button shows the whole scene.")
 
 
+def cmd_pack(a):
+    """pack check: validate a model pack's manifest. pack build: write its one-file page."""
+    from . import pack as packmod
+    if a.pcmd == "check":
+        errors, warnings = packmod.check(a.path)
+        if a.json:
+            print(json.dumps({"ok": not errors, "errors": errors, "warnings": warnings}, indent=2))
+        else:
+            for w in warnings:
+                print(f"warning: {w}")
+            for e in errors:
+                print(f"error: {e}")
+            print(f"{a.path}: " + (f"{len(errors)} error(s), {len(warnings)} warning(s)" if errors else f"ok ({len(warnings)} warning(s))"))
+        raise SystemExit(1 if errors else 0)
+    scene = json.loads(Path(a.scene).read_text(encoding="utf-8")) if a.scene else None
+    try:
+        html = packmod.build_page(a.path, scene)
+    except packmod.PackError as e:
+        raise SystemExit(f"cannot continue: {e}")
+    Path(a.out).write_text(html, encoding="utf-8")
+    print(f"wrote {a.out} ({Path(a.out).stat().st_size // 1024} KB)")
+
+
 def cmd_ingest(a):
     from .ingest import build, report as rpt
     bbox = tuple(float(x) for x in a.bbox.split(",")) if a.bbox else None
@@ -358,6 +381,10 @@ def main(argv=None):
     s = sub.add_parser("place", help="get the OSM extract, ingest it, and write the scene and its report (place_scene projects)")
     s.add_argument("spec"); s.add_argument("--refetch", action="store_true"); s.add_argument("--no-fetch", action="store_true"); s.set_defaults(f=cmd_place)
     s = sub.add_parser("viewer", help="write a one-file viewer page for the project's place"); s.add_argument("spec"); s.set_defaults(f=cmd_viewer)
+    s = sub.add_parser("pack", help="model packs: check a pack.yaml, build a pack's one-file page"); psub = s.add_subparsers(dest="pcmd", required=True)
+    i = psub.add_parser("check", help="validate the manifest (a pack folder or a pack.yaml); exits 1 on errors"); i.add_argument("path"); i.add_argument("--json", action="store_true")
+    i = psub.add_parser("build", help="write the pack's one-file page"); i.add_argument("path"); i.add_argument("--scene"); i.add_argument("--out", default="pack.html")
+    s.set_defaults(f=cmd_pack)
     a = ap.parse_args(argv)
     a.f(a)
 

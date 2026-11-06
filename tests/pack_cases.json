@@ -1,0 +1,852 @@
+{
+ "base": {
+  "spec": 1,
+  "id": "mini",
+  "title": "Mini",
+  "runtime": {
+   "type": "js",
+   "entry": "runtime.js"
+  },
+  "time": {
+   "unit": "day",
+   "steps": 10,
+   "speeds": [
+    1,
+    4
+   ],
+   "speed": 4
+  },
+  "params": {
+   "rate": {
+    "type": "number",
+    "min": 0,
+    "max": 1,
+    "step": 0.05,
+    "default": 0.5,
+    "unit": "share",
+    "label": "Rate",
+    "group": "A",
+    "help": "How fast."
+   },
+   "n": {
+    "type": "integer",
+    "min": 1,
+    "max": 9,
+    "default": 3,
+    "group": "A"
+   },
+   "flag": {
+    "type": "boolean",
+    "default": false,
+    "group": "B"
+   },
+   "mode": {
+    "type": "enum",
+    "values": [
+     "x",
+     {
+      "value": "y",
+      "label": "Why"
+     }
+    ],
+    "default": "x",
+    "group": "B"
+   }
+  },
+  "presets": [
+   {
+    "id": "fast",
+    "label": "Fast",
+    "params": {
+     "rate": 0.9,
+     "flag": true
+    }
+   }
+  ],
+  "entities": {
+   "thing": {
+    "count": 5,
+    "fields": {
+     "kind": {
+      "type": "category",
+      "values": [
+       "a",
+       "b"
+      ]
+     },
+     "load": "number"
+    }
+   }
+  },
+  "mappings": [
+   {
+    "entity": "thing",
+    "field": "kind",
+    "channel": "wall",
+    "scale": {
+     "type": "categorical",
+     "label": "Kind",
+     "values": {
+      "a": {
+       "colour": "#112233",
+       "label": "A"
+      },
+      "b": {
+       "colour": "#445566",
+       "label": "B"
+      }
+     }
+    }
+   },
+   {
+    "entity": "thing",
+    "field": "load",
+    "channel": "wall",
+    "scale": {
+     "type": "sequential",
+     "label": "Load",
+     "domain": [
+      0,
+      1
+     ],
+     "colours": [
+      "#000000",
+      "#ffffff"
+     ]
+    }
+   },
+   {
+    "entity": "thing",
+    "field": "kind",
+    "channel": "overlay",
+    "scale": {
+     "type": "categorical",
+     "values": {
+      "a": {
+       "overlay": null,
+       "label": "A"
+      },
+      "b": {
+       "overlay": "marker",
+       "label": "B"
+      }
+     }
+    }
+   }
+  ],
+  "series": {
+   "totals": {
+    "label": "Totals",
+    "y": [
+     "a",
+     "b"
+    ]
+   }
+  },
+  "layout": {
+   "left": [
+    {
+     "control": "params",
+     "groups": [
+      "A",
+      "B"
+     ]
+    },
+    {
+     "control": "presets"
+    }
+   ],
+   "right": [
+    {
+     "control": "legend"
+    }
+   ],
+   "bottom": [
+    {
+     "control": "timeline"
+    }
+   ]
+  },
+  "banner": "Synthetic."
+ },
+ "cases": [
+  {
+   "name": "the base manifest is valid",
+   "patch": {},
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "unknown top-level key",
+   "patch": {
+    "colour": 1
+   },
+   "errors": [
+    "colour: unknown top-level key"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "id must be a slug",
+   "patch": {
+    "id": "Bad Id"
+   },
+   "errors": [
+    "id: required"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "title is required",
+   "patch": {
+    "title": "$delete"
+   },
+   "errors": [
+    "title: required"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "spec must be 1",
+   "patch": {
+    "spec": 2
+   },
+   "errors": [
+    "spec: must be 1"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "runtime is required",
+   "patch": {
+    "runtime": "$delete"
+   },
+   "errors": [
+    "runtime: required"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a js runtime needs an entry",
+   "patch": {
+    "runtime.entry": "$delete"
+   },
+   "errors": [
+    "runtime.entry: required"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "runtime type must be known",
+   "patch": {
+    "runtime.type": "java"
+   },
+   "errors": [
+    "runtime.type: must be one of"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a pyodide runtime is accepted with a warning",
+   "patch": {
+    "runtime": {
+     "type": "pyodide"
+    }
+   },
+   "errors": [],
+   "warnings": [
+    "runtime.type: pyodide runtimes are planned"
+   ]
+  },
+  {
+   "name": "on_params must be rerun or continue",
+   "patch": {
+    "runtime.on_params": "sometimes"
+   },
+   "errors": [
+    "runtime.on_params"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "time is required",
+   "patch": {
+    "time": "$delete"
+   },
+   "errors": [
+    "time: required"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "time.steps must be a positive whole number",
+   "patch": {
+    "time.steps": 0
+   },
+   "errors": [
+    "time.steps"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "time.speed outside speeds warns",
+   "patch": {
+    "time.speed": 3
+   },
+   "errors": [],
+   "warnings": [
+    "time.speed: is not in time.speeds"
+   ]
+  },
+  {
+   "name": "params is required",
+   "patch": {
+    "params": "$delete"
+   },
+   "errors": [
+    "params: required"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a number needs min and max",
+   "patch": {
+    "params.rate.max": "$delete"
+   },
+   "errors": [
+    "params.rate: a number needs min and max"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "min must be below max",
+   "patch": {
+    "params.rate.min": 2
+   },
+   "errors": [
+    "params.rate: min must be below max"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "the default must lie in range",
+   "patch": {
+    "params.rate.default": 2
+   },
+   "errors": [
+    "params.rate.default: 2 is above max 1"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "an integer default must be whole",
+   "patch": {
+    "params.n.default": 2.5
+   },
+   "errors": [
+    "params.n.default: must be a whole number"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a default is required",
+   "patch": {
+    "params.rate.default": "$delete"
+   },
+   "errors": [
+    "params.rate.default: required"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "an enum needs values",
+   "patch": {
+    "params.mode.values": "$delete"
+   },
+   "errors": [
+    "params.mode.values: an enum needs"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "an enum default must be one of its values",
+   "patch": {
+    "params.mode.default": "z"
+   },
+   "errors": [
+    "params.mode.default: must be one of x, y"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a boolean has no range",
+   "patch": {
+    "params.flag.max": 3
+   },
+   "errors": [
+    "params.flag.max: only numbers have max"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "an unknown parameter key is a typo",
+   "patch": {
+    "params.rate.maxx": 3
+   },
+   "errors": [
+    "params.rate.maxx: unknown key"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a parameter name must be a name",
+   "patch": {
+    "params.Rate": {
+     "type": "boolean",
+     "default": true
+    }
+   },
+   "errors": [
+    "params.Rate: name must be"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a preset may only set declared parameters",
+   "patch": {
+    "presets.0.params.ghost": 1
+   },
+   "errors": [
+    "presets[0].params.ghost: unknown parameter"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a preset value must be legal",
+   "patch": {
+    "presets.0.params.rate": 5
+   },
+   "errors": [
+    "presets[0].params.rate: 5 is above max 1"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "preset ids are unique",
+   "patch": {
+    "presets": [
+     {
+      "id": "p",
+      "label": "P",
+      "params": {}
+     },
+     {
+      "id": "p",
+      "label": "Q",
+      "params": {}
+     }
+    ]
+   },
+   "errors": [
+    "presets[1].id: duplicate preset id p"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a preset needs a label",
+   "patch": {
+    "presets.0.label": "$delete"
+   },
+   "errors": [
+    "presets[0].label: required"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "an empty preset is fine",
+   "patch": {
+    "presets": [
+     {
+      "id": "base",
+      "label": "Base",
+      "params": {}
+     }
+    ]
+   },
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "an entity needs count or from",
+   "patch": {
+    "entities.thing.count": "$delete"
+   },
+   "errors": [
+    "entities.thing: needs count"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a category needs values",
+   "patch": {
+    "entities.thing.fields.kind": {
+     "type": "category"
+    }
+   },
+   "errors": [
+    "entities.thing.fields.kind.values: a category needs"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a field type must be known",
+   "patch": {
+    "entities.thing.fields.load": "float"
+   },
+   "errors": [
+    "entities.thing.fields.load.type: must be one of"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "binding to the scene is planned",
+   "patch": {
+    "entities.thing": {
+     "from": "scene",
+     "fields": {
+      "load": "number"
+     }
+    },
+    "mappings": [],
+    "series": {}
+   },
+   "errors": [],
+   "warnings": [
+    "entities.thing.from: binding to scene"
+   ]
+  },
+  {
+   "name": "a mapping must name an entity that exists",
+   "patch": {
+    "mappings.0.entity": "ghost"
+   },
+   "errors": [
+    "mappings[0].entity: unknown entity ghost"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a mapping must name a field that exists",
+   "patch": {
+    "mappings.0.field": "ghost"
+   },
+   "errors": [
+    "mappings[0].field: entity thing has no field ghost"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a channel must be known",
+   "patch": {
+    "mappings.0.channel": "sparkle"
+   },
+   "errors": [
+    "mappings[0].channel: must be one of wall, overlay"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a planned channel warns and is skipped",
+   "patch": {
+    "mappings.2.channel": "segments"
+   },
+   "errors": [],
+   "warnings": [
+    "mappings[2].channel: segments is a planned channel"
+   ]
+  },
+  {
+   "name": "a categorical key must be a value of the field",
+   "patch": {
+    "mappings.0.scale.values.c": {
+     "colour": "#000000",
+     "label": "C"
+    }
+   },
+   "errors": [
+    "mappings[0].scale.values.c: not a value of thing.kind (a, b)"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a legend entry needs a label",
+   "patch": {
+    "mappings.0.scale.values.a.label": "$delete"
+   },
+   "errors": [
+    "mappings[0].scale.values.a: needs a label"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a wall colour must be a hex colour",
+   "patch": {
+    "mappings.0.scale.values.a.colour": "red"
+   },
+   "errors": [
+    "mappings[0].scale.values.a.colour: needs a #rrggbb colour"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "an overlay must be a known marking",
+   "patch": {
+    "mappings.2.scale.values.b.overlay": "fireworks"
+   },
+   "errors": [
+    "mappings[2].scale.values.b.overlay: must be null or one of"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a value with no entry warns",
+   "patch": {
+    "mappings.0.scale.values.b": "$delete"
+   },
+   "errors": [],
+   "warnings": [
+    "mappings[0].scale.values: no entry for b: drawn as \"no data\""
+   ]
+  },
+  {
+   "name": "a sequential scale needs a numeric field",
+   "patch": {
+    "mappings.1.field": "kind"
+   },
+   "errors": [
+    "mappings[1]: a sequential scale needs a number field, kind is a category"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a sequential domain must rise",
+   "patch": {
+    "mappings.1.scale.domain": [
+     1,
+     0
+    ]
+   },
+   "errors": [
+    "mappings[1].scale.domain: must be [low, high]"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a sequential scale needs two colours",
+   "patch": {
+    "mappings.1.scale.colours": [
+     "#000000"
+    ]
+   },
+   "errors": [
+    "mappings[1].scale.colours: must be at least two"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a sequential scale without a label warns",
+   "patch": {
+    "mappings.1.scale.label": "$delete"
+   },
+   "errors": [],
+   "warnings": [
+    "mappings[1].scale.label: missing"
+   ]
+  },
+  {
+   "name": "an overlay cannot be sequential",
+   "patch": {
+    "mappings.2.scale": {
+     "type": "sequential",
+     "domain": [
+      0,
+      1
+     ],
+     "colours": [
+      "#000000",
+      "#ffffff"
+     ]
+    }
+   },
+   "errors": [
+    "mappings[2]: a sequential scale colours walls"
+   ],
+   "warnings": [
+    "mappings[2].scale.label: missing"
+   ]
+  },
+  {
+   "name": "no mappings warns",
+   "patch": {
+    "mappings": "$delete"
+   },
+   "errors": [],
+   "warnings": [
+    "mappings: none: nothing will be drawn"
+   ]
+  },
+  {
+   "name": "a series needs y",
+   "patch": {
+    "series.totals.y": "$delete"
+   },
+   "errors": [
+    "series.totals.y: required"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "series y names are unique",
+   "patch": {
+    "series.totals.y": [
+     "a",
+     "a"
+    ]
+   },
+   "errors": [
+    "series.totals.y: required"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a layout region must be known",
+   "patch": {
+    "layout.top": []
+   },
+   "errors": [
+    "layout.top: unknown region"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a layout control must be known",
+   "patch": {
+    "layout.left": [
+     {
+      "control": "knobs"
+     }
+    ]
+   },
+   "errors": [
+    "layout.left[0].control: must be one of"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a layout item needs exactly one kind",
+   "patch": {
+    "layout.left": [
+     {
+      "control": "params",
+      "chart": "totals"
+     }
+    ]
+   },
+   "errors": [
+    "layout.left[0]: needs exactly one of"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a layout group must exist",
+   "patch": {
+    "layout.left": [
+     {
+      "control": "params",
+      "groups": [
+       "Z"
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "layout.left[0].groups: no parameter is in group Z (groups: A, B)"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a chart is planned and must name a real series",
+   "patch": {
+    "layout.right": [
+     {
+      "chart": "line",
+      "series": "ghost"
+     }
+    ]
+   },
+   "errors": [
+    "layout.right[0].series: unknown series ghost"
+   ],
+   "warnings": [
+    "layout.right[0]: chart components are planned"
+   ]
+  },
+  {
+   "name": "the inspector is planned",
+   "patch": {
+    "layout.inspector": {
+     "building": [
+      "header"
+     ]
+    }
+   },
+   "errors": [],
+   "warnings": [
+    "layout.inspector: the inspector is planned"
+   ]
+  },
+  {
+   "name": "a banner is advisable",
+   "patch": {
+    "banner": "$delete"
+   },
+   "errors": [],
+   "warnings": [
+    "banner: none"
+   ]
+  },
+  {
+   "name": "a banner must be a string",
+   "patch": {
+    "banner": 3
+   },
+   "errors": [
+    "banner: must be a string"
+   ],
+   "warnings": []
+  }
+ ]
+}

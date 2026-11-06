@@ -1,0 +1,144 @@
+/* packruntime.js: the runtime adapter for a model pack. One interface, so the shell never knows how a model is computed.
+ *
+ * A `js` runtime is a plain object registered by the pack's runtime file:
+ *
+ *   PaperDolls.registerRuntime('toy-epidemic', {
+ *     init(params, entities, seed) -> handle        entities: { building: { count: 600, fields: ['state', 'exposure'] } }
+ *     step(handle, n)              -> frames[]      advances n steps and returns the n new frames; n = 0 returns [the current frame] without advancing
+ *     run(handle, toT)             -> frames[]      (optional) steps up to time toT and returns the new frames; used to fill the timeline in one go
+ *     setParams(handle, params)    -> handle        required only when manifest.runtime.on_params is "continue": keep the state, use the new parameters from now on
+ *     snapshot(handle)             -> state         (optional) a plain, structured-cloneable copy of everything that is needed to carry on
+ *     restore(handle, state)       -> handle        (optional) the inverse of snapshot
+ *   });
+ *
+ * A frame is { t, entities: { name: { field: array } }, series: { name: [numbers] } }. Time 0 is the state before the first step. Category fields
+ * hold the index into the field's declared values (-1 for "no data"); number fields hold numbers (NaN for "no data"); every array has the entity's count.
+ *
+ * Rules carried over from the model hook: a runtime is deterministic given (params, seed), and drawing never uses the model's random generator.
+ * `PackRuntime.create` wraps a runtime, checks every frame against the manifest, and applies the manifest's on_params policy
+ * ("rerun": a parameter change starts again from time 0; "continue": it calls setParams and the run goes on).
+ */
+(function (root) {
+  'use strict';
+  const PD = root.PaperDolls || (root.PaperDolls = {});
+  const registry = PD.runtimes || (PD.runtimes = {});
+  PD.registerRuntime = (id, impl) => {
+    if (typeof id !== 'string' || !id) throw new Error('registerRuntime needs the pack id');
+    if (!impl || typeof impl.init !== 'function' || typeof impl.step !== 'function') throw new Error('runtime ' + id + ' needs init(params, entities, seed) and step(handle, n)');
+    registry[id] = impl; return impl;
+  };
+  PD.getRuntime = id => registry[id] || null;
+
+  const plain = v => (ArrayBuffer.isView(v) ? Array.from(v) : Array.isArray(v) ? v.map(plain) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, plain(x)])) : v);
+  const digest = frames => JSON.stringify(plain(frames), (k, v) => (typeof v === 'number' && !isFinite(v) ? String(v) : v));     // NaN and infinity survive JSON as text, so they compare
+
+  // What the runtime is given as `entities`: the declared counts and field names.
+  function entitySpec(manifest, counts) {
+    const out = {};
+    for (const [name, e] of Object.entries(manifest.entities || {})) out[name] = { count: (counts && counts[name]) || e.count || 0, fields: Object.keys(e.fields || {}) };
+    return out;
+  }
+  const fieldType = f => (typeof f === 'string' ? { type: f } : f);
+
+  // Problems with a frame, as strings (none: the frame is good). Series points given as a bare number are accepted for a one-value series.
+  function checkFrame(manifest, ents, frame, wantT) {
+    const bad = [];
+    if (!frame || typeof frame !== 'object') return ['frame is not an object'];
+    if (frame.t !== wantT) bad.push('t is ' + frame.t + ', expected ' + wantT);
+    for (const [name, e] of Object.entries(manifest.entities || {})) {
+      const data = frame.entities && frame.entities[name];
+      if (!data) { bad.push('no entities.' + name); continue; }
+      for (const [fn, f0] of Object.entries(e.fields || {})) {
+        const f = fieldType(f0), a = data[fn];
+        if (!a || typeof a.length !== 'number') { bad.push('entities.' + name + '.' + fn + ' is not an array'); continue; }
+        if (a.length !== ents[name].count) { bad.push('entities.' + name + '.' + fn + ' has ' + a.length + ' values, expected ' + ents[name].count); continue; }
+        if (f.type === 'category') {
+          for (let i = 0; i < a.length; i++) if (!(Number.isInteger(a[i]) && a[i] >= -1 && a[i] < f.values.length)) { bad.push('entities.' + name + '.' + fn + '[' + i + '] = ' + a[i] + ' is not an index into ' + f.values.join('/') + ' (or -1)'); break; }
+        } else for (let i = 0; i < a.length; i++) if (typeof a[i] !== 'number' && typeof a[i] !== 'boolean') { bad.push('entities.' + name + '.' + fn + '[' + i + '] is not a number'); break; }
+      }
+    }
+    for (const [name, pt] of Object.entries(frame.series || {})) {
+      const s = (manifest.series || {})[name];
+      if (!s) { bad.push('series.' + name + ' is not declared in the manifest'); continue; }
+      const arr = typeof pt === 'number' ? [pt] : pt;
+      if (!Array.isArray(arr) || arr.length !== s.y.length || !arr.every(x => typeof x === 'number')) bad.push('series.' + name + ' must be ' + s.y.length + ' number(s) for ' + s.y.join(', '));
+    }
+    return bad;
+  }
+
+  // Missing parts of the interface, given the manifest's policy.
+  function checkInterface(manifest, impl) {
+    const bad = [];
+    if (!impl || typeof impl.init !== 'function') bad.push('init is missing');
+    if (!impl || typeof impl.step !== 'function') bad.push('step is missing');
+    if (impl && (manifest.runtime || {}).on_params === 'continue' && typeof impl.setParams !== 'function') bad.push('setParams is missing (runtime.on_params is "continue")');
+    if (impl && (!!impl.snapshot !== !!impl.restore)) bad.push('snapshot and restore go together');
+    return bad;
+  }
+
+  function create(manifest, impl, opts) {
+    opts = Object.assign({ validate: true, counts: null }, opts || {});
+    const missing = checkInterface(manifest, impl);
+    if (missing.length) throw new Error('runtime ' + manifest.id + ': ' + missing.join('; '));
+    const rt = manifest.runtime || {}, policy = rt.on_params || 'rerun', horizon = manifest.time.steps;
+    const ents = entitySpec(manifest, opts.counts);
+    let handle = null, t = 0, seed = rt.seed === undefined ? 1 : rt.seed, params = null;
+    const take = (frames, from) => {
+      if (!Array.isArray(frames)) throw new Error('runtime ' + manifest.id + ': step/run must return an array of frames');
+      frames.forEach((f, i) => {
+        for (const k of Object.keys(f.series || {})) if (typeof f.series[k] === 'number') f.series[k] = [f.series[k]];
+        if (opts.validate) { const bad = checkFrame(manifest, ents, f, from + i); if (bad.length) throw new Error('runtime ' + manifest.id + ', frame ' + (from + i) + ': ' + bad.slice(0, 3).join('; ')); }
+      });
+      return frames;
+    };
+    const r = {
+      manifest, policy, horizon, entities: ents,
+      get t() { return t; },
+      // Begin again from time 0 with these parameters. Returns the frame at time 0.
+      start(p, s) {
+        params = Object.assign({}, p); if (s !== undefined) seed = s;
+        handle = impl.init(Object.assign({}, params), JSON.parse(JSON.stringify(ents)), seed); t = 0;
+        return take(impl.step(handle, 0), 0)[0];
+      },
+      // New parameters: a re-run starts again (and returns the frame at time 0); "continue" keeps the state and returns null.
+      setParams(p) {
+        if (policy === 'rerun') return { restarted: true, frame: r.start(p) };
+        params = Object.assign({}, p);
+        const h = impl.setParams(handle, Object.assign({}, params)); if (h !== undefined) handle = h;
+        return { restarted: false, frame: null };
+      },
+      step(n) { if (!handle) throw new Error('start() first'); n = Math.max(0, n | 0); const fr = take(impl.step(handle, n), t + 1); t += fr.length; return fr; },
+      run(toT) {
+        if (!handle) throw new Error('start() first');
+        toT = Math.min(horizon, toT | 0); if (toT <= t) return [];
+        const fr = impl.run ? take(impl.run(handle, toT), t + 1) : take(impl.step(handle, toT - t), t + 1);
+        t += fr.length; return fr;
+      },
+      canSnapshot: !!(impl.snapshot && impl.restore),
+      snapshot() { if (!impl.snapshot) throw new Error('this runtime has no snapshot'); return { t, params: Object.assign({}, params), state: impl.snapshot(handle) }; },
+      restore(snap) { if (!impl.restore) throw new Error('this runtime has no restore'); const h = impl.restore(handle, snap.state); if (h !== undefined) handle = h; t = snap.t; params = Object.assign({}, snap.params); },
+    };
+    return r;
+  }
+
+  // The checks every runtime must pass (also run by `paperdolls pack check` once it can run a runtime, and by the toy pack's tests):
+  //   same (params, seed) -> the same frames; a snapshot restored later continues exactly as the original did; frames match the manifest.
+  function checkRuntime(manifest, impl, params, steps) {
+    const out = [], p = Object.assign({}, ...Object.entries(manifest.params).map(([k, v]) => ({ [k]: v.default })), params || {}), n = Math.min(steps || manifest.time.steps, manifest.time.steps);
+    const play = () => { const r = create(manifest, impl); const f0 = r.start(p); return [f0].concat(r.run(n)); };
+    let a, b;
+    try { a = play(); b = play(); } catch (e) { return ['runtime failed: ' + e.message]; }
+    if (a.length !== n + 1) out.push('run(' + n + ') gave ' + (a.length - 1) + ' steps');
+    if (digest(a) !== digest(b)) out.push('two runs with the same parameters and seed differ: the runtime is not deterministic');
+    const rr = create(manifest, impl);
+    if (rr.canSnapshot) {
+      rr.start(p); rr.step(Math.floor(n / 2)); const snap = rr.snapshot();
+      const tail1 = rr.run(n); rr.restore(snap); const tail2 = rr.run(n);
+      if (digest(tail1) !== digest(tail2)) out.push('a restored snapshot does not continue as the original did');
+    }
+    return out;
+  }
+
+  root.PackRuntime = { create, checkFrame, checkInterface, checkRuntime, entitySpec, digest };
+  if (typeof module !== 'undefined' && module.exports) module.exports = root.PackRuntime;
+})(typeof window !== 'undefined' ? window : globalThis);
