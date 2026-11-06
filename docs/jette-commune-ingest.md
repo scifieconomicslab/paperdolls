@@ -44,7 +44,7 @@ If the public server rate-limits (HTTP 429) or times out (504), `osm-fetch` says
 | `type-default` | 548 | 5.9% |
 | `global-default` (building=yes, 2 storeys) | 8,553 | 92.8% |
 
-`levels_assumed` is **true for 9,101 of 9,214 (98.8%)**. In the 2,162-building test area the same share was 97%+. So any model that reads storeys from OSM reads defaults, almost everywhere: the plan's "assumed" flag must be shown in the UI and the storey count must come from another source (the regional building register, or the pack's own typology) before it carries meaning.
+`levels_assumed` is **true for 9,101 of 9,214 (98.8%)**. The 2,162-building test area is similar (about 98% assumed). So any model that reads storeys from OSM reads defaults, almost everywhere: the plan's "assumed" flag must be shown in the UI and the storey count must come from another source (the regional building register, or the pack's own typology) before it carries meaning.
 
 ## Asset fit
 
@@ -54,7 +54,7 @@ If the public server rate-limits (HTTP 429) or times out (504), `osm-fetch` says
 | renderer, exact (`sim.stats`) | **2,652 of 9,214 (28.8%)** drawn from assets, 6,562 as generic extrusions |
 | reasons for extrusion | not rectangular 1,498; too small 420; the rest (about 4,600) rotated 12 to 45 degrees off the axes |
 
-The estimate and the renderer agree. The frame rotation chosen was **0 degrees** ("none" had the highest asset share, 26%, against 24% for the building-edge, road and combined candidates): Jette is not one grid. Its districts run at different angles (the old village, the 1960s blocks, the hospital quarter), so no single rotation fits more than about a quarter of the buildings, while the 2,162-building core fits 28% at 14.7 degrees. A per-building or per-district rotation is the real fix; it is a renderer change, not an ingest one, and it is not attempted here.
+The estimate and the renderer agree. The frame rotation chosen was **0 degrees** ("none" had the highest asset share, 26%, against 24% for the building-edge, road and combined candidates): Jette is not one grid. Its districts run at different angles (the candidates' grid strengths are only 0.17 to 0.22 out of 1), so no single rotation fits more than about a quarter of the buildings, while the 2,162-building core fits 28% at 14.7 degrees. A per-building or per-district rotation is the real fix; it is a renderer change, not an ingest one, and it is not attempted here.
 
 ## Entity table (P3 fields) at commune scale
 
@@ -70,4 +70,4 @@ Only 433 buildings are tagged as a dwelling type, so the binding has to include 
 
 - **Nothing broke** in the readers, the relation clip or the boundary: the Overpass JSON reader handled relations, the boundary relation closed, no ways lacked geometry. The earlier note that the relation form of the query "has not been run" is now out of date and corrected (`ingest/query.py`, `ingest/fetch.py`, the CLI help).
 - **Slow in the viewer, probably**: 9,214 buildings is within the validator's 30,000 limit and the ingest's 25,000 warning, but the first far-zoom frame cost 4.9 s at 12,000 buildings (known-issues #19). Not measured here in a real browser; P2/`pd-render` territory.
-- **Not fixed (not cheap)**: per-district rotation (above); courtyards (27 buildings with inner rings are drawn solid); storeys (no data); no elevation (Jette's slope toward the Molenbeek valley is flat in the scene).
+- **Not fixed (not cheap)**: per-district rotation (above); courtyards (27 buildings with inner rings are drawn solid); storeys (no data); no elevation (the scene is flat).
