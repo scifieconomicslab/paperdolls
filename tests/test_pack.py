@@ -166,3 +166,10 @@ def test_built_pack_page_runs_in_jsdom(tmp_path):
     r = subprocess.run([node, str(ROOT / "viz" / "test_pack_page.js"), str(page)], capture_output=True, text=True, env=node_env(), timeout=300)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "FAIL" not in r.stdout
+
+
+@needs_node
+def test_js_live_rendering_and_picking_suite_passes():
+    r = subprocess.run([node, str(ROOT / "viz" / "test_pack_live.js"), "--manifest-json", json.dumps(pack.load(TOY))], capture_output=True, text=True, env=node_env(), timeout=300)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "FAIL" not in r.stdout and "all passed" in r.stdout and "SKIP toy" not in r.stdout and "SKIP worker" not in r.stdout, r.stdout

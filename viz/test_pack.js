@@ -141,9 +141,14 @@ else {
   test('toy: the manifest validates with no errors and no warnings', () => { const r = PS.validate(TOY); assert.deepStrictEqual([Array.from(r.errors), Array.from(r.warnings)], [[], []]); });
   test('toy: deterministic, and a snapshot restores exactly', () => { assert.deepStrictEqual(Array.from(PR.checkRuntime(TOY, impl)), []); });
   test('toy: every building is in one state, and the counts add up in every frame', () => {
-    const fr = runAll(); assert.strictEqual(fr.length, TOY.time.steps + 1);
-    for (const f of fr) { assert.strictEqual(f.entities.building.state.length, 600); assert.strictEqual(f.series.counts.reduce((a, b) => a + b, 0), 600); }
-    assert.strictEqual(fr[0].series.counts[2], TOY.params.initial_cases.default);
+    const raw = runAll(); assert.strictEqual(raw.length, TOY.time.steps + 1);
+    assert(raw[0].entities && !raw[0].patch, 'frame 0 is whole'); assert(raw.slice(1).every(f => f.patch && !f.entities), 'every later frame is a patch');
+    const st = PStore.create(TOY); st.pushFrames(raw, { replace: true });          // the store applies the patches, so its frames are whole
+    for (const f of st.frames()) {
+      assert.strictEqual(f.entities.building.state.length, 600); assert.strictEqual(f.series.counts.reduce((a, b) => a + b, 0), 600);
+      const n = [0, 0, 0, 0]; for (const v of f.entities.building.state) n[v]++; assert.deepStrictEqual(n, Array.from(f.series.counts), 'the patched states agree with the counts at t=' + f.t);
+    }
+    assert.strictEqual(raw[0].series.counts[2], TOY.params.initial_cases.default);
   });
   test('toy: parameters do something: lockdown, immunity and transmission change the epidemic', () => {
     const base = runAll(), lock = runAll({ lockdown: 'full' }), imm = runAll({ immunity: 0.9, initial_cases: 3 }), none = runAll({ beta: 0 });
@@ -211,7 +216,7 @@ else {
     }
     assert.deepStrictEqual(style(b.entityOf(600)), { data: null, overlays: [] }); assert.strictEqual(sim.buildings.length, 1023);
     ctl.setWall(1); store.setTime(30); const ex = store.frame().entities.building.exposure, s5 = style(b.entityOf(5));
-    assert.strictEqual(s5.data, A && g.Replay.sequential(['#f4e9c8', '#e9b44c', '#c8452f'], [0, 1], ex[5]));
+    assert.strictEqual(s5.data, g.Replay.sequential(['#f4e9c8', '#e9b44c', '#c8452f'], [0, 1], Math.round(ex[5] * 127) / 127), 'a sequential scale is read in 128 steps');
   });
   test('shell: a scene with fewer buildings than the model says so and draws nothing', () => {
     const { man, store, ctl } = mkHost(), small = V.makePlaceholderScene(7); small.buildings = small.buildings.slice(0, 10);
@@ -226,7 +231,7 @@ else {
     A.sprites.factory = (w, h) => createCanvas(w, h);
     const { man, store, ctl } = mkHost(), sim = mkSim(), b = PH.bindRenderer({ manifest: man, store, controller: ctl, sim }); assert(b.ok);
     const W = 800, H = 520, cv = createCanvas(W, H), ctx = cv.getContext('2d'), view = V.fitView(sim.scene, W, H, 0.06);
-    const shot = () => { for (let i = 0; i < 6; i++) V.renderFrame(ctx, sim, view, { vehicles: false, people: false }); return ctx.getImageData(0, 0, W, H).data; };
+    const shot = () => { for (let i = 0; i < 400; i++) { V.renderFrame(ctx, sim, view, { vehicles: false, people: false }); if (i > 4 && !sim._farP && !sim._groundP && A.sprites.builds === 0) break; } return ctx.getImageData(0, 0, W, H).data; };       // the far layer is repainted in slices after a change: draw until it is whole
     const diff = (a, c) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - c[i]) + Math.abs(a[i + 1] - c[i + 1]) + Math.abs(a[i + 2] - c[i + 2]) > 30) n++; return n; };
     store.setTime(0); const p0 = shot(); assert(diff(p0, shot()) === 0, 'a still frame is stable');
     store.setTime(60); const p60 = shot(); assert(diff(p0, p60) > 300, 'day 60 looks different from day 0: ' + diff(p0, p60) + ' pixels');

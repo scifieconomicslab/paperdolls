@@ -114,3 +114,12 @@ Other scene keys: `area{name, source, osm_relation, attribution, origin{lat,lon}
 4. **Test conventions**: JS tests are standalone node scripts that print `PASS ... / FAIL ...` and exit non-zero on failure, with pytest wrappers in `tests/test_viz_assets.py` that skip without node (`tests/test_viz_assets.py:1-60`); page tests use jsdom against a built HTML file (`viz/test_replay_page.js`). `package.json`'s `test` script lists the suites by hand. New tests follow this.
 5. **Env note for whoever runs the tests**: `node_modules` lives only in the main checkout (`../../../node_modules` from this worktree). `tests/conftest.py:14-19` honours `PAPERDOLLS_NODE_MODULES`; set it (and `NODE_PATH`) in a worktree.
 6. **Baseline**: 118 tests passed before any change (3 min wall).
+
+---
+
+## Update after P2 and P4
+
+- **The far-layer rule changed** (`vizlib.js`, was ~line 834): a custom `sim.buildingStyle` no longer switches the far-zoom layer off if it also publishes `sim.frameVersion` (a number). The layer is then keyed on that number, and a building's style is asked for again only when the number moves (`drawBuildingEntity`, `e._fv`). A style without a version, and `sim.bindings`, behave as before. `VizLib.entityHeight(e)` is now exported (the height the renderer draws).
+- **Picking now exists** (`viz/packpick.js`), built the way (c) above proposed: inverse projection, footprint lifted by height, painter's order, 25 m grid. It does not touch `vizlib.js` beyond `entityHeight`, and works on the sim's scene, so it also works for any other page that has a sim. The silhouette uses the renderer's height; a gabled sprite's ridge can stand a little above it, so a click just above a ridge can miss.
+- **What the benchmark found** (`viz/README.md`, "Live model frames"): the per-frame cost of a patch is no longer the limit. At far zoom the limit is the far layer itself: it is painted in slices of `LAYER_MS` and a patch is fully on screen only when the repaint ends (the old layer stays up meanwhile, a newer patch restarts the repaint).
+- **Still true**: no elevation, no per-building z; sprite cache keyed as in (a); placement of entities on scene buildings is invented until P3.

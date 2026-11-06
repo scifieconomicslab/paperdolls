@@ -457,8 +457,8 @@ def build_page(path, scene=None):
         raise PackError("the pack does not validate: " + errors[0] + (f" (and {len(errors) - 1} more)" if len(errors) > 1 else ""))
     m = load(path)
     src = (manifest_path(path).parent / m["runtime"]["entry"]).read_text(encoding="utf-8")
-    if "</script" in src.lower():
-        raise PackError("runtime source contains </script>, which cannot be inlined in a page")
+    if "</script" in src.lower() or "<!--" in src:
+        raise PackError("runtime source contains </script> or <!--, which cannot be inlined in a page")
     title = m["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     page = _read("packhost.html").replace("/*__PACKRUNTIMESRC__*/", src)
     return _fill(page, TITLE=title, PACK=_json_for_script(m), SCENE=_json_for_script(scene) if scene is not None else "null")

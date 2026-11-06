@@ -3,7 +3,7 @@
   "private": true,
   "description": "Test dependencies for paperdolls. The viewer itself needs no packages: the HTML pages are self-contained.",
   "scripts": {
-    "test": "node viz/test_camera.js && node viz/test_assets.js && node viz/test_replay.js && node viz/test_zoomhold.js && node viz/test_refocus.js && node viz/test_pack.js"
+    "test": "node viz/test_camera.js && node viz/test_assets.js && node viz/test_replay.js && node viz/test_zoomhold.js && node viz/test_refocus.js && node viz/test_pack.js && node viz/test_pack_live.js"
   },
   "devDependencies": {
     "canvas": "^3.0.0",

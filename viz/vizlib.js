@@ -436,7 +436,7 @@
       } else a.outfits = A.DEFS.people[a.kind].members.map((m, k) => A.makeOutfit(sim.opts.region, th, a.ts + k * 31));
       a._ck = null; a._rc = null;
     }
-    for (const e of sim.buildings) { e._ck = null; e._fast = false; }
+    for (const e of sim.buildings) { e._ck = null; e._fast = false; e._fv = null; }
     for (const t of sim.trees) { if (!t.fixed) t.kind = A.pickTree(sim.opts.region, A.hash(t.seed + 1), th); t._ck = null; t._asset = null; }
   }
 
@@ -764,7 +764,7 @@
     A.sprites.detail = detail; A.sprites.ink = sim.opts.ink === true && pal.reg !== 'formal';
     const shadow = mixHex(pal.shadow, pal.bg, 0.72);
     const sRgb = hexRgb(pal.shadow);
-    const heightOfEntity = e => e.params ? A_().buildingHeight(e.kind, e.params.N) : e.levels * (LIB.buildings[e.kind] || LIB.buildings.terrace).storeyH;
+    const heightOfEntity = entityHeight;
     // The ground and the building shadows do not change between frames. They are drawn once into a cached layer that is bigger than the
     // screen and anchored to the world, so panning only moves a window over it (see worldLayer).
     const drawStaticSteps = function* (c, v) {
@@ -829,11 +829,16 @@
     const byDepth = (p, q) => p.d - q.d;
     // Zoomed far out nothing in the buildings and trees changes from frame to frame, so they are drawn once into a world-anchored layer
     // and blitted; only vehicles (dots at this zoom) are drawn on top. The layer is redrawn when the scale, the theme or any building's
-    // state changes, or when panning runs past its margin. A binding or a custom building style can change colours at any moment, so
-    // they switch it off.
-    const far = view.scale < 1.0 && F && sim.opts.cacheGround !== false && !sim.bindings.length && !sim.buildingStyle;
+    // state changes, or when panning runs past its margin. A binding can change colours at any moment, so it switches the layer off; so does a
+    // custom building style, unless the style publishes a frame version (see below).
+    // A custom style that publishes sim.frameVersion (a number it bumps whenever any building's style may have changed, as the pack store does) promises
+    // that it returns the same style for a building until the number changes. The layer is then keyed on that number instead of being switched off.
+    const versioned = !!sim.buildingStyle && typeof sim.frameVersion === 'number';
+    const far = view.scale < 1.0 && F && sim.opts.cacheGround !== false && !sim.bindings.length && (!sim.buildingStyle || versioned);
     if (far) {
-      let h = 0; for (const e of sim.buildings) h = (h * 31 + (e.state ? e.state.charCodeAt(0) : 0) * 2 + (e.investor ? 1 : 0)) | 0;
+      let h = 0;
+      if (versioned) h = 'v' + sim.frameVersion;
+      else for (const e of sim.buildings) h = (h * 31 + (e.state ? e.state.charCodeAt(0) : 0) * 2 + (e.investor ? 1 : 0)) | 0;
       // painted in slices (a yield every 16 items); until it is ready the buildings are drawn directly below. The sprite exact flag is not part of the
       // key: it flipped when the view settled and repainted the whole layer a second time for nothing.
       const farSteps = function* (c, v) { c.lineJoin = 'round'; let n = 0; for (const it of collectStatic(v, []).sort(byDepth)) { drawItem(c, it, v); if ((++n & 15) === 0) yield; } };
@@ -936,6 +941,9 @@
     return true;
   }
 
+  // Height of a building in metres, as drawn (an asset's own height, or storeys times the storey height).
+  function entityHeight(e) { return e.params ? A_().buildingHeight(e.kind, e.params.N) : e.levels * (LIB.buildings[e.kind] || LIB.buildings.terrace).storeyH; }
+
   // A building: an asset sprite when its footprint fits a slot, otherwise the generic extrusion.
   function drawBuildingEntity(ctx, view, reg, pal, shadowCol, sim, e) {
     const A = A_(), areg = A.REG[pal.reg] || A.REG.colorfigures;
@@ -944,18 +952,21 @@
     for (const b of sim.bindings) if (b.match(e)) { bound = true; break; }
     const fastOk = !sim.buildingStyle && !bound;
     if (fastOk && e._fast && e._th === pal && e._st === e.state && e._inv === e.investor) { drawBuildingSprite(ctx, view, A, areg, e); return; }
+    // A style with a frame version (sim.frameVersion, a number) is asked again only when the number has changed: no style call, no key string, no allocation.
+    const ver = sim.buildingStyle && typeof sim.frameVersion === 'number' ? sim.frameVersion : null;
+    if (ver !== null && !bound && e._fv === ver && e._th === pal) { if (e._asset) drawBuildingSprite(ctx, view, A, areg, e); else drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, e._fdata); return; }
     const wall = A.wallFor(pal, e.seed);
     const style = (sim.buildingStyle || retrofitStyle)(e, areg, pal, wall) || {};
     let data = style.data || null;
     for (const b of sim.bindings) if (b.match(e)) { data = b.scale.colour(b.value(e)); break; }   // a data binding wins over the style
-    if (!e.params) { drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, data || wall); return; }
+    if (!e.params) { e._fv = ver; e._th = pal; e._asset = null; e._fdata = data || wall; drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, data || wall); return; }
     const ov = style.overlays || [], key = pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + wall + '|' + data + '|' + ov.join(',');
     if (e._ck !== key) {
       e._cols = A.buildingColours(areg, pal, { wall, data, seed: e.seed });
       e._asset = A.getAsset('buildings', e.kind, e.fit.heading, A.buildingExtra(e.params, ov));
       e._ck = key;
     }
-    e._fast = fastOk; e._th = pal; e._st = e.state; e._inv = e.investor;
+    e._fast = fastOk; e._th = pal; e._st = e.state; e._inv = e.investor; e._fv = ver;
     drawBuildingSprite(ctx, view, A, areg, e);
   }
   function drawBuildingSprite(ctx, view, A, areg, e) {
@@ -1030,5 +1041,5 @@
     return { w, h, scale, ox: w / 2 - (cx - cy) * scale * C30, oy: h / 2 - (cx + cy) * scale * 0.5 };
   }
 
-  root.VizLib = { LIB, rng, validateScene, roadCls, sceneBounds, makePlaceholderScene, buildNetwork, createSim, setTheme, stepSim, setMotion, bindData, retrofitStyle, renderFrame, fitView, proj, agentPose };
+  root.VizLib = { LIB, rng, validateScene, roadCls, sceneBounds, makePlaceholderScene, buildNetwork, createSim, setTheme, stepSim, setMotion, bindData, retrofitStyle, renderFrame, fitView, proj, agentPose, entityHeight };
 })(typeof window !== 'undefined' ? window : globalThis);

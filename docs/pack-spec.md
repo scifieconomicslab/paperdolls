@@ -4,11 +4,11 @@ A **model pack** is a folder with a manifest (`pack.yaml`) and a runtime. The pa
 runs the runtime when a parameter moves, and colours the buildings of the existing renderer from the runtime's frames. A manifest-only change is enough to
 add a slider, a preset or a colouring.
 
-This is the first phase (P1) of the interactive-model work. What works today, and what does not yet:
+This is the interactive-model work, phases P1 (the shell), P2 (live rendering) and P4 (interaction). What works today, and what does not yet:
 
 | Works (P1) | Planned |
 |---|---|
-| `js` runtimes; manifest, schema and validators; store; shell with parameter groups, presets, play/pause/speed/timeline, legend, display switches; `wall` and `overlay` channels; `paperdolls pack check` and `pack build` | frame patching and a worker (P2), binding to real scene buildings (P3), picking and inspector (P4), charts, KPIs, A/B (P5), new channels (P6), terrain (P7), `pyodide` and `remote` runtimes (P9), custom components (P10) |
+| `js` runtimes, run in a Web Worker (with a same-thread fallback); patch frames; manifest, schema and validators; store with typed arrays bound to scene buildings; shell with parameter groups, presets, play/pause/speed/timeline, legend, display switches; `wall` and `overlay` channels; hover, click selection, tooltip, inspector, Esc and arrow keys; `paperdolls pack check` and `pack build` | binding to real scene buildings (P3), charts, KPIs, A/B (P5), new channels (P6), terrain (P7), `pyodide` and `remote` runtimes (P9), custom components (P10) |
 
 Entities are drawn on scene buildings in a **fixed, invented order** (the same rule as `paperdolls replay`, `Replay.place`): where an entity stands carries no meaning, and
 the page says so. See [`pack-architecture-findings.md`](pack-architecture-findings.md) for how this fits the renderer.
@@ -185,6 +185,7 @@ PaperDolls.registerRuntime('toy-epidemic', {
   setParams(handle, params)     { /* required only for on_params: continue -> handle */ },
   snapshot(handle)              { /* optional -> plain state */ },
   restore(handle, state)        { /* optional -> handle */ },   // snapshot and restore go together
+  inspect(handle, id, t)        { /* optional -> detail */ },   // what the inspector shows for one entity, asked for on demand
 });
 ```
 
@@ -192,7 +193,9 @@ PaperDolls.registerRuntime('toy-epidemic', {
 - A **frame** is `{ t, entities: { building: { state: Int8Array(600), exposure: Float32Array(600) } }, series: { counts: [s, e, i, r] } }`. `t` is consecutive from 0. Arrays may be plain arrays or typed arrays and must have the entity's count. A one-value series may be a bare number. Frames must not be reused or mutated afterwards.
 - **Determinism**: the same `(params, seed)` always gives the same frames, and the runtime never uses `Math.random`. Drawing never draws from the model's random generator. `PackRuntime.checkRuntime(manifest, impl)` tests this, and that a restored snapshot carries on exactly as the original did.
 - Errors thrown by the runtime, or a frame that does not match the manifest, are shown in the page header and do not stop the viewer.
-- The runtime runs on the main thread today (the toy re-runs 160 steps of 600 entities in about 30 ms). A worker is P2.
+- **Patch frames.** After time 0 a frame may be a patch instead of the whole state: `{ t, patch: { building: { state: { idx: Int32Array, val: Int8Array }, exposure: { idx, val } } }, series }`, the entities that differ from the frame before it and their new values. A field with no change is left out. The adapter checks `idx` (whole numbers below the count) and `val` (legal for the field) and says where a patch is wrong; frame 0 must be whole. A patch costs what changed: the toy sends a few dozen entries a day, a model of 12,000 buildings that changes thousands sends thousands, and the store applies them without going over the rest (see Store). A runtime may send whole frames at any time.
+- **`inspect(handle, id, t)`** answers the inspector. `id` is `{ entity, id }` (the shape of `store.selection()`; `id` is the entity's number in the model), `t` the time on screen. Return `{ title?, fields: [{ label, value, unit? }], note? }`, or `null`. It is asked on demand, once per selection and again when the time moves, never sent with a frame, and it may read anything the runtime remembers; the toy keeps the day each building changed state, so it is right at any day of the run. It runs where the runtime runs, so it needs no copy of the model on the page.
+- **Where it runs.** The page runs the runtime in a **Web Worker** made from a Blob of text: the page keeps `packruntime.js`, `packworker.js` and the pack's runtime file as text and builds the worker from them, so the build stays one offline file. `PackWorker.create(manifest, { sources, mode })` returns the same adapter made asynchronous (`start`, `setParams`, `run(toT, onFrames)`, `step`, `inspect`, `snapshot`, `restore`, `cancel`, each a promise). `run` streams its frames in chunks of 16, so the timeline fills as the model runs and a moved slider is never waiting behind a long run; a new `start`/`setParams` cancels the run in progress and its late chunks are dropped. Frames are structured-cloned, not transferred, so a runtime that still holds an array it returned cannot lose it. When there is no `Worker` (Node, jsdom), a Blob URL is blocked, or the worker fails before it answers, the same server runs on the main thread (`mode: 'inline'`, `rt.fellBack` says why) and the requests already sent are repeated. `#worker=0` in the page's address forces the main thread. A runtime that throws, or sends a frame that does not match the manifest, reaches the page as a rejected promise and is shown in the header.
 
 The planned `pyodide` and `remote` runtimes will implement the same six methods.
 
@@ -203,19 +206,23 @@ The planned `pyodide` and `remote` runtimes will implement the same six methods.
 ```js
 store.params() / param(name) / setParam(name, v) / setParams(obj) / resetParams() / applyPreset(id) / isPreset(id)
 store.time() / setTime(t) / setPlaying(on) / setSpeed(s)          // { t, horizon, playing, speed, unit }
-store.selection() / select({ entity, id } | null)                  // for the inspector (P4)
+store.selection() / select({ entity, id } | null)                  // what the inspector shows; a click on the map writes it
+store.bindScene(entity, { count, index }) / bound(entity)          // typed arrays of the frame shown, indexed by scene building (below)
+store.shownVersion() / invalidate()                                // a number that moves whenever the map may look different
 store.frames() / frame() / frameAt(t) / length() / pushFrames(frames, { replace })
 store.series(name?) / latest(name)                                 // latest: the point at the current time
-store.subscribe(topic, fn) -> unsubscribe                          // topics: params, time, selection, frames, series, '*'
+store.subscribe(topic, fn) -> unsubscribe                          // topics: params, time, selection, frames, series, view, '*'
 ```
 
 Subscribers are called synchronously, in subscription order, after the state changed; one that throws does not stop the others. Setting a value that is already held is not an event.
+
+**Patches and the bound view (P2).** `pushFrames` applies a patch frame to the frame before it, so `frame()` and `frameAt(t)` always return whole frames (a field the patch did not touch is shared with the previous frame, not copied). The frame keeps its `patch`. For the renderer, `bindScene('building', { count: sceneBuildings, index })` (`index[k]` is the scene building that draws entity k) makes `bound('building')` return `{ version, fields, stats }`, where `fields.state` and `fields.exposure` are typed arrays of length `count` holding the frame on screen, `-1` / `NaN` where nothing is bound. They are updated in place, once per change, when asked: by the patch alone when time has moved one step onto a patch frame (`stats.patch`), by a gather over the bound entities otherwise (`stats.full`, e.g. a scrub or a new run). `shownVersion()` is a counter that moves when the frame on screen may differ (time moved, a run replaced the frames, or `invalidate()` after a change of colouring such as the wall chooser); frames added beyond the time shown do not move it. The shell copies it to `sim.frameVersion`.
 
 ## Shell
 
 `viz/packhost.js` plus `viz/packhost.html` (the page template). `createController` owns the runtime: a changed parameter marks the model stale and the re-run happens once at the next flush,
 however many slider events came before it; the time is kept (clamped to the new run). `mountUI` draws the manifest's layout. `bindRenderer` sets `sim.buildingStyle`, the renderer's existing extension
-point, to read the store's current frame. `window.labPack` exposes `{manifest, store, controller, runtime, sim, binding}` for tests and the browser console.
+point, to read the store's bound arrays, and `sim.frameVersion` to follow the store. `window.labPack` exposes `{manifest, store, controller, runtime, sim, binding}` for tests and the browser console.
 
 ## Writing a pack
 
@@ -228,3 +235,16 @@ point, to read the store's current frame. `window.labPack` exposes `{manifest, s
 
 It validates the manifest and that the runtime file exists. It does not run the runtime (determinism, frame shape, JS-versus-Python parity); the pieces exist
 (`PackRuntime.checkRuntime`) and are exercised by the toy pack's tests, but need a JS engine, so the command stays a manifest check until the `pyodide`/`remote` work (P9).
+
+## Rendering a live model (P2)
+
+- **Frame version.** A custom `sim.buildingStyle` used to switch the far-zoom layer off, because a style can change colours at any moment (`vizlib.js`). A style may now publish `sim.frameVersion`, a number it bumps whenever any building's style may have changed, and promise to return the same style for a building until it moves. The renderer then (1) keeps the far-zoom layer, keyed on the number, so it is repainted once per change and not per frame, and (2) asks a building for its style only when the number has moved, skipping the style call and the cache key string. `bindRenderer` does this; a style without `frameVersion` behaves as before. `sim.bindings` (data bindings) still switch the far layer off.
+- **No allocation per draw.** `bindRenderer` reads the bound arrays, turns each value into a code (a sequential scale is read in 128 steps, so a colour is a table lookup, not a string per building) and returns one of a small table of shared `{ data, overlays }` objects. A million style reads leave no measurable garbage (tested).
+- **Repaint in slices.** The far layer is repainted in slices of about 6 ms a frame while the old one stays on screen (`vizlib.js`, `LAYER_MS`), so no frame is long, but a change is on screen only when the whole layer is done. A newer patch restarts the repaint. See `viz/README.md` for the measured time and what limits it.
+
+## Interaction (P4)
+
+- **Picking** (`viz/packpick.js`, `Pick.create(sim)`, tested in Node): the screen point is inverted to a ground point; a building is hit when the segment from that point to that point plus `(h, h)` touches its footprint (the footprint lifted by its height: a point at height z lands where the ground point `(x - z, y - z)` does). Of several hits the one drawn last wins (greatest `fit.cx + fit.cy`, then the later in the list), which is what the painter's order shows on top; trees and people do not block a pick. A 25 m grid keeps a query to a few buildings (about 1.5 µs on 12,000). The height is the renderer's (`VizLib.entityHeight`); the ridge of a gabled sprite can rise a little above it.
+- **Hover and click** (`PackHost.bindInteraction`): moving over a building shows a tooltip ("Building 12: state Infectious"); a click that is not a drag selects it (`store.select({ entity, id })`); a click on nothing clears. Only buildings that carry a model entity can be selected; the rest of the scene is picture. The selected building is outlined on a canvas above the map, the hovered one dashed.
+- **Inspector**: appears in the right-hand region when something is selected. It shows the entity's fields in the frame on screen at once, then asks the runtime (`inspect`) and adds the answer (`title`, `fields`, `note`) when it comes; it asks again when the time moves. Not configurable from the manifest yet (`layout.inspector` stays reserved for the content layout).
+- **Keys**: Esc clears the selection; the left and right arrows step the time back and forward one step and pause. Neither acts while a form control has the focus, so a focused slider keeps its own arrows. A and D pan and W and S zoom, as before.

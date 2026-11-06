@@ -7,6 +7,7 @@ Status: people, vehicles, buildings and trees are in the asset system (`assetlib
 - `assetlib.js`: the engine, plus people and vehicles. Parametric definitions, four-heading builds, SVG and canvas output, regional fleets and outfits, data scales. No dependencies.
 - `buildinglib.js`: buildings as assets (archetypes, facade grammar, roofs, overlays, regional grammar, footprint fitting). Load after `assetlib.js`.
 - `treelib.js`: trees as assets (nine kinds, regional species mixes, foliage colours from the look). Load after `assetlib.js`.
+- `packstore.js`, `packruntime.js`, `packworker.js`, `packhost.js`, `packpick.js`, `packvalidate.js`: model packs (`docs/pack-spec.md`): state store with typed arrays bound to buildings, runtime adapter, the runtime in a Web Worker, the shell, picking and the manifest validator. Tests: `test_pack.js`, `test_pack_live.js`, `test_pack_page.js`.
 - `replay.js`: plays an exported trajectory through a scene (placement, mapping, week, legend). Load after `vizlib.js`.
 - `refocus.js`: the zoom's finish: draws the sharp frame on a second canvas while the stretched picture stays up, cross-fades when it is whole, with an optional focus reticle and lens blur. No drawing, tested in Node. Used by `viewer.html`.
 - `zoomhold.js`: smooth zooming: stretches the drawn canvas with a CSS transform while the scale changes, and says when to draw a real frame. No drawing, tested in Node. Used by `viewer.html`.
@@ -247,6 +248,25 @@ On the placeholder scene in node-canvas, with every option on, settled frames st
 - With a mapping, `sim.buildingStyle` is replaced; without one, the state codes are written onto the scene's buildings and the default Great Retrofit style draws them.
 
 Tests: `node viz/test_replay.js` (the library) and `viz/test_replay_page.js` (a built page in jsdom, run by `tests/test_replay_page.py`).
+
+### Live model frames (model packs)
+
+A pack's runtime sends frames, most of them patches; the page applies each to the store, the store updates typed arrays bound to the scene's buildings, and `sim.frameVersion` tells the renderer that the picture may differ (`docs/pack-spec.md`, "Rendering a live model"). `node viz/scale_bench.js` measures it on the 12,276-building scene: a patch of 4,000 buildings (a third of the scene, each moved one state on) is applied, and the next frame and the frames after it are timed until the picture is whole again. `P1` is the path before this work (a style that looks the frame up by a Map and allocates, no version, so the far layer is off and every building is styled in every frame); `P2` is the store's bound arrays and the frame version. Median of 8 patches, node-canvas (software canvas, 1200 by 700), this machine:
+
+| px/m | path | steady | store apply | frame after patch | worst frame | frames to settle |
+|---|---|---|---|---|---|---|
+| 0.7 (far) | P1 | 127.3 ms | 0.02 ms | 448.3 ms | 448.3 ms | 3 |
+| 0.7 (far) | **P2** | 4.0 ms | 0.34 ms | **16.2 ms** | 18.6 ms | 173 |
+| 1.7 (mid) | P1 | 22.6 ms | 0.01 ms | 81.0 ms | 81.0 ms | 160 |
+| 1.7 (mid) | **P2** | 26.5 ms | 0.32 ms | **35.4 ms** | 35.4 ms | 3 |
+| 4 (near) | P1 | 14.4 ms | 0.01 ms | 14.4 ms | 15.9 ms | 19 |
+| 4 (near) | **P2** | 13.3 ms | 0.28 ms | **11.8 ms** | 11.8 ms | 3 |
+
+With a patch of 12,000 (every building changes; 4 patches): far 3.8 ms steady, 23.3 ms after the patch, 26.4 ms worst, 343 frames to settle (P1: 1,100 ms); mid 21.2 ms steady, 30.9 ms after the patch and worst, 85 frames to settle (P1: 233 ms, and still settling at the 400-frame cap). `PATCH=12000 node viz/scale_bench.js` reproduces it.
+
+**Target: under about 50 ms per patch frame. Met at every zoom** (worst frame 35 ms with a patch of 4,000, 31 ms with 12,000), and applying the patch to the store costs under 1 ms. **What is not instant is the far zoom.** At 0.7 px/m the far layer holds 12,276 buildings and 5,088 trees and is repainted in slices of `LAYER_MS` (6 ms a frame; the pack page uses 12 ms, which `LAYERMS=16` shows takes a patch from 173 frames to 54 with a 20.7 ms frame after the patch and 23.3 ms worst). A patch is on screen only when that repaint ends, about 1 s of painting here, 170 frames at 6 ms (about 3 s at 60 fps), while the old layer stays up; and a newer patch restarts the repaint. So a model that sends a patch every 50 ms and is watched from far out shows the picture a few seconds late, and at 20 steps a second it never completes: the far layer is the limit, not the patch. What would lift it: drawing the far layer as flat polygons rather than sprites (they are a few pixels wide), or repainting only the dirty rectangles of a compact patch (a scattered patch, as here, dirties nearly everything). Neither is built. A browser's GPU canvas paints faster than node-canvas (the far layer took 275 ms in one go in a browser, known-issues #19, against about 1 s here), so expect the lag to be a few times shorter there; it has not been measured in a browser.
+
+The mid and near rows show the other half: the P1 path styled every visible building in every frame (an allocation and a key string each) and took 160 frames to settle at mid zoom; with a version a building is asked once per change. The steady frame at mid zoom reads 26.5 ms against 22.6 ms for P1, which is noise between runs (the work per steady frame is less, not more); the first table above reads about twice the numbers in "Rendering cost" on this machine and is identical on the commit before this work.
 
 ### Occlusion culling: built, correct, and not faster (opt-in)
 

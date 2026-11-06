@@ -9,10 +9,14 @@
  *     setParams(handle, params)    -> handle        required only when manifest.runtime.on_params is "continue": keep the state, use the new parameters from now on
  *     snapshot(handle)             -> state         (optional) a plain, structured-cloneable copy of everything that is needed to carry on
  *     restore(handle, state)       -> handle        (optional) the inverse of snapshot
+ *     inspect(handle, id, t)       -> detail        (optional) what the inspector shows for one entity: id is { entity, id } (the shape of store.selection()), t the time shown;
+ *                                                   detail is { title?, fields: [{ label, value, unit? }], note? }. Asked on demand, never sent with a frame.
  *   });
  *
  * A frame is { t, entities: { name: { field: array } }, series: { name: [numbers] } }. Time 0 is the state before the first step. Category fields
  * hold the index into the field's declared values (-1 for "no data"); number fields hold numbers (NaN for "no data"); every array has the entity's count.
+ * After time 0 a frame may be a patch instead: { t, patch: { entity: { field: { idx: Int32Array, val: array } } }, series }, the entities and values that differ from the
+ * frame before it. A patch costs what changed, not what exists, and the store applies it (packstore.js).
  *
  * Rules carried over from the model hook: a runtime is deterministic given (params, seed), and drawing never uses the model's random generator.
  * `PackRuntime.create` wraps a runtime, checks every frame against the manifest, and applies the manifest's on_params policy
@@ -45,7 +49,24 @@
     const bad = [];
     if (!frame || typeof frame !== 'object') return ['frame is not an object'];
     if (frame.t !== wantT) bad.push('t is ' + frame.t + ', expected ' + wantT);
-    for (const [name, e] of Object.entries(manifest.entities || {})) {
+    if (frame.patch && !frame.entities) {
+      if (wantT === 0) bad.push('frame 0 must be whole, not a patch');
+      for (const [name, pf] of Object.entries(frame.patch)) {
+        const e = (manifest.entities || {})[name];
+        if (!e) { bad.push('patch.' + name + ' is not an entity of the manifest'); continue; }
+        for (const [fn, ch] of Object.entries(pf)) {
+          const f0 = (e.fields || {})[fn]; if (f0 === undefined) { bad.push('patch.' + name + '.' + fn + ' is not a field'); continue; }
+          const f = fieldType(f0), where = 'patch.' + name + '.' + fn;
+          if (!ch || !ch.idx || !ch.val || ch.idx.length !== ch.val.length) { bad.push(where + ' needs idx and val of the same length'); continue; }
+          let ok = true;
+          for (let i = 0; i < ch.idx.length && ok; i++) {
+            const k = ch.idx[i], v = ch.val[i];
+            if (!(Number.isInteger(k) && k >= 0 && k < ents[name].count)) { bad.push(where + '.idx[' + i + '] = ' + k + ' is not an entity number below ' + ents[name].count); ok = false; }
+            else if (f.type === 'category' ? !(Number.isInteger(v) && v >= -1 && v < f.values.length) : (typeof v !== 'number' && typeof v !== 'boolean')) { bad.push(where + '.val[' + i + '] = ' + v + ' is not a legal value'); ok = false; }
+          }
+        }
+      }
+    } else for (const [name, e] of Object.entries(manifest.entities || {})) {
       const data = frame.entities && frame.entities[name];
       if (!data) { bad.push('no entities.' + name); continue; }
       for (const [fn, f0] of Object.entries(e.fields || {})) {
@@ -114,6 +135,9 @@
         const fr = impl.run ? take(impl.run(handle, toT), t + 1) : take(impl.step(handle, toT - t), t + 1);
         t += fr.length; return fr;
       },
+      canInspect: typeof impl.inspect === 'function',
+      // Detail for one entity, from the model's own state (the end of the run), asked for on demand. null when the runtime cannot say.
+      inspect(sel, tShown) { if (!handle || !impl.inspect) return null; return impl.inspect(handle, { entity: sel.entity, id: sel.id }, tShown === undefined ? t : tShown) || null; },
       canSnapshot: !!(impl.snapshot && impl.restore),
       snapshot() { if (!impl.snapshot) throw new Error('this runtime has no snapshot'); return { t, params: Object.assign({}, params), state: impl.snapshot(handle) }; },
       restore(snap) { if (!impl.restore) throw new Error('this runtime has no restore'); const h = impl.restore(handle, snap.state); if (h !== undefined) handle = h; t = snap.t; params = Object.assign({}, snap.params); },
