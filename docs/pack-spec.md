@@ -6,9 +6,9 @@ add a slider, a preset or a colouring.
 
 This is the interactive-model work, phases P1 (the shell), P2 (live rendering) and P4 (interaction). What works today, and what does not yet:
 
-| Works (P1) | Planned |
+| Works (P1 to P4, P6) | Planned |
 |---|---|
-| `js` runtimes, run in a Web Worker (with a same-thread fallback); patch frames; manifest, schema and validators; store with typed arrays bound to scene buildings; shell with parameter groups, presets, play/pause/speed/timeline, legend, display switches; `wall` and `overlay` channels; hover, click selection, tooltip, inspector, Esc and arrow keys; `paperdolls pack check` and `pack build` | binding to real scene buildings (P3, **done**: see [Binding to the scene](#binding-to-the-scene-bindscene)), charts, KPIs, A/B (P5), new channels (P6), terrain (P7), `pyodide` and `remote` runtimes (P9), custom components (P10) |
+| `js` runtimes, run in a Web Worker (with a same-thread fallback); patch frames; manifest, schema and validators; store with typed arrays bound to scene buildings; shell with parameter groups, presets, play/pause/speed/timeline, legend, display switches; `wall`, `overlay` and the P6 channels (`segments`, `outline`, `halo`, `groundtint`, the `insulation` and `community` overlays); hover, click selection, tooltip, inspector, Esc and arrow keys; `paperdolls pack check` and `pack build` | binding to real scene buildings (P3, **done**: see [Binding to the scene](#binding-to-the-scene-bindscene)), charts, KPIs, A/B (P5), a `height` channel (evaluated in P6 and not built: see [`height`](#height-not-built-and-why)), terrain (P7), `pyodide` and `remote` runtimes (P9), custom components (P10) |
 
 A pack whose runtime has **no** `bindScene` has its entities drawn on scene buildings in a **fixed, invented order** (the same rule as `paperdolls replay`, `Replay.place`): where an entity stands carries no meaning, and
 the page says so. A pack with `bindScene` makes its entities from the real scene and each stands on the building it came from (below). See [`pack-architecture-findings.md`](pack-architecture-findings.md) for how this fits the renderer.
@@ -148,7 +148,7 @@ Only the first entity that has a wall, overlay or segments mapping is drawn.
 
 ### Visual channels (P6)
 
-Mappings beyond `wall` and `overlay`. All of them are drawn from the typed arrays of the frame on screen, none of them allocates per draw, and the legend lists each one from its scale.
+Mappings beyond `wall` and `overlay`. All of them are drawn from the typed arrays of the frame on screen, none of them allocates per draw, and the legend lists each one from its scale. The toy pack uses all of them (`packs/toy-epidemic/pack.yaml`: units infectious as segments, the smallest quarter of buildings outlined, active cases haloed, recovered buildings insulated, meeting places with a community pavilion, the share exposed as ground tint), on fields its runtime sends; they stand for the retrofit story's, and say nothing about disease.
 
 #### `segments`: k of n units
 
@@ -212,6 +212,16 @@ mappings:
 - Drawn right after the ground and shadows and before buildings, trees and agents: the buildings are on top of it. The far-zoom layer is unaffected (it holds only buildings and trees).
 - The legend has a labelled ramp "<label> (ground tint)" with the aggregate and the neighbourhood ("mean over a 250 m grid") and an entry for ground the model does not cover.
 - One entity is drawn per pack and the first `groundtint` mapping of it is used.
+
+#### `height`: not built, and why
+
+A channel that scales a building's drawn height by a field (energy use, say) was evaluated for P6 and is **not built**. It does not fit the building asset system cleanly:
+
+- Height is baked into the asset: the storey count `N` is part of the asset id, and the facade grammar draws windows, balconies and doors from one seeded random stream storey by storey and wall by wall, so changing `N` re-rolls the facade (a different building, not a taller one) and a continuous quantity would have to be snapped to whole storeys.
+- A building's height also feeds the cached ground layer (its cast shadow, painted once and keyed without any height), the pick silhouette, the culling margins and the painter's order. A per-frame-version height would repaint the ground layer (35 to 50 ms in a browser, `viz/README.md`) on every change, and it touches the projection and depth code that the terrain work (P7) is changing.
+- Cheaper channels already carry a quantity: `segments` for a count of a building's units, a sequential `wall` colour, `groundtint` for a neighbourhood aggregate, and the P5 charts for a number that needs reading. If a pack needs storeys to change (demolition, extension), that is a change of the scene, not of a frame.
+
+`channel: height` therefore stays reserved: it validates with a warning and is ignored.
 
 #### `overlay: insulation` and `overlay: community`
 

@@ -387,6 +387,7 @@ def validate(m):
                 continue
             legal = f.get("values") if f.get("type") == "category" else (["true", "false", "0", "1"] if f.get("type") == "boolean" else None)
             for k, v in vals.items():
+                k = "true" if k is True else "false" if k is False else k  # YAML 1.1 reads an unquoted true: or false: key as a boolean; the JSON the page gets already has "true" and "false"
                 vat = f"{at}.scale.values.{k}"
                 if isinstance(legal, list) and str(k) not in legal:
                     err(vat, f"not a value of {mp['entity']}.{mp['field']} ({', '.join(legal)})")

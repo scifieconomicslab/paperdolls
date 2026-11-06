@@ -7,6 +7,11 @@
  * With a scene, bindScene makes one entity per residential building and the page draws it there; "nearby" still means nearby in the list, not on the street.
  * Deterministic: the same parameters and seed always give the same frames. It never uses Math.random.
  * It sends frame 0 whole and every later frame as a patch, and answers inspect() from a log of when each building changed state.
+ *
+ * Besides state and exposure it sends fields that exist to exercise the visual channels of the shell (segments, outline, halo, overlays, ground tint):
+ * units (dwellings per building, from area and storeys), units_hit (how many of them are infectious today, rising through the infectious period), infected (exposed or
+ * infectious, whose share by neighbourhood tints the ground), hub (the largest 5% by area: a meeting place) and vulnerable (the smallest quarter by area). units, hub and
+ * vulnerable never change, so they are sent in frame 0 only.
  */
 (function () {
   'use strict';
@@ -18,24 +23,34 @@
 
   // Time 0 is sent whole; after that a frame is a patch: only the buildings whose state or exposure changed since the frame before. A day touches a few of the
   // 600 buildings (at 12,000 it would be thousands), and the shell applies the patch to its typed arrays without going over the rest.
+  // derived per-building values for the visual channels
+  function derive(h) {
+    for (let i = 0; i < h.n; i++) {
+      h.inf[i] = h.state[i] === E || h.state[i] === I ? 1 : 0;
+      h.hit[i] = h.state[i] === I ? Math.min(h.units[i], Math.ceil(h.units[i] * (h.t - h.iA[i] + 1) / h.p.infectious_days)) : 0;
+    }
+  }
+  const STATIC = ['units', 'hub', 'vulnerable'], DYNAMIC = { state: 'state', exposure: 'exposure', units_hit: 'hit', infected: 'inf' };
   function whole(h) {
+    derive(h);
     const counts = [0, 0, 0, 0]; for (let i = 0; i < h.n; i++) counts[h.state[i]]++;
-    return { t: h.t, entities: { building: { state: Int8Array.from(h.state), exposure: Float32Array.from(h.exposure) } }, series: { counts } };
+    return { t: h.t, entities: { building: { state: Int8Array.from(h.state), exposure: Float32Array.from(h.exposure), units: Int8Array.from(h.units), units_hit: Int8Array.from(h.hit), infected: Int8Array.from(h.inf),
+                                              hub: Int8Array.from(h.hub), vulnerable: Int8Array.from(h.vulnerable) } }, series: { counts } };
   }
   function frame(h) {
-    if (h.t === 0) { h.sent = true; h.pState = Int8Array.from(h.state); h.pExp = Float32Array.from(h.exposure); return whole(h); }
-    const counts = [0, 0, 0, 0], si = [], sv = [], ei = [], ev = [];
+    if (h.t === 0) { h.sent = true; derive(h); keep(h); return whole(h); }
+    derive(h);
+    const counts = [0, 0, 0, 0], building = {}, idx = {}, val = {};
+    for (const f of Object.keys(DYNAMIC)) { idx[f] = []; val[f] = []; }
     for (let i = 0; i < h.n; i++) {
       counts[h.state[i]]++;
-      if (h.state[i] !== h.pState[i]) { si.push(i); sv.push(h.state[i]); }
-      if (h.exposure[i] !== h.pExp[i]) { ei.push(i); ev.push(h.exposure[i]); }
+      for (const f of Object.keys(DYNAMIC)) if (h[DYNAMIC[f]][i] !== h.prev[f][i]) { idx[f].push(i); val[f].push(h[DYNAMIC[f]][i]); }
     }
-    h.pState = Int8Array.from(h.state); h.pExp = Float32Array.from(h.exposure);
-    const building = {};
-    if (si.length) building.state = { idx: Int32Array.from(si), val: Int8Array.from(sv) };
-    if (ei.length) building.exposure = { idx: Int32Array.from(ei), val: Float32Array.from(ev) };
+    for (const f of Object.keys(DYNAMIC)) if (idx[f].length) building[f] = { idx: Int32Array.from(idx[f]), val: (f === 'exposure' ? Float32Array : Int8Array).from(val[f]) };
+    keep(h);
     return { t: h.t, patch: { building }, series: { counts } };
   }
+  function keep(h) { h.prev = {}; for (const f of Object.keys(DYNAMIC)) h.prev[f] = h[DYNAMIC[f]].slice(); }       // what the next patch is taken against
   const NAMES = ['Susceptible', 'Exposed', 'Infectious', 'Recovered'];
 
   // Reference bindScene: one model building per residential scene building. A scene from the ingest says which ('residential' or 'probable'); an older
@@ -58,12 +73,25 @@
   }
   function footprintArea(ring) { let a = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; a += p[0] * q[1] - q[0] * p[1]; } return Math.abs(a) / 2; }
 
+  // units, hub and vulnerable from the geometry the scene gave (area, storeys); without it, from the entity number
+  function statics(h, at) {
+    const n = h.n, area = at && at.area && at.area.length === n ? at.area : null, levels = at && at.levels && at.levels.length === n ? at.levels : null;
+    if (!area) { for (let i = 0; i < n; i++) { h.units[i] = 1 + (i * 7) % 9; h.hub[i] = i % 20 === 0 ? 1 : 0; h.vulnerable[i] = i % 4 === 0 ? 1 : 0; } return; }
+    const sorted = Array.from(area).sort((a, b) => a - b), q25 = sorted[Math.floor(n * 0.25)], q95 = sorted[Math.min(n - 1, Math.floor(n * 0.95))];
+    for (let i = 0; i < n; i++) {
+      h.units[i] = Math.max(1, Math.min(40, Math.round(area[i] * (levels ? levels[i] : 2) / 90)));            // a dwelling per 90 m2 of floor, at most 40
+      h.hub[i] = area[i] >= q95 ? 1 : 0; h.vulnerable[i] = area[i] < q25 ? 1 : 0;
+    }
+  }
+
   PaperDolls.registerRuntime('toy-epidemic', {
     bindScene,
     init(p, ents, seed) {
       const n = ents.building.count;
       const h = { p: Object.assign({}, p), n, t: 0, s: seed | 0, state: new Int8Array(n), timer: new Int16Array(n), exposure: new Float32Array(n),
-        eA: new Int16Array(n).fill(-1), iA: new Int16Array(n).fill(-1), rA: new Int16Array(n).fill(-1), sent: false };    // eA, iA, rA: the day each building became exposed, infectious, recovered
+        eA: new Int16Array(n).fill(-1), iA: new Int16Array(n).fill(-1), rA: new Int16Array(n).fill(-1), sent: false,    // eA, iA, rA: the day each building became exposed, infectious, recovered
+        hit: new Int8Array(n), inf: new Int8Array(n), prev: null, units: new Int8Array(n), hub: new Int8Array(n), vulnerable: new Int8Array(n) };
+      statics(h, ents.building.attrs);
       for (let i = 0; i < n; i++) if (draw(h) < h.p.immunity) { h.state[i] = R; h.rA[i] = 0; }
       let placed = 0, guard = 0;
       while (placed < h.p.initial_cases && guard++ < n * 20) { const i = Math.floor(draw(h) * n); if (h.state[i] === S) { h.state[i] = I; h.iA[i] = 0; h.timer[i] = h.p.infectious_days; placed++; } }
@@ -85,11 +113,15 @@
       const fields = [{ label: 'State on day ' + t, value: NAMES[st] }, { label: 'Exposed', value: upTo(h.eA, t) }, { label: 'Infectious from', value: upTo(h.iA, t) }, { label: 'Recovered', value: upTo(h.rA, t) }];
       return { title: 'Building ' + (i + 1) + ' · ' + NAMES[st], fields, note: h.rA[i] === 0 ? 'Immune from the start.' : h.iA[i] === 0 ? 'One of the first cases.' : '' };
     },
-    snapshot(h) { return { p: h.p, t: h.t, state: Array.from(h.state), timer: Array.from(h.timer), exposure: Array.from(h.exposure), s: h.s, eA: Array.from(h.eA), iA: Array.from(h.iA), rA: Array.from(h.rA), pState: Array.from(h.pState || h.state), pExp: Array.from(h.pExp || h.exposure), sent: !!h.sent }; },
+    snapshot(h) {
+      if (!h.prev) { derive(h); keep(h); }                  // before any frame the baseline for the next patch is the state now
+      return { p: h.p, t: h.t, state: Array.from(h.state), timer: Array.from(h.timer), exposure: Array.from(h.exposure), s: h.s, eA: Array.from(h.eA), iA: Array.from(h.iA), rA: Array.from(h.rA), sent: !!h.sent, units: Array.from(h.units), hub: Array.from(h.hub), vulnerable: Array.from(h.vulnerable), prev: Object.fromEntries(Object.entries(h.prev).map(([k, v]) => [k, Array.from(v)])) };
+    },
     restore(h, snap) {
       h.p = Object.assign({}, snap.p); h.t = snap.t; h.state = Int8Array.from(snap.state); h.timer = Int16Array.from(snap.timer); h.exposure = Float32Array.from(snap.exposure);
       h.s = snap.s; h.eA = Int16Array.from(snap.eA); h.iA = Int16Array.from(snap.iA); h.rA = Int16Array.from(snap.rA);
-      h.pState = Int8Array.from(snap.pState); h.pExp = Float32Array.from(snap.pExp); h.sent = snap.sent; return h;
+      h.units = Int8Array.from(snap.units); h.hub = Int8Array.from(snap.hub); h.vulnerable = Int8Array.from(snap.vulnerable); h.hit = new Int8Array(h.n); h.inf = new Int8Array(h.n); h.sent = snap.sent;
+      h.prev = snap.prev ? { state: Int8Array.from(snap.prev.state), exposure: Float32Array.from(snap.prev.exposure), units_hit: Int8Array.from(snap.prev.units_hit), infected: Int8Array.from(snap.prev.infected) } : null; return h;
     },
   });
 

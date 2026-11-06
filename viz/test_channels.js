@@ -3,8 +3,8 @@
  * Rendering tests need the node 'canvas' package (NODE_CANVAS, or on the module path) and skip themselves without it. */
 const fs = require('fs'), path = require('path'), vm = require('vm'), assert = require('assert');
 const root = path.resolve(__dirname, '..');
-const g = { console, Math, Object, Map, Array, Infinity, JSON, Set, Int8Array, Int32Array, Float32Array, Float64Array, Uint8Array }; g.globalThis = g; vm.createContext(g);
-for (const f of ['assetlib.js', 'buildinglib.js', 'treelib.js', 'vizlib.js', 'packruntime.js', 'packstore.js', 'replay.js', 'packhost.js', 'packpick.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, f), 'utf8'), g, { filename: f });
+const g = { console, Math, Object, Map, WeakMap, Array, Infinity, JSON, Set, Date, Number, String, Promise, Int8Array, Int16Array, Int32Array, Float32Array, Float64Array, Uint8Array, ArrayBuffer, performance, setTimeout, clearTimeout }; g.globalThis = g; vm.createContext(g);
+for (const f of ['assetlib.js', 'buildinglib.js', 'treelib.js', 'vizlib.js', 'packvalidate.js', 'packruntime.js', 'packstore.js', 'replay.js', 'packhost.js', 'packpick.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, f), 'utf8'), g, { filename: f });
 const A = g.AssetLib, V = g.VizLib, PackHost = g.PackHost;
 const pal = JSON.parse(fs.readFileSync(path.join(root, 'assets', 'palettes.json'), 'utf8'));
 const fam = pal.families[0], reg = A.REG.colorfigures;
@@ -308,5 +308,51 @@ if (createCanvas) test('groundtint render: the tint is under the buildings, repa
   store.setTime(1); frame(near); assert.strictEqual(sim.tintPaints, p0 + 1, 'a new frame repaints the tint once'); assert.strictEqual(sim.layerRepaints, r0, 'and the ground layer not at all');
   const tr = frame(Object.assign({}, near, { ox: near.ox + 37 })); assert(sim.tintPaints === p0 + 2, 'a pan repaints it for the new view'); b.dispose();
 });
+
+// ================= the toy pack uses every channel =================
+const toyArg = process.argv.indexOf('--manifest-json') >= 0 ? process.argv[process.argv.indexOf('--manifest-json') + 1] : process.env.PACK_MANIFEST_JSON;
+if (!toyArg) skip('toy pack channels', 'no manifest given');
+else {
+  const TOY = JSON.parse(toyArg); vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'packs', 'toy-epidemic', 'runtime.js'), 'utf8'), g);
+  const impl = g.PaperDolls.getRuntime('toy-epidemic');
+  const host = () => {
+    const store = PStore.create(TOY), runtime = g.PackRuntime.create(TOY, impl), ctl = PackHost.createController({ manifest: TOY, runtime, store, immediate: true }); ctl.start();
+    const sim = mkSim(), bound = g.PackRuntime.bindScene(TOY, impl, sim.scene), b = PackHost.bindRenderer({ manifest: TOY, store, controller: ctl, sim, bound }); assert(b.ok, b.error);
+    return { store, ctl, sim, b, st: k => sim.buildingStyle(b.entityOf(k), reg, sim.theme, '#aaa') };
+  };
+  test('toy pack: the manifest uses segments, outline, halo, insulation, community and groundtint, and validates clean', () => {
+    const chans = new Set(TOY.mappings.map(m => m.channel)); for (const c of ['wall', 'overlay', 'segments', 'outline', 'halo', 'groundtint']) assert(chans.has(c), 'uses ' + c);
+    const ovs = new Set(); for (const m of TOY.mappings) if (m.channel === 'overlay') for (const v of Object.values(m.scale.values)) if (v.overlay) ovs.add(v.overlay); assert(ovs.has('insulation') && ovs.has('community') && ovs.has('marker'));
+    const r = g.PackSpec.validate(TOY); assert(r.ok && r.errors.length === 0 && r.warnings.length === 0, J(r.errors.concat(r.warnings)));
+  });
+  test('toy pack: through the bound renderer every channel reads the frame (segments, highlights, tint, overlays) and follows the patches', () => {
+    const { store, sim, b, st } = host(); store.setTime(0);
+    const F = () => store.bound('block' in TOY.entities ? 'block' : 'building').fields, f0 = F();
+    let hubs = 0, vul = 0, seg0 = 0; for (let k = 0; k < b.count; k++) { const i = b.index[k]; hubs += f0.hub[i] === 1; vul += f0.vulnerable[i] === 1; if (st(k).overlays.includes('community') !== (f0.hub[i] === 1)) throw new Error('hub overlay ' + k); if (st(k).seg && st(k).seg.k) seg0++; }
+    assert(hubs > 0 && vul > 0, 'hubs ' + hubs + ', vulnerable ' + vul); assert(seg0 <= TOY.params.initial_cases.default, 'day 0: only the initial cases have units infectious: ' + seg0);
+    assert.strictEqual(b.highlights().outline.reduce((n, gr) => n + gr.idx.length, 0), vul, 'every vulnerable building is outlined from day 0');
+    store.setTime(40); const f = F(); let hit = 0, haloN = 0, rec = 0; for (let k = 0; k < b.count; k++) { const i = b.index[k], s = st(k); if (s.seg && s.seg.k > 0) { hit++; assert(f.state[i] === 2 && s.seg.n >= 2 && s.seg.k <= s.seg.n, 'segments only on infectious buildings: ' + J(s.seg)); } if (f.state[i] === 3 && !s.overlays.includes('insulation')) throw new Error('recovered is insulated'); rec += f.state[i] === 3; }
+    haloN = b.highlights().halo.reduce((n, gr) => n + gr.idx.length, 0); const infectious = Array.from(f.state).filter(v => v === 2).length;
+    assert(rec > 0 && hit > 0 && hit <= infectious, 'at day 40: recovered ' + rec + ', with units infectious ' + hit + ' of ' + infectious + ' infectious'); assert.strictEqual(haloN, infectious, 'a halo on each infectious building');
+    const T = b.tint(); assert(T.cells.length > 0 && T.cells.every(c => c.v >= 0 && c.v <= 1), 'ground tint cells: ' + T.cells.length);
+    const shares = T.cells.map(c => c.v); assert(Math.max(...shares) > Math.min(...shares), 'the tint differs between neighbourhoods');
+    b.dispose();
+  });
+  if (createCanvas) test('toy pack: renders near and far with every channel on, offscreen canvases only, and a patch does not rebuild the sprites it did not change', () => {
+    A.sprites.factory = (w, h) => createCanvas(w, h); A.sprites.cache.clear(); A.sprites.pixels = 0;
+    const { store, sim, b } = host(), W = 900, H = 600, ctx = createCanvas(W, H).getContext('2d'), hc = createCanvas(W, H).getContext('2d'); store.setTime(40);
+    const fake = { addEventListener() {}, removeEventListener() {}, getBoundingClientRect: () => ({ left: 0, top: 0 }) }, far = V.fitView(sim.scene, W, H, 0.06), e0 = b.entityOf(0);
+    const near = { w: W, h: H, scale: 6, ox: W / 2 - (e0.fit.cx - e0.fit.cy) * 6 * 0.866, oy: H / 2 - (e0.fit.cx + e0.fit.cy) * 3 };
+    const inter = PackHost.bindInteraction({ manifest: TOY, store, sim, binding: b, pick: g.Pick.create(sim), box: fake, camera: { view: () => far }, doc: fake, tip: null });
+    for (const v of [far, near]) { for (let i = 0; i < 12; i++) V.renderFrame(ctx, sim, v, { vehicles: false, people: false }); inter.drawHighlight(hc, v); }
+    const nz = c => { const d = c.getImageData(0, 0, W, H).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n; };
+    assert(nz(hc) > 100, 'highlights drawn'); assert(sim.tintPaints >= 1, 'the ground was tinted');
+    const stAt = k => sim.buildingStyle(b.entityOf(k), reg, sim.theme, '#aaa'), before = new Map(), styles = []; for (let k = 0; k < b.count; k++) { styles.push(stAt(k)); before.set(k, b.entityOf(k)._asset); }
+    store.setTime(41); for (let i = 0; i < 12; i++) V.renderFrame(ctx, sim, near, { vehicles: false, people: false });
+    let same = 0, changed = 0; for (let k = 0; k < b.count; k++) { const e = b.entityOf(k); if (stAt(k) === styles[k]) { same++; assert.strictEqual(e._asset, before.get(k), 'building ' + k + ': same style, same sprite asset'); } else changed++; }
+    assert(same > changed && changed > 0, 'a day changes few buildings: ' + changed + ' of ' + (same + changed));
+    inter.dispose(); b.dispose();
+  });
+}
 
 console.log(passed + ' passed' + (process.exitCode ? ', with failures' : ''));

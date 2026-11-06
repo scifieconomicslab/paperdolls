@@ -18,6 +18,7 @@
  #stagebox { position:relative; overflow:hidden; background:#f2efe7; cursor:grab; touch-action:none; min-height:240px; }
  #stagebox.dragging { cursor:grabbing; }
  #stagebox canvas { position:absolute; left:0; top:0; display:block; width:100%; height:100%; will-change:transform, opacity; pointer-events:none; }
+ #stagebox #hilite { z-index:3; }                       /* above both stage canvases (refocus.js gives them z-index 1 and 2); without it the outlines drawn here sit under the map */
  #fit { position:absolute; right:10px; top:10px; z-index:4; }
  #reticle { position:absolute; left:50%; top:50%; width:96px; height:96px; margin:-48px 0 0 -48px; pointer-events:none; opacity:0; transition:opacity .35s ease; z-index:3; }
  #reticle i { position:absolute; width:22px; height:22px; border:2px solid rgba(35,30,22,.85); }

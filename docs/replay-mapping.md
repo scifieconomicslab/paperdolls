@@ -34,4 +34,4 @@ The hook stays read-only, as in [model-interface.md](model-interface.md).
 
 Every entry needs a label. The legend on the page is generated from the scales, so it can only describe what is drawn.
 
-Not built: height as a channel, and agents (people and vehicles) driven by model agents.
+Not built: height as a channel (see `pack-spec.md`, "`height`: not built, and why"; the model packs have `segments`, `outline`, `halo`, `groundtint` and the `insulation` and `community` overlays, which `replay` does not), and agents (people and vehicles) driven by model agents.
