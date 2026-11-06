@@ -3,10 +3,10 @@
  *
  *   const ctl  = PackHost.createController({ manifest, runtime, store, immediate });   // runs the model; ctl.flush() re-runs if a parameter moved
  *   PackHost.mountUI({ manifest, store, controller: ctl, doc, regions: { left, right, bottom }, display: [...] });
- *   PackHost.bindRenderer({ manifest, store, controller: ctl, sim });                  // sim.buildingStyle reads the store's current frame
+ *   PackHost.bindRenderer({ manifest, store, controller: ctl, sim, bound });                  // sim.buildingStyle reads the store's current frame
  *
- * Only the first entity that has a wall or overlay mapping is drawn, one entity to one scene building in a fixed order (Replay.place). That placement is
- * invented and the page says so; binding model entities to real buildings is a later phase. Pure helpers (legendFor, scaleFor) have no DOM.
+ * Only the first entity that has a wall or overlay mapping is drawn. When the pack's runtime has a bindScene, entity k stands on the scene building it names
+ * (PackRuntime.bindScene); otherwise one entity to one scene building in a fixed order (Replay.place), which is invented and the page says so. Pure helpers (legendFor, scaleFor) have no DOM.
  */
 (function (root) {
   'use strict';
@@ -90,9 +90,23 @@
   function bindRenderer(o) {
     const { manifest, store, controller: ctl, sim } = o, R = o.Replay || root.Replay, en = drawnEntity(manifest);
     if (!en) return { ok: false, error: 'the manifest maps nothing to the map' };
-    const count = (manifest.entities[en] || {}).count || 0, placement = R.place(sim.scene, count);
-    if (!placement.ok) return { ok: false, error: placement.error };
-    const rank = new Map(); sim.buildings.forEach((e, i) => rank.set(e, placement.rank[i]));
+    // With a bindScene result (o.bound, from PackRuntime.bindScene) entity k stands on the scene building the pack named; without one, the invented fixed order (Replay.place).
+    const bound = o.bound && o.bound.bound && o.bound.pos[en] ? o.bound : null;
+    const count = bound ? bound.counts[en] : (manifest.entities[en] || {}).count || 0;
+    let placement = null, rank = new Map(), entityOf, placed;
+    if (bound) {
+      const pos = bound.pos[en], byScene = new Map();           // scene building index -> entity index
+      pos.forEach((si, k) => { if (si >= 0) byScene.set(si, k); });
+      sim.buildings.forEach((e, i) => { if (byScene.has(i)) rank.set(e, byScene.get(i)); });
+      placed = byScene.size;
+      entityOf = k => (pos[k] >= 0 ? sim.buildings[pos[k]] : null);
+    } else {
+      placement = R.place(sim.scene, count);
+      if (!placement.ok) return { ok: false, error: placement.error };
+      sim.buildings.forEach((e, i) => rank.set(e, placement.rank[i]));
+      placed = count;
+      entityOf = k => sim.buildings[placement.order[k]];
+    }
     const walls = wallMaps(manifest).filter(m => m.entity === en).map(m => ({ field: m.field, sc: scaleFor(manifest, m) }));
     const overlays = overlayMaps(manifest).filter(m => m.entity === en).map(m => ({ field: m.field, sc: scaleFor(manifest, m) }));
     const none = { data: null, overlays: [] };
@@ -103,8 +117,7 @@
       for (const m of overlays) { const o2 = m.sc.overlay(d[m.field][k]); if (o2) ov.push(o2); }
       return { data: w ? w.sc.colour(d[w.field][k]) : null, overlays: ov };
     };
-    const entityOf = k => sim.buildings[placement.order[k]];
-    return { ok: true, placement, entityOf, count, dispose() { sim.buildingStyle = null; } };
+    return { ok: true, bound: !!bound, placement, entityOf, count, placed, warnings: bound ? bound.warnings : [], dispose() { sim.buildingStyle = null; } };
   }
 
   // ---- UI ----

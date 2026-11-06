@@ -233,6 +233,75 @@ else {
     store.setParam('lockdown', 'full'); const lock60 = shot(); assert(diff(p60, lock60) > 300, 'a lockdown changes day 60: ' + diff(p60, lock60) + ' pixels');
     store.setParam('lockdown', 'none'); assert.strictEqual(diff(p60, shot()), 0, 'putting the slider back restores the picture');
   });
+
+  // ---------- bindScene: model entities generated from the real scene ----------
+  const loadScene = f => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, '..', f), 'utf8')); } catch (e) { return null; } };
+  const mkSimOf = scene => V.createSim(scene, { seed: 5, theme: A.theme(fam, undefined, 'colorfigures'), region: 'nw' });
+  const isDwelling = b => (b.residential !== undefined ? b.residential !== 'other' : b.archetype !== 'shed');
+  const bindOn = scene => { const b = PR.bindScene(TOY, impl, scene); assert(b.ok, b.error); return b; };
+  test('bindScene: the placeholder gets one entity per non-shed building, and each stands on the building it names', () => {
+    const scene = V.makePlaceholderScene(7), b = bindOn(scene), want = scene.buildings.filter(isDwelling);
+    assert(b.bound && b.counts.building === want.length && want.length > 0 && want.length < scene.buildings.length, 'count ' + b.counts.building);
+    const pos = b.pos.building; assert.strictEqual(pos.length, want.length);
+    pos.forEach((si, k) => assert.strictEqual(scene.buildings[si].id, want[k].id));
+    assert.strictEqual(b.warnings.length, 0); assert.strictEqual(b.attrs.building.area.length, want.length);
+  });
+  test('bindScene: the page binding paints entity k on scene building pos[k], and buildings without an entity are left alone', () => {
+    const scene = V.makePlaceholderScene(7), b = bindOn(scene), man = TOY, store = PStore.create(man), runtime = PR.create(man, impl, { counts: b.counts, attrs: b.attrs });
+    const ctl = PH.createController({ manifest: man, runtime, store, immediate: true }); ctl.start();
+    const sim = mkSimOf(scene), br = PH.bindRenderer({ manifest: man, store, controller: ctl, sim, bound: b }); assert(br.ok && br.bound, br.error);
+    assert.strictEqual(br.count, b.counts.building); assert.strictEqual(br.placed, b.counts.building); assert.strictEqual(store.frame().entities.building.state.length, b.counts.building);
+    const reg = A.REG.colorfigures, style = e => sim.buildingStyle(e, reg, sim.theme, '#aaaaaa'), COL = ['#a9c5a0', '#e9b44c', '#c8452f', '#5b8db8'], st = store.frame().entities.building.state;
+    for (const k of [0, 1, 5, b.counts.building - 1]) { assert.strictEqual(br.entityOf(k).id, scene.buildings[b.pos.building[k]].id); assert.strictEqual(style(br.entityOf(k)).data, COL[st[k]]); }
+    const shed = sim.buildings.find((e, i) => !isDwelling(scene.buildings[i])); assert(shed, 'the placeholder has a shed'); assert.deepStrictEqual({ data: style(shed).data, n: style(shed).overlays.length }, { data: null, n: 0 });
+  });
+  test('bindScene: an id the scene does not have, a null, and a repeated id are warnings; those entities are not drawn and the model still runs', () => {
+    const scene = V.makePlaceholderScene(7), ids = scene.buildings.map(b => b.id), bad = { bindScene: () => ({ entities: { building: { count: 5 } }, sceneIndex: { building: [ids[0], 'nope', null, ids[0], ids[3]] } }) };
+    const b = PR.bindScene(TOY, bad, scene); assert(b.ok);
+    assert.deepStrictEqual(Array.from(b.pos.building), [0, -1, -1, -1, 3]); assert.strictEqual(b.warnings.length, 2, JSON.stringify(b.warnings));
+    assert(/does not have/.test(b.warnings[0]) && /nope/.test(b.warnings[0]) && /share a scene building/.test(b.warnings[1]));
+    const man = TOY, store = PStore.create(man), rt = PR.create(man, impl, { counts: b.counts }), ctl = PH.createController({ manifest: man, runtime: rt, store, immediate: true }); ctl.start();
+    const sim = mkSimOf(scene), br = PH.bindRenderer({ manifest: man, store, controller: ctl, sim, bound: b }); assert(br.ok && br.placed === 2 && br.count === 5 && br.entityOf(1) === null);
+  });
+  test('bindScene: a scene whose buildings have no ids is bound by "#<index>"', () => {
+    const scene = V.makePlaceholderScene(7); scene.buildings.forEach(b => { delete b.id; });
+    const b = bindOn(scene); assert.strictEqual(b.warnings.length, 0); assert(b.bound && b.pos.building[0] >= 0 && b.pos.building.every(x => x >= 0));
+    const first = scene.buildings.findIndex(isDwelling); assert.strictEqual(b.pos.building[0], first);
+  });
+  test('bindScene: a malformed result is an error that says what is wrong; a pack without bindScene is unbound', () => {
+    const scene = V.makePlaceholderScene(7), run = r => PR.bindScene(TOY, { bindScene: () => r }, scene);
+    assert(/must return/.test(run({}).error)); assert(/not declared/.test(run({ entities: { ghost: { count: 1 } }, sceneIndex: {} }).error));
+    assert(/sceneIndex.building has 1 entries for 2/.test(run({ entities: { building: { count: 2 } }, sceneIndex: { building: ['a'] } }).error));
+    assert(/must be a scene building id/.test(run({ entities: { building: { count: 1 } }, sceneIndex: { building: [{}] } }).error));
+    assert(/boom/.test(PR.bindScene(TOY, { bindScene() { throw new Error('boom'); } }, scene).error));
+    assert.deepStrictEqual({ ok: PR.bindScene(TOY, {}, scene).ok, bound: PR.bindScene(TOY, {}, scene).bound }, { ok: true, bound: false });
+  });
+  test('bindScene: the model receives the counts and the real attributes; neighbours are entity indices', () => {
+    const scene = loadScene('samples/osm_fixture_scene.json'); assert(scene && scene.buildings[0].neighbours, 'fixture scene with the entity table');
+    const b = bindOn(scene), n = b.counts.building, nb = b.attrs.building.neighbours; let seen = null;
+    const spy = Object.assign({}, impl, { init(p, e, sd) { seen = e; return impl.init(p, e, sd); } }); PR.create(TOY, spy, { counts: b.counts, attrs: b.attrs }).start(Object.fromEntries(Object.entries(TOY.params).map(([k, v]) => [k, v.default])));
+    assert.strictEqual(seen.building.count, n); assert.strictEqual(seen.building.attrs.area.length, n); assert(seen.building.attrs.area.every(a => a > 0));
+    nb.forEach((l, k) => l.forEach(j => { assert(j >= 0 && j < n && j !== k); assert(nb[j].includes(k), 'neighbours are symmetric'); }));
+  });
+  const jette = loadScene('cache/jette-bbox-scene.json');
+  if (!jette) skip('bindScene: Jette extract', 'cache/jette-bbox-scene.json is not there; python -m paperdolls ingest cache/jette-bbox-extract.json --bbox 50.874,4.325,50.88,4.338');
+  else test('bindScene: on the 2,162-building Jette extract every dwelling gets exactly one entity, on its own building', () => {
+    assert.strictEqual(jette.buildings.length, 2162); assert(V.validateScene(jette).ok);
+    const b = bindOn(jette), want = jette.buildings.filter(isDwelling), pos = b.pos.building;
+    assert.strictEqual(b.counts.building, want.length); assert(want.length > 1500 && want.length < 2162, 'dwellings: ' + want.length);
+    assert.strictEqual(new Set(pos).size, pos.length); assert(pos.every(i => i >= 0 && isDwelling(jette.buildings[i])));
+    assert.strictEqual(jette.buildings.filter(x => x.residential === 'residential' || x.residential === 'probable').length, want.length);
+    const sim = mkSimOf(jette), man = TOY, store = PStore.create(man), rt = PR.create(man, impl, { counts: b.counts, attrs: b.attrs }), ctl = PH.createController({ manifest: man, runtime: rt, store, immediate: true }); ctl.start();
+    const br = PH.bindRenderer({ manifest: man, store, controller: ctl, sim, bound: b }); assert(br.ok && br.placed === want.length);
+    assert.strictEqual(store.length(), TOY.time.steps + 1);
+  });
+  test('scene: old scenes (no entity table) and new scenes both validate; bad new fields are errors', () => {
+    const old = V.makePlaceholderScene(7); assert(V.validateScene(old).ok);
+    const sc = loadScene('samples/osm_fixture_scene.json'); assert(V.validateScene(sc).ok, JSON.stringify(V.validateScene(sc).errors));
+    const bad = clone(sc); Object.assign(bad.buildings[0], { area: -1, centroid: [1], height: 0, levels_assumed: 'yes', residential: 'maybe', neighbours: [{}] });
+    const r = V.validateScene(bad); assert.strictEqual(r.errors.length, 6, JSON.stringify(r.errors));
+    const dang = clone(sc); dang.buildings[0].neighbours = ['ghost']; const d = V.validateScene(dang); assert(d.ok && d.warnings.some(w => /neighbour id/.test(w)));
+  });
 }
 
 if (failed) { console.log(failed + ' failed'); process.exit(1); }

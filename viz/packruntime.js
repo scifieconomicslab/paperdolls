@@ -9,6 +9,7 @@
  *     setParams(handle, params)    -> handle        required only when manifest.runtime.on_params is "continue": keep the state, use the new parameters from now on
  *     snapshot(handle)             -> state         (optional) a plain, structured-cloneable copy of everything that is needed to carry on
  *     restore(handle, state)       -> handle        (optional) the inverse of snapshot
+ *     bindScene(scene)             -> { entities, sceneIndex }   (optional) build the entities from the real scene; see docs/pack-spec.md
  *   });
  *
  * A frame is { t, entities: { name: { field: array } }, series: { name: [numbers] } }. Time 0 is the state before the first step. Category fields
@@ -33,10 +34,55 @@
   const digest = frames => JSON.stringify(plain(frames), (k, v) => (typeof v === 'number' && !isFinite(v) ? String(v) : v));     // NaN and infinity survive JSON as text, so they compare
 
   // What the runtime is given as `entities`: the declared counts and field names.
-  function entitySpec(manifest, counts) {
+  // `attrs` (optional, from bindScene): per-entity arrays about the real buildings, handed to the model as entities.<name>.attrs.
+  function entitySpec(manifest, counts, attrs) {
     const out = {};
-    for (const [name, e] of Object.entries(manifest.entities || {})) out[name] = { count: (counts && counts[name]) || e.count || 0, fields: Object.keys(e.fields || {}) };
+    for (const [name, e] of Object.entries(manifest.entities || {})) {
+      const n = counts && counts[name] !== undefined ? counts[name] : e.count || 0;
+      out[name] = { count: n, fields: Object.keys(e.fields || {}) };
+      if (attrs && attrs[name]) out[name].attrs = attrs[name];
+    }
     return out;
+  }
+
+  // ---- bindScene: let the pack build its entities from the real scene ----
+  // A scene building is addressed by its id; a building with no id is addressed as "#<index>" (sceneKey), so a pack can bind to any scene.
+  const sceneKey = (b, i) => (b && b.id !== undefined && b.id !== null ? b.id : '#' + i);
+
+  // impl.bindScene(scene) -> { entities: { name: { count, attrs? } }, sceneIndex: { name: [id | null, ...] } }   (sceneIndex[name].length === count)
+  // Returns { ok, bound, error?, warnings[], counts, attrs, pos } where pos[name] is an Int32Array: the scene building index of entity k, or -1 when the entity
+  // stands on no building (null, an id the scene does not have, or an id an earlier entity of the same kind already took). Those are warnings, never errors:
+  // the model still runs, the entity is just not drawn.
+  function bindScene(manifest, impl, scene) {
+    const none = { ok: true, bound: false, warnings: [], counts: null, attrs: null, pos: {} };
+    if (!impl || typeof impl.bindScene !== 'function') return none;
+    const fail = m => ({ ok: false, bound: false, error: 'bindScene: ' + m, warnings: [], counts: null, attrs: null, pos: {} });
+    let res;
+    try { res = impl.bindScene(scene); } catch (e) { return fail(e.message); }
+    if (!res || typeof res !== 'object' || !res.entities || typeof res.entities !== 'object' || !res.sceneIndex || typeof res.sceneIndex !== 'object') return fail('must return { entities, sceneIndex }');
+    const where = new Map(); (scene.buildings || []).forEach((b, i) => { const k = sceneKey(b, i); if (!where.has(k)) where.set(k, i); });
+    const warnings = [], counts = {}, attrs = {}, pos = {};
+    for (const [name, e] of Object.entries(res.entities)) {
+      if (!(manifest.entities || {})[name]) return fail('entities.' + name + ' is not declared in the manifest');
+      if (!e || !Number.isInteger(e.count) || e.count < 0) return fail('entities.' + name + '.count must be a whole number');
+      const idx = res.sceneIndex[name];
+      if (!Array.isArray(idx) && !ArrayBuffer.isView(idx)) return fail('sceneIndex.' + name + ' is missing');
+      if (idx.length !== e.count) return fail('sceneIndex.' + name + ' has ' + idx.length + ' entries for ' + e.count + ' entities');
+      counts[name] = e.count; if (e.attrs) attrs[name] = e.attrs;
+      const p = new Int32Array(e.count).fill(-1), taken = new Set(), unknown = [], dup = [];
+      for (let k = 0; k < e.count; k++) {
+        const id = idx[k]; if (id === null || id === undefined) continue;
+        if (typeof id !== 'string' && typeof id !== 'number') return fail('sceneIndex.' + name + '[' + k + '] must be a scene building id or null');
+        const i = where.get(id);
+        if (i === undefined) { unknown.push(id); continue; }
+        if (taken.has(i)) { dup.push(id); continue; }
+        taken.add(i); p[k] = i;
+      }
+      pos[name] = p;
+      if (unknown.length) warnings.push(unknown.length + ' ' + name + ' entities name a building the scene does not have (' + unknown.slice(0, 3).join(', ') + (unknown.length > 3 ? ', ...' : '') + '): not drawn');
+      if (dup.length) warnings.push(dup.length + ' ' + name + ' entities share a scene building with an earlier one (' + dup.slice(0, 3).join(', ') + (dup.length > 3 ? ', ...' : '') + '): not drawn');
+    }
+    return { ok: true, bound: true, warnings, counts, attrs, pos };
   }
   const fieldType = f => (typeof f === 'string' ? { type: f } : f);
 
@@ -77,11 +123,11 @@
   }
 
   function create(manifest, impl, opts) {
-    opts = Object.assign({ validate: true, counts: null }, opts || {});
+    opts = Object.assign({ validate: true, counts: null, attrs: null }, opts || {});
     const missing = checkInterface(manifest, impl);
     if (missing.length) throw new Error('runtime ' + manifest.id + ': ' + missing.join('; '));
     const rt = manifest.runtime || {}, policy = rt.on_params || 'rerun', horizon = manifest.time.steps;
-    const ents = entitySpec(manifest, opts.counts);
+    const ents = entitySpec(manifest, opts.counts, opts.attrs);
     let handle = null, t = 0, seed = rt.seed === undefined ? 1 : rt.seed, params = null;
     const take = (frames, from) => {
       if (!Array.isArray(frames)) throw new Error('runtime ' + manifest.id + ': step/run must return an array of frames');
@@ -97,7 +143,7 @@
       // Begin again from time 0 with these parameters. Returns the frame at time 0.
       start(p, s) {
         params = Object.assign({}, p); if (s !== undefined) seed = s;
-        handle = impl.init(Object.assign({}, params), JSON.parse(JSON.stringify(ents)), seed); t = 0;
+        handle = impl.init(Object.assign({}, params), plain(ents), seed); t = 0;
         return take(impl.step(handle, 0), 0)[0];
       },
       // New parameters: a re-run starts again (and returns the frame at time 0); "continue" keeps the state and returns null.
@@ -139,6 +185,6 @@
     return out;
   }
 
-  root.PackRuntime = { create, checkFrame, checkInterface, checkRuntime, entitySpec, digest };
+  root.PackRuntime = { create, checkFrame, checkInterface, checkRuntime, entitySpec, digest, bindScene, sceneKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.PackRuntime;
 })(typeof window !== 'undefined' ? window : globalThis);

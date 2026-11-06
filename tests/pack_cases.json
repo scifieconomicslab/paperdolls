@@ -526,7 +526,7 @@
    "schema": "fail"
   },
   {
-   "name": "binding to the scene is planned",
+   "name": "from scene needs no count: the runtime's bindScene sets it",
    "patch": {
     "entities.thing": {
      "from": "scene",
@@ -538,9 +538,7 @@
     "series": {}
    },
    "errors": [],
-   "warnings": [
-    "entities.thing.from: binding to scene"
-   ]
+   "warnings": []
   },
   {
    "name": "a mapping must name an entity that exists",

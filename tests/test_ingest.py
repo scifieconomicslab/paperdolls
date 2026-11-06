@@ -475,3 +475,87 @@ def test_a_boundary_that_does_not_close_gets_its_own_error(files, tmp_path):
         cli.main(["ingest", str(p), "--out", str(tmp_path / "s.json"), "--boundary-relation", str(REL)])
     scene, rep = build.ingest(p)                               # without the clip it still works, and says why
     assert rep["counts"]["buildings"] == 135 and any("did not close" in w for w in rep["warnings"])
+
+
+# ---------- the scene entity table: area, centroid, height, levels_assumed, residential, neighbours ----------
+def test_buildings_carry_the_entity_table(result):
+    scene, rep = result
+    for b in scene["buildings"]:
+        assert b["area"] == pytest.approx(geo.ring_area(b["footprint"]), rel=0.01, abs=0.2)
+        assert _near(b["centroid"], geo.ring_centroid(b["footprint"]), 0.05)
+        assert b["height"] > 0 and isinstance(b["levels_assumed"], bool)
+        assert b["levels_assumed"] == (b["osm"]["levels_source"] in ("type-default", "global-default"))
+        assert b["residential"] in classify.RESIDENTIAL_CLASSES
+    assert rep["levels_assumed"] == sum(b["levels_assumed"] for b in scene["buildings"])
+    assert sum(rep["residential"].values()) == len(scene["buildings"])
+
+
+def test_height_comes_from_the_tag_else_the_storeys(result):
+    scene, _ = result
+    tagged = [b for b in scene["buildings"] if b["osm"]["levels_source"] == "height"]
+    assert tagged and all(b["height"] == 24.0 for b in tagged)
+    lv = [b for b in scene["buildings"] if b["osm"]["levels_source"] == "tag"]
+    assert lv and all(b["height"] == pytest.approx(b["levels"] * classify.M_PER_LEVEL, abs=0.06) for b in lv)
+
+
+@pytest.mark.parametrize("tags,arch,area,want", [
+    ({"building": "house"}, "villa", 90, "residential"), ({"building": "apartments"}, "block", 300, "residential"),
+    ({"building": "terrace"}, "terrace", 112, "residential"), ({"building": "church"}, "auto", 400, "other"),
+    ({"building": "yes", "shop": "bakery"}, "auto", 120, "other"), ({"building": "yes"}, "shed", 200, "other"),
+    ({"building": "yes"}, "auto", 12, "other"), ({"building": "clubhouse"}, "auto", 300, "other"), ({"building": "yes"}, "auto", 150, "probable"), ({}, "auto", 150, "probable"),
+])
+def test_residential_rule(tags, arch, area, want):
+    a = classify.Assumptions()
+    assert classify.residential_class(tags, arch, area, a) == want
+    assert any(c == "residential" for c, _, _ in a.table())
+
+
+def test_residential_classes_on_the_fixture(result):
+    scene, rep = result
+    by = {}
+    for b in scene["buildings"]:
+        by.setdefault(b["osm"]["building"], set()).add(b["residential"])
+    assert by["terrace"] == {"residential"} and by["house"] == {"residential"} and by["apartments"] == {"residential"}
+    assert by["retail"] == {"other"} and by["warehouse"] == {"other"} and by["church"] == {"other"} and by["yes"] <= {"probable", "other"}
+    assert any(c == "residential" for c, _, _ in rep["assumptions"])
+
+
+def test_neighbours_are_symmetric_and_the_fixture_terraces_touch_or_nearly(result):
+    scene, rep = result
+    byid = {b["id"]: b for b in scene["buildings"]}
+    for b in scene["buildings"]:
+        assert b["id"] not in b["neighbours"]
+        for n in b["neighbours"]:
+            assert b["id"] in byid[n]["neighbours"]
+    terraces = [b for b in scene["buildings"] if b["osm"]["building"] == "terrace"]
+    assert sum(1 for b in terraces if b["neighbours"]) > len(terraces) * 0.6              # 8 m wide units on an 8.2 m pitch: 0.2 m gaps
+    assert rep["neighbours"]["threshold_m"] == 1.0 and rep["neighbours"]["links"] == sum(len(b["neighbours"]) for b in scene["buildings"]) // 2
+
+
+def test_neighbour_geometry():
+    from paperdolls.ingest import adjacency as adj
+    sq = lambda x, y, s=10: [(x, y), (x + s, y), (x + s, y + s), (x, y + s)]
+    rings = [sq(0, 0), sq(10.4, 0), sq(12, 0), sq(5, 5, 2), sq(30, 30), sq(8, 8, 10)]     # 1: 0.4 m gap from 0; 3: inside 0; 5: overlaps 0; 2: 2 m gap
+    nb = adj.neighbours(rings)
+    assert 1 in nb[0] and 0 in nb[1]                       # across a 0.4 m gap
+    assert 3 in nb[0] and 0 in nb[3]                       # one inside the other
+    assert 5 in nb[0]                                      # overlapping
+    assert nb[4] == []                                     # far away
+    assert 2 not in nb[0]                                  # 2 m gap, over the threshold
+    assert adj.neighbours([sq(0, 0), sq(10, 10)]) == [[1], [0]]       # corner touch
+
+
+def test_the_report_describes_the_entity_table(result):
+    scene, rep = result
+    md = report.report_markdown(scene, rep)
+    assert "Fields for the model binding" in md and "probable" in md and "neighbours" in md
+
+
+def test_the_jette_extract_if_it_is_there():
+    ex = ROOT / "cache" / "jette-bbox-extract.json"
+    if not ex.exists():
+        pytest.skip("cache/jette-bbox-extract.json is not in this checkout")
+    scene, rep = build.ingest(ex, bbox=(50.874, 4.325, 50.88, 4.338))
+    assert len(scene["buildings"]) == 2162
+    assert rep["neighbours"]["buildings_with_neighbours"] > 1500 and rep["levels_assumed"] > 1500
+    assert set(b["residential"] for b in scene["buildings"]) == {"residential", "probable", "other"}

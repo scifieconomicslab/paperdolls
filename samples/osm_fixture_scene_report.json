@@ -164,6 +164,41 @@
    1
   ],
   [
+   "residential",
+   "residential: building=terrace: a dwelling type",
+   54
+  ],
+  [
+   "residential",
+   "residential: building=house: a dwelling type",
+   49
+  ],
+  [
+   "residential",
+   "residential: building=apartments: a dwelling type",
+   10
+  ],
+  [
+   "residential",
+   "probable: building=yes with no use tag, 30 m2 or more: probably a dwelling (a guess)",
+   10
+  ],
+  [
+   "residential",
+   "other: building=retail: not a dwelling type",
+   9
+  ],
+  [
+   "residential",
+   "other: building=warehouse: not a dwelling type",
+   1
+  ],
+  [
+   "residential",
+   "other: building=church: not a dwelling type",
+   1
+  ],
+  [
    "storeys",
    "building=house with no levels or height: assumed 2",
    45
@@ -192,6 +227,11 @@
    "courtyards",
    "buildings with inner rings (courtyards): drawn as solid footprints",
    1
+  ],
+  [
+   "neighbours",
+   "buildings within 1 m of each other (edge to edge) are neighbours: 95 buildings have at least one",
+   95
   ],
   [
    "landuse",
@@ -264,5 +304,17 @@
   "tag": 69,
   "type-default": 56,
   "height": 9
+ },
+ "levels_assumed": 56,
+ "residential": {
+  "residential": 113,
+  "other": 11,
+  "probable": 10
+ },
+ "neighbours": {
+  "threshold_m": 1.0,
+  "buildings_with_neighbours": 95,
+  "links": 77,
+  "max_per_building": 3
  }
 }

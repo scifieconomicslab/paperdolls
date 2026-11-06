@@ -50,12 +50,20 @@ Every default the ingest applied. Confirm, or supply better data.
 | archetype | building=warehouse -> shed | 1 |
 | archetype | building=yes with 14 storeys -> tower | 1 |
 | archetype | building=church -> auto (the region decides) | 1 |
+| residential | residential: building=terrace: a dwelling type | 54 |
+| residential | residential: building=house: a dwelling type | 49 |
+| residential | residential: building=apartments: a dwelling type | 10 |
+| residential | probable: building=yes with no use tag, 30 m2 or more: probably a dwelling (a guess) | 10 |
+| residential | other: building=retail: not a dwelling type | 9 |
+| residential | other: building=warehouse: not a dwelling type | 1 |
+| residential | other: building=church: not a dwelling type | 1 |
 | storeys | building=house with no levels or height: assumed 2 | 45 |
 | storeys | building=retail with no levels or height: assumed 2 | 9 |
 | storeys | from height tag at 3.1 m per storey | 9 |
 | storeys | building=warehouse with no levels or height: assumed 1 | 1 |
 | storeys | building=church with no levels or height: assumed 1 | 1 |
 | courtyards | buildings with inner rings (courtyards): drawn as solid footprints | 1 |
+| neighbours | buildings within 1 m of each other (edge to edge) are neighbours: 95 buildings have at least one | 95 |
 | landuse | park from leisure=park | 1 |
 | landuse | water from natural=water | 1 |
 | landuse | square from place=square | 1 |
@@ -79,6 +87,20 @@ Every default the ingest applied. Confirm, or supply better data.
 | height | 9 | 7% |
 
 Storey counts decide building height and, through the region, which archetype a building gets. Where the share from `tag` is low, heights are mostly assumed.
+
+### Fields for the model binding
+
+Each building also carries `area` (m2), `centroid`, `height` (m: the height tag, else storeys x 3.1 m), `levels_assumed` (storeys not read from the data: **56** of 134, 42%), `residential` and `neighbours`.
+
+| residential class | buildings | share |
+|---|---|---|
+| residential | 113 | 84% |
+| probable | 10 | 7% |
+| other | 11 | 8% |
+
+`residential`: a dwelling type (house, terrace, apartments, residential, ...). `probable`: a generic `building=yes` with no use tag and at least 30 m2: probably a dwelling, but a guess. `other`: a non-dwelling type, a use tag (shop, amenity, office, craft, industrial, tourism, healthcare, ...), a shed, or an outbuilding under 30 m2.
+
+`neighbours`: buildings whose footprints touch or come within 1.0 m: 95 buildings have at least one, 77 links, at most 3 for one building.
 
 ## Left out
 

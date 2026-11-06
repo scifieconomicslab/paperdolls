@@ -115,13 +115,15 @@
   if (!check.ok) { problem('This pack does not validate: ' + check.errors.slice(0, 3).join('; ') + (check.errors.length > 3 ? ' (and ' + (check.errors.length - 3) + ' more)' : '')); return; }
   const impl = PaperDolls.getRuntime(MANIFEST.id);
   if (!impl) { problem('The pack’s runtime did not register itself as ' + MANIFEST.id + '.'); return; }
-  const store = PackStore.create(MANIFEST), runtime = PackRuntime.create(MANIFEST, impl);
+  const scene = EMBEDDED_SCENE || V.makePlaceholderScene(7);
+  const bound = PackRuntime.bindScene(MANIFEST, impl, scene);          // the pack builds its entities from the real scene, or { bound: false } when it has no bindScene
+  if (!bound.ok) { problem('This pack could not bind to the scene: ' + bound.error); return; }
+  const store = PackStore.create(MANIFEST), runtime = PackRuntime.create(MANIFEST, impl, { counts: bound.counts, attrs: bound.attrs });
   const ctl = PackHost.createController({ manifest: MANIFEST, runtime, store, schedule: () => setTimeout(() => ctl.flush(), 0) });
 
   // ---- the renderer: the existing one, on the synthetic placeholder unless a scene is embedded ----
   const fam = FAMS.families.find(f => f.id === 'nw'), look = (fam.looks.find(k => k.id === 'brick') || fam.looks[0]).id;
   const theme = A.theme(fam, look, 'colorfigures');
-  const scene = EMBEDDED_SCENE || V.makePlaceholderScene(7);
   const sim = V.createSim(scene, { seed: 11, theme, region: 'nw' });
   const canvas = $('stage'), canvas2 = $('stage2'), ctx = canvas.getContext('2d'), ctx2 = canvas2.getContext('2d'), ctxOf = new Map([[canvas, ctx], [canvas2, ctx2]]);
   const cam = LabCamera.create({ bounds: V.sceneBounds(scene), width: canvas.clientWidth || 1200, height: canvas.clientHeight || 700 });
@@ -137,11 +139,14 @@
     for (const [c, x] of ctxOf) { c.width = canvas.clientWidth * dpr; c.height = canvas.clientHeight * dpr; x.setTransform(dpr, 0, 0, dpr, 0, 0); }
     rf.reset(); rf.anchor(canvas.clientWidth / 2, canvas.clientHeight / 2); cam.resize(canvas.clientWidth || 1200, canvas.clientHeight || 700);
   }
-  const binding = PackHost.bindRenderer({ manifest: MANIFEST, store, controller: ctl, sim });
+  const binding = PackHost.bindRenderer({ manifest: MANIFEST, store, controller: ctl, sim, bound });
   if (!binding.ok) problem('Cannot draw the model on this scene: ' + binding.error);
 
   // ---- the page: banner, controls, legend, timeline ----
-  $('banner').textContent = (MANIFEST.banner || '') + (binding.ok ? ' Placement invented: each model building is drawn on a scene building in a fixed order, so where it stands carries no meaning. People, vehicles and trees are decoration.' : '');
+  const note = !binding.ok ? '' : binding.bound
+    ? ' Each model building stands on the scene building it was made from (' + binding.placed + ' of ' + binding.count + ' placed' + (binding.warnings.length ? '; ' + binding.warnings.join('; ') : '') + '). People, vehicles and trees are decoration.'
+    : ' Placement invented: each model building is drawn on a scene building in a fixed order, so where it stands carries no meaning. People, vehicles and trees are decoration.';
+  $('banner').textContent = (MANIFEST.banner || '') + note;
   const layers = { buildings: true, vehicles: true, people: true };
   let ink = false, pixel = false, fog = false;
   const apply = () => { sim.opts.ink = ink; sim.opts.pixel = pixel ? 1.5 : 0; sim.opts.posterize = pixel ? 12 : 0; sim.opts.fog = fog; };

@@ -1,7 +1,7 @@
 """Fetch an extract from an Overpass endpoint. Standard library only.
 
-Run once against the live Overpass service (a bounding-box query, 2026-11-05) and it worked. It was otherwise tested against a
-local stand-in server (request format, headers, error handling). If the live service answers in a way this does not expect,
+Run against the live Overpass service twice and it worked: a bounding-box query (2026-11-05) and a whole-municipality relation query (Jette, 2026-11-06: 20,249 elements,
+14 MB, 56 s). It was otherwise tested against a local stand-in server (request format, headers, error handling). If the live service answers in a way this does not expect,
 the raw response is kept so the failure can be read."""
 import json
 import urllib.error

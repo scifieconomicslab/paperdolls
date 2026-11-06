@@ -8,10 +8,10 @@ This is the first phase (P1) of the interactive-model work. What works today, an
 
 | Works (P1) | Planned |
 |---|---|
-| `js` runtimes; manifest, schema and validators; store; shell with parameter groups, presets, play/pause/speed/timeline, legend, display switches; `wall` and `overlay` channels; `paperdolls pack check` and `pack build` | frame patching and a worker (P2), binding to real scene buildings (P3), picking and inspector (P4), charts, KPIs, A/B (P5), new channels (P6), terrain (P7), `pyodide` and `remote` runtimes (P9), custom components (P10) |
+| `js` runtimes; manifest, schema and validators; store; shell with parameter groups, presets, play/pause/speed/timeline, legend, display switches; `wall` and `overlay` channels; `paperdolls pack check` and `pack build` | frame patching and a worker (P2), binding to real scene buildings (P3, **done**: see [Binding to the scene](#binding-to-the-scene-bindscene)), picking and inspector (P4), charts, KPIs, A/B (P5), new channels (P6), terrain (P7), `pyodide` and `remote` runtimes (P9), custom components (P10) |
 
-Entities are drawn on scene buildings in a **fixed, invented order** (the same rule as `paperdolls replay`, `Replay.place`): where an entity stands carries no meaning, and
-the page says so. See [`pack-architecture-findings.md`](pack-architecture-findings.md) for how this fits the renderer.
+A pack whose runtime has **no** `bindScene` has its entities drawn on scene buildings in a **fixed, invented order** (the same rule as `paperdolls replay`, `Replay.place`): where an entity stands carries no meaning, and
+the page says so. A pack with `bindScene` makes its entities from the real scene and each stands on the building it came from (below). See [`pack-architecture-findings.md`](pack-architecture-findings.md) for how this fits the renderer.
 
 ```
 packs/toy-epidemic/
@@ -114,7 +114,7 @@ entities:
       exposure: number
 ```
 
-`count` is how many the model makes (`from: scene` is reserved for binding to scene buildings, P3; it validates with a warning). A field is a type name or `{type, ...}`:
+`count` is how many the model makes. `from: scene` says the count comes from the runtime's `bindScene`; `count` is then only the fallback for a runtime or page without one. A field is a type name or `{type, ...}`:
 `category` (needs `values`; the runtime sends the **index** into that list, -1 for no data), `number` (NaN for no data), `int`, `boolean`.
 
 ### `mappings`
@@ -188,13 +188,56 @@ PaperDolls.registerRuntime('toy-epidemic', {
 });
 ```
 
-- `entities` is `{ building: { count: 600, fields: ['state', 'exposure'] } }`.
+- `entities` is `{ building: { count: 600, fields: ['state', 'exposure'] } }`; with `bindScene`, `count` is the bound count and `attrs` is whatever `bindScene` returned for that entity (plain arrays, one value per entity).
 - A **frame** is `{ t, entities: { building: { state: Int8Array(600), exposure: Float32Array(600) } }, series: { counts: [s, e, i, r] } }`. `t` is consecutive from 0. Arrays may be plain arrays or typed arrays and must have the entity's count. A one-value series may be a bare number. Frames must not be reused or mutated afterwards.
 - **Determinism**: the same `(params, seed)` always gives the same frames, and the runtime never uses `Math.random`. Drawing never draws from the model's random generator. `PackRuntime.checkRuntime(manifest, impl)` tests this, and that a restored snapshot carries on exactly as the original did.
 - Errors thrown by the runtime, or a frame that does not match the manifest, are shown in the page header and do not stop the viewer.
 - The runtime runs on the main thread today (the toy re-runs 160 steps of 600 entities in about 30 ms). A worker is P2.
 
 The planned `pyodide` and `remote` runtimes will implement the same six methods.
+
+## Binding to the scene (`bindScene`)
+
+The model's buildings and units are generated **from** the real scene, not placed on it. `bindScene(scene)` is an optional hook of the runtime; the page calls it once, with the scene object it is about to draw, before it creates the runtime.
+
+```js
+bindScene(scene) -> {
+  entities:   { building: { count: 812, attrs: { area: [...], levels: [...], neighbours: [[3, 9], ...] } } },
+  sceneIndex: { building: ['w1018', 'w1019', null, ...] },      // length === count
+}
+```
+
+- `entities.<name>.count` replaces the manifest's `count` (set `from: scene` in the manifest). `attrs` is optional: plain arrays with one value per entity (typed arrays are not cloned into the model), handed to `init` as `entities.<name>.attrs`. Use them for what the model needs from the geometry: area, storeys, whether the storeys were assumed, neighbours as **entity** indices.
+- `sceneIndex.<name>[k]` is the **id** of the scene building that entity *k* stands on, or `null` if it stands on none (a model-only entity: it runs, it is not drawn). A scene building that has no `id` (ids are optional in a scene) is addressed as `"#<index>"`; use `PackRuntime.sceneKey(building, index)` to build the key.
+- Only the entity that has a `wall` or `overlay` mapping is drawn, and a scene building shows one entity of it. Everything below is a **warning**, shown in the page banner, not an error: the model runs and those entities are not drawn.
+  an id the scene does not have (a stale pack against another scene); a second entity naming a building an earlier one already holds (the first wins).
+- A malformed result (not an object, an entity not in the manifest, `sceneIndex` length not equal to `count`, an id that is neither a string, a number nor `null`) is an **error**, shown as "This pack could not bind to the scene: ...", and nothing is drawn. An exception thrown by `bindScene` is the same.
+- It must be deterministic: the same scene gives the same result. It sees the scene only, never the model's parameters, so moving a slider never re-binds.
+- `PackRuntime.bindScene(manifest, impl, scene)` is the adapter call: it validates the result and returns `{ ok, bound, error?, warnings, counts, attrs, pos }`, where `pos.<name>` is an `Int32Array` holding each entity's index in `scene.buildings` (-1 for none). A runtime without the hook gives `{ ok: true, bound: false }` and the page falls back to the invented order. `PackHost.bindRenderer({ ..., bound })` takes that result.
+
+The reference implementation is in `packs/toy-epidemic/runtime.js`: one entity per residential building (`residential` is `residential` or `probable`; a scene without the class counts every non-shed building).
+
+### What the scene carries per building
+
+`paperdolls ingest` (version 0.2.0 and later) writes these optional fields on every building. Old scenes without them still validate and draw; `validateScene` checks them only when present, and a `neighbours` id that names no building is a warning.
+
+| Field | |
+|---|---|
+| `area` | Footprint area, m² (outer ring; courtyards are not subtracted). |
+| `centroid` | `[x, y]`, area-weighted, in the scene frame. |
+| `height` | Metres: the OSM `height` tag when there is one, else `levels` × 3.1 m. |
+| `levels_assumed` | `true` when the storey count was **not** read from the data: `osm.levels_source` is `type-default` or `global-default`. `tag` and `height` are `false`. |
+| `residential` | `residential`, `probable` or `other`. The rule is below. |
+| `neighbours` | Ids of buildings whose footprints touch, overlap or come within **1.0 m** edge to edge (`ingest/adjacency.py`, `NEIGHBOUR_M`). Symmetric, never the building itself. Terraced houses in OSM touch or sit 0.1 to 0.5 m apart, which is what the threshold is for; a street (about 5 m or more) is never crossed. Found with a 12 m spatial grid, so the cost is near-linear in the number of buildings. |
+
+**Residential rule** (`classify.residential_class`; first match wins; the ingest report counts each outcome as an assumption and prints the shares):
+
+1. `building` is a dwelling type (house, detached, semidetached_house, terrace, row_house, residential, apartments, bungalow, villa, cabin, dormitory, duplex, flats, townhouse, ...): `residential`.
+2. `building` is a non-dwelling type (commercial, retail, office, industrial, warehouse, garage(s), school, hospital, church and other religious, hotel, parking, ...): `other`.
+3. The feature carries a use tag (`shop`, `amenity`, `office`, `craft`, `industrial`, `tourism`, `healthcare`, `leisure`, `man_made`, `public_transport`, `railway`, `power`): `other`.
+4. Any other named type (clubhouse, museum, brewery, ...), which is not a dwelling: `other`.
+5. The archetype is `shed`, or the footprint is under 30 m²: `other` (outbuildings).
+6. What is left is a generic `building=yes` (or no value) with no use tag: `probable`. **This is a guess.** In Brussels most dwellings are mapped as `building=yes`, so `probable` is the largest class; the pack decides whether to include it.
 
 ## Store
 
