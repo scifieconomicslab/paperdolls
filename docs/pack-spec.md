@@ -22,7 +22,10 @@ packs/toy-epidemic/
 ```bash
 paperdolls pack check packs/toy-epidemic                 # validate; exit 1 on errors
 paperdolls pack build packs/toy-epidemic --out toy.html  # one self-contained page; add --scene scene.json for a real place
+paperdolls pack dev packs/toy-epidemic --scene scene.json # local server on 127.0.0.1 that reloads when pack.yaml, runtime.js or bind.js change
 ```
+
+`pack check` also runs the runtime (determinism, frames against the manifest, parity with a Python reference) and `pack build` embeds and, if needed, trims a large scene: see [`pack-authoring.md`](pack-authoring.md), the working guide.
 
 The built page is a single offline HTML file: no network, no framework, every script inlined (the same property as `viewer_built.html`).
 
@@ -272,12 +275,12 @@ point, to read the store's bound arrays, and `sim.frameVersion` to follow the st
 1. Copy `packs/toy-epidemic/`. Change `id` in `pack.yaml` and in `registerRuntime`.
 2. Declare your parameters, entities (with their fields), mappings and series; `paperdolls pack check packs/yours` tells you what is missing.
 3. Make `init` and `step` return frames in the shape above. Run `PackRuntime.checkRuntime` on it (see `viz/test_pack.js`).
-4. `paperdolls pack build packs/yours --out yours.html` and open the file.
+4. `paperdolls pack dev packs/yours` while you work, `paperdolls pack build packs/yours --out yours.html` to send it. The step-by-step version is [`pack-authoring.md`](pack-authoring.md).
 
-## Not covered by `pack check` yet
+## What `pack check` covers
 
-It validates the manifest and that the runtime file exists. It does not run the runtime (determinism, frame shape, JS-versus-Python parity); the pieces exist
-(`PackRuntime.checkRuntime`) and are exercised by the toy pack's tests, but need a JS engine, so the command stays a manifest check until the `pyodide`/`remote` work (P9).
+The manifest, the references between its parts, and (with node) the runtime run: determinism, frames against the declared entities and series, snapshot/restore, binding to a scene, parameter extremes, and optionally parity with a Python reference
+(`--runtime-parity`). Details, the parity case and golden formats and the exit codes are in [`pack-authoring.md`](pack-authoring.md). The `pyodide` and `remote` runtimes are designed for in the adapter interface above and are not built: `check` says it did not run them.
 
 ## Rendering a live model (P2)
 
