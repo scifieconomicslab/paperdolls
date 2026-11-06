@@ -15,7 +15,9 @@
   const CHANNELS = ['wall', 'overlay'], PLANNED_CHANNELS = ['segments', 'height', 'outline', 'halo', 'insulation', 'ground'];
   const OVERLAYS = ['scaffold', 'solar', 'band', 'marker'];
   const REGIONS = ['left', 'right', 'bottom'];
-  const CONTROLS = ['params', 'presets', 'timeline', 'legend', 'display'], PLANNED_ITEMS = ['chart', 'kpis', 'table'];
+  const CONTROLS = ['params', 'presets', 'compare', 'timeline', 'legend', 'display'], PLANNED_ITEMS = ['table'], ITEM_KINDS = ['control', 'chart', 'kpis', 'table'];
+  const CHART_TYPES = ['line', 'area', 'bar'], DISPLAY_IDS = ['people', 'vehicles', 'ink', 'pixel', 'fog'], KPI_AT = ['now', 'final', 'max', 'min'];
+  const ITEM_KEYS = { control: ['control', 'groups', 'items'], chart: ['chart', 'series', 'y', 'title', 'unit', 'x', 'compare'], kpis: ['kpis', 'title'], table: ['table', 'series'] };
   const TOP = ['spec', 'id', 'title', 'description', 'runtime', 'time', 'params', 'presets', 'entities', 'mappings', 'series', 'layout', 'banner'];
 
   const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -213,14 +215,50 @@
         items.forEach((it, i) => {
           const iat = at + '[' + i + ']';
           if (!isObj(it)) { err(iat, 'must be a mapping'); return; }
-          const kind = ['control', ...PLANNED_ITEMS].filter(k => it[k] !== undefined);
+          const kind = ITEM_KINDS.filter(k => it[k] !== undefined);
           if (kind.length !== 1) { err(iat, 'needs exactly one of control, chart, kpis, table'); return; }
+          for (const k of Object.keys(it)) if (!ITEM_KEYS[kind[0]].includes(k)) err(iat + '.' + k, 'unknown key for a ' + kind[0] + ' component');
+          if (kind[0] === 'chart') {
+            if (!CHART_TYPES.includes(it.chart)) err(iat + '.chart', 'must be one of ' + CHART_TYPES.join(', '));
+            const sr = isStr(it.series) ? series[it.series] : undefined;
+            if (!isStr(it.series)) err(iat + '.series', 'required: the series to draw'); else if (!sr) err(iat + '.series', 'unknown series ' + it.series);
+            if (it.y !== undefined) {
+              if (!Array.isArray(it.y) || !it.y.length || !it.y.every(isStr) || new Set(it.y).size !== it.y.length) err(iat + '.y', 'must be a list of unique value names from the series');
+              else if (sr && Array.isArray(sr.y)) for (const n of it.y) if (!sr.y.includes(n)) err(iat + '.y', 'no value ' + n + ' in series ' + it.series + ' (' + sr.y.join(', ') + ')');
+            }
+            for (const k of ['title', 'unit', 'x']) if (it[k] !== undefined && !isStr(it[k])) err(iat + '.' + k, 'must be a non-empty string');
+            if (it.compare !== undefined && typeof it.compare !== 'boolean') err(iat + '.compare', 'must be true or false');
+            return;
+          }
+          if (kind[0] === 'kpis') {
+            if (it.title !== undefined && !isStr(it.title)) err(iat + '.title', 'must be a non-empty string');
+            if (!Array.isArray(it.kpis) || !it.kpis.length) { err(iat + '.kpis', 'must be a non-empty list of tiles'); return; }
+            it.kpis.forEach((k, j) => {
+              const kat = iat + '.kpis[' + j + ']';
+              if (!isObj(k)) { err(kat, 'must be a mapping'); return; }
+              for (const key of Object.keys(k)) if (!['label', 'series', 'y', 'at', 'unit', 'decimals'].includes(key)) err(kat + '.' + key, 'unknown key');
+              if (!isStr(k.label)) err(kat + '.label', 'required: the tile text');
+              const sr = isStr(k.series) ? series[k.series] : undefined;
+              if (!isStr(k.series)) err(kat + '.series', 'required'); else if (!sr) err(kat + '.series', 'unknown series ' + k.series);
+              if (k.y !== undefined && !isStr(k.y)) err(kat + '.y', 'must be a value name from the series');
+              else if (sr && Array.isArray(sr.y)) { if (k.y === undefined && sr.y.length > 1) err(kat + '.y', 'required: series ' + k.series + ' has several values (' + sr.y.join(', ') + ')'); else if (k.y !== undefined && !sr.y.includes(k.y)) err(kat + '.y', 'no value ' + k.y + ' in series ' + k.series + ' (' + sr.y.join(', ') + ')'); }
+              if (k.at !== undefined && !KPI_AT.includes(k.at)) err(kat + '.at', 'must be one of ' + KPI_AT.join(', '));
+              if (k.unit !== undefined && !isStr(k.unit)) err(kat + '.unit', 'must be a non-empty string');
+              if (k.decimals !== undefined && !(isInt(k.decimals) && k.decimals >= 0 && k.decimals <= 6)) err(kat + '.decimals', 'must be a whole number from 0 to 6');
+            });
+            return;
+          }
           if (kind[0] !== 'control') { warn(iat, kind[0] + ' components are planned and are not drawn yet'); if (it.series !== undefined && !series[it.series]) err(iat + '.series', 'unknown series ' + it.series); return; }
           if (!CONTROLS.includes(it.control)) { err(iat + '.control', 'must be one of ' + CONTROLS.join(', ')); return; }
           if (it.groups !== undefined) {
             if (it.control !== 'params') err(iat + '.groups', 'only the params control has groups');
             else if (!Array.isArray(it.groups)) err(iat + '.groups', 'must be a list of group names');
             else for (const g of it.groups) if (!groups.includes(g)) err(iat + '.groups', 'no parameter is in group ' + g + ' (groups: ' + (groups.join(', ') || 'none') + ')');
+          }
+          if (it.items !== undefined) {
+            if (it.control !== 'display') err(iat + '.items', 'only the display control has items');
+            else if (!Array.isArray(it.items) || new Set(it.items).size !== it.items.length) err(iat + '.items', 'must be a list of unique switch names (' + DISPLAY_IDS.join(', ') + ')');
+            else for (const n of it.items) if (!DISPLAY_IDS.includes(n)) err(iat + '.items', 'unknown switch ' + n + ' (' + DISPLAY_IDS.join(', ') + ')');
           }
         });
       }
@@ -230,6 +268,6 @@
     return { ok: errors.length === 0, errors, warnings };
   }
 
-  root.PackSpec = { validate, checkValue, enumValues, CHANNELS, OVERLAYS };
+  root.PackSpec = { validate, checkValue, enumValues, CHANNELS, OVERLAYS, CHART_TYPES, DISPLAY_IDS, KPI_AT };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.PackSpec;
 })(typeof window !== 'undefined' ? window : globalThis);

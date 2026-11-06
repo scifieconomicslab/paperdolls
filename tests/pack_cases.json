@@ -796,7 +796,7 @@
    "warnings": []
   },
   {
-   "name": "a chart is planned and must name a real series",
+   "name": "a chart must name a real series",
    "patch": {
     "layout.right": [
      {
@@ -808,8 +808,333 @@
    "errors": [
     "layout.right[0].series: unknown series ghost"
    ],
+   "warnings": []
+  },
+  {
+   "name": "a chart type must be known",
+   "patch": {
+    "layout.right": [
+     {
+      "chart": "pie",
+      "series": "totals"
+     }
+    ]
+   },
+   "errors": [
+    "layout.right[0].chart: must be one of line, area, bar"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a chart needs a series",
+   "patch": {
+    "layout.right": [
+     {
+      "chart": "line"
+     }
+    ]
+   },
+   "errors": [
+    "layout.right[0].series: required"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a chart may draw some of the values of its series",
+   "patch": {
+    "layout.right": [
+     {
+      "chart": "area",
+      "series": "totals",
+      "y": [
+       "a"
+      ],
+      "title": "T",
+      "unit": "u",
+      "x": "Day",
+      "compare": false
+     }
+    ]
+   },
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "a chart value must be in the series",
+   "patch": {
+    "layout.right": [
+     {
+      "chart": "bar",
+      "series": "totals",
+      "y": [
+       "a",
+       "zz"
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "layout.right[0].y: no value zz in series totals (a, b)"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a chart title must be text",
+   "patch": {
+    "layout.right": [
+     {
+      "chart": "line",
+      "series": "totals",
+      "title": 3
+     }
+    ]
+   },
+   "errors": [
+    "layout.right[0].title: must be a non-empty string"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a chart item has no stray keys",
+   "patch": {
+    "layout.right": [
+     {
+      "chart": "line",
+      "series": "totals",
+      "colour": "red"
+     }
+    ]
+   },
+   "errors": [
+    "layout.right[0].colour: unknown key for a chart component"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "kpi tiles read a series",
+   "patch": {
+    "layout.bottom": [
+     {
+      "kpis": [
+       {
+        "label": "A now",
+        "series": "totals",
+        "y": "a"
+       },
+       {
+        "label": "B end",
+        "series": "totals",
+        "y": "b",
+        "at": "final",
+        "unit": "u",
+        "decimals": 1
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "a kpi tile needs a label",
+   "patch": {
+    "layout.bottom": [
+     {
+      "kpis": [
+       {
+        "series": "totals",
+        "y": "a"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "layout.bottom[0].kpis[0].label: required"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a kpi tile must name a real series",
+   "patch": {
+    "layout.bottom": [
+     {
+      "kpis": [
+       {
+        "label": "X",
+        "series": "ghost",
+        "y": "a"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "layout.bottom[0].kpis[0].series: unknown series ghost"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a kpi tile of a many-valued series needs y",
+   "patch": {
+    "layout.bottom": [
+     {
+      "kpis": [
+       {
+        "label": "X",
+        "series": "totals"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "layout.bottom[0].kpis[0].y: required: series totals has several values"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a kpi y must be in the series",
+   "patch": {
+    "layout.bottom": [
+     {
+      "kpis": [
+       {
+        "label": "X",
+        "series": "totals",
+        "y": "q"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "layout.bottom[0].kpis[0].y: no value q in series totals"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a kpi reading must be known",
+   "patch": {
+    "layout.bottom": [
+     {
+      "kpis": [
+       {
+        "label": "X",
+        "series": "totals",
+        "y": "a",
+        "at": "median"
+       }
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "layout.bottom[0].kpis[0].at: must be one of now, final, max, min"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "kpis may not be empty",
+   "patch": {
+    "layout.bottom": [
+     {
+      "kpis": []
+     }
+    ]
+   },
+   "errors": [
+    "layout.bottom[0].kpis: must be a non-empty list of tiles"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "the compare control is known",
+   "patch": {
+    "layout.left": [
+     {
+      "control": "params"
+     },
+     {
+      "control": "compare"
+     }
+    ]
+   },
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "the display control may reduce and reorder the switches",
+   "patch": {
+    "layout.right": [
+     {
+      "control": "display",
+      "items": [
+       "fog",
+       "ink"
+      ]
+     }
+    ]
+   },
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "a display switch must be known",
+   "patch": {
+    "layout.right": [
+     {
+      "control": "display",
+      "items": [
+       "ink",
+       "sparkle"
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "layout.right[0].items: unknown switch sparkle"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "only display has items",
+   "patch": {
+    "layout.left": [
+     {
+      "control": "params",
+      "items": [
+       "ink"
+      ]
+     }
+    ]
+   },
+   "errors": [
+    "layout.left[0].items: only the display control has items"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a table is still planned",
+   "patch": {
+    "layout.right": [
+     {
+      "table": "x",
+      "series": "totals"
+     }
+    ]
+   },
+   "errors": [],
    "warnings": [
-    "layout.right[0]: chart components are planned"
+    "layout.right[0]: table components are planned"
    ]
   },
   {
