@@ -13,13 +13,13 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
   function create(opts) {
-    opts = Object.assign({ bounds: [0, 0, 100, 100], width: 1200, height: 700, maxScale: 32, margin: 0.2, fitMargin: 0.06, minFactor: 0.85 }, opts || {});
+    opts = Object.assign({ bounds: [0, 0, 100, 100], width: 1200, height: 700, maxScale: 32, margin: 0.2, fitMargin: 0.06, minFactor: 0.85, zmax: 0 }, opts || {});
     const cam = { cx: 0, cy: 0, scale: 1, w: opts.width, h: opts.height, fit: 1, minScale: 1, maxScale: opts.maxScale, bounds: opts.bounds.slice() };
 
     // The scale that shows the whole scene. An isometric box of ground (dx by dy metres) is (dx + dy) * cos30 wide and (dx + dy) / 2 tall.
     function computeFit() {
       const B = cam.bounds, S = (B[2] - B[0]) + (B[3] - B[1]);
-      cam.fit = Math.max(1e-4, Math.min((cam.w * (1 - opts.fitMargin)) / (S * C30 + 1), (cam.h * (1 - opts.fitMargin)) / (S * 0.5 + 1)));
+      cam.fit = Math.max(1e-4, Math.min((cam.w * (1 - opts.fitMargin)) / (S * C30 + 1), (cam.h * (1 - opts.fitMargin)) / (S * 0.5 + opts.zmax + 1)));
       cam.minScale = cam.fit * opts.minFactor;
       if (cam.maxScale < cam.minScale * 2) cam.maxScale = cam.minScale * 2;
     }
@@ -61,7 +61,9 @@
     cam.zoomFraction = function () { return Math.log(cam.scale / cam.minScale) / Math.log(cam.maxScale / cam.minScale); };
     cam.setZoomFraction = function (t) { return cam.zoomTo(cam.minScale * Math.pow(cam.maxScale / cam.minScale, clamp(t, 0, 1))); };
 
-    cam.fitAll = function () { const B = cam.bounds; cam.cx = (B[0] + B[2]) / 2; cam.cy = (B[1] + B[3]) / 2; cam.scale = cam.fit; return cam; };
+    cam.fitAll = function () { const B = cam.bounds, d = opts.zmax / 2; cam.cx = (B[0] + B[2]) / 2 - d; cam.cy = (B[1] + B[3]) / 2 - d; cam.scale = cam.fit; return cam; };   // a point z metres up is drawn where the ground point (x - z, y - z) is: the hills stretch the picture upward, so aim half the relief up the screen
+    // The tallest ground in the scene, in metres (terrain): the fit leaves room for it above the map and fitAll centres the map and its hills together.
+    cam.setRelief = function (zmax) { opts.zmax = Math.max(0, zmax || 0); computeFit(); return cam; };
     cam.setBounds = function (bounds) { cam.bounds = bounds.slice(); computeFit(); return cam.fitAll(); };
     // The canvas changed size: keep the same ground point at the middle, and keep the scale unless it now falls outside the limits.
     cam.resize = function (w, h) { cam.w = w; cam.h = h; computeFit(); cam.scale = clamp(cam.scale, cam.minScale, cam.maxScale); clampCentre(); return cam; };

@@ -1579,6 +1579,23 @@
     const k = view.scale;
     return [view.ox + (x - y) * k * C30, view.oy + (x + y) * k * 0.5 - z * k];
   }
+  // ---------- terrain (optional) ----------
+  // scene.terrain = { x0, y0, dx, dy, nx, ny, z: [nx * ny heights in metres, row-major: row j is y = y0 + j * dy] } is a regular height grid. Buildings, road
+  // vertices and trees may also carry their own z (metres): b.z, road.z = [one per point], tree = [x, y, kind, scale, z]. An explicit z wins over the grid;
+  // with neither, z is 0 and the picture is what it was before terrain existed. sim.opts.relief scales every height (1 = true, 0 = relief shading only, no
+  // vertical offset, 3 = exaggerated), and is baked in when the sim is created, so everything downstream just uses e.z.
+  function makeTerrain(t) {
+    const z = Float32Array.from(t.z); let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < z.length; i++) { if (z[i] < lo) lo = z[i]; if (z[i] > hi) hi = z[i]; }
+    const T = { x0: t.x0, y0: t.y0, dx: t.dx, dy: t.dy, nx: t.nx, ny: t.ny, z, lo, hi };
+    T.at = function (x, y) {                                   // bilinear, clamped to the grid (heights in metres, unscaled)
+      let u = (x - T.x0) / T.dx, v = (y - T.y0) / T.dy;
+      u = u < 0 ? 0 : (u > T.nx - 1 ? T.nx - 1 : u); v = v < 0 ? 0 : (v > T.ny - 1 ? T.ny - 1 : v);
+      const i = Math.min(T.nx - 2, Math.floor(u)), j = Math.min(T.ny - 2, Math.floor(v)), fu = u - i, fv = v - j, k = j * T.nx + i;
+      return (z[k] * (1 - fu) + z[k + 1] * fu) * (1 - fv) + (z[k + T.nx] * (1 - fu) + z[k + T.nx + 1] * fu) * fv;
+    };
+    return T;
+  }
   // view direction (toward the camera), used for face visibility
   const VIEW = [1, 1, 1.2];
 
@@ -1812,7 +1829,10 @@
     scene.roads.forEach((r, i) => {
       if (!r || !LIB.roads[r.class]) bad('road ' + i + ': unknown class ' + (r && r.class));
       else if (!Array.isArray(r.pts) || r.pts.length < 2 || !r.pts.every(pt)) bad('road ' + i + ' (' + r.id + '): needs at least two [x, y] points');
-      else for (const k of ['width', 'pavement']) if (r[k] !== undefined && r[k] !== null && !(num(r[k]) && r[k] >= 0 && r[k] < 100)) bad('road ' + i + ': bad ' + k);
+      else {
+        for (const k of ['width', 'pavement']) if (r[k] !== undefined && r[k] !== null && !(num(r[k]) && r[k] >= 0 && r[k] < 100)) bad('road ' + i + ': bad ' + k);
+        if (r.z !== undefined && !(Array.isArray(r.z) && r.z.length === r.pts.length && r.z.every(num))) bad('road ' + i + ' (' + r.id + '): z must list one height in metres per point');
+      }
     });
     const ids = new Set();
     scene.buildings.forEach((b, i) => {
@@ -1821,6 +1841,7 @@
       if (b.archetype !== undefined && b.archetype !== 'auto' && !A.ARCH[b.archetype]) bad('building ' + i + ': unknown archetype ' + b.archetype);
       if (b.id !== undefined) { if (ids.has(b.id)) bad('building id ' + b.id + ' appears twice'); ids.add(b.id); }
       // optional fields written by the ingest (scene entity table); old scenes without them stay valid
+      if (b.z !== undefined && !num(b.z)) bad('building ' + i + ' (' + b.id + '): z must be a number of metres');
       if (b.area !== undefined && !(num(b.area) && b.area >= 0)) bad('building ' + i + ' (' + b.id + '): area must be a number of at least 0');
       if (b.centroid !== undefined && !pt(b.centroid)) bad('building ' + i + ' (' + b.id + '): centroid must be [x, y]');
       if (b.height !== undefined && !(num(b.height) && b.height > 0)) bad('building ' + i + ' (' + b.id + '): height must be a number above 0');
@@ -1832,7 +1853,12 @@
     scene.buildings.forEach(b => { if (b && Array.isArray(b.neighbours)) for (const n of b.neighbours) if (!ids.has(n)) dangling++; });
     if (dangling) warnings.push(dangling + ' neighbour id(s) name no building in the scene');
     scene.landuse.forEach((l, i) => { if (!l || !['park', 'garden', 'square', 'water'].includes(l.kind)) bad('landuse ' + i + ': unknown kind ' + (l && l.kind)); else if (!Array.isArray(l.footprint) || l.footprint.length < 3 || !l.footprint.every(pt)) bad('landuse ' + i + ': needs a footprint'); });
-    scene.trees.forEach((t, i) => { if (!pt(t)) bad('tree ' + i + ': needs [x, y]'); else if (t[2] && !A.TREES[t[2]]) bad('tree ' + i + ': unknown kind ' + t[2]); else if (t[3] !== undefined && t[3] !== null && !(num(t[3]) && t[3] > 0)) bad('tree ' + i + ': bad scale'); });
+    scene.trees.forEach((t, i) => { if (!pt(t)) bad('tree ' + i + ': needs [x, y]'); else if (t[2] && !A.TREES[t[2]]) bad('tree ' + i + ': unknown kind ' + t[2]); else if (t[3] !== undefined && t[3] !== null && !(num(t[3]) && t[3] > 0)) bad('tree ' + i + ': bad scale'); else if (t[4] !== undefined && t[4] !== null && !num(t[4])) bad('tree ' + i + ': z must be a number of metres'); });
+    if (scene.terrain !== undefined && scene.terrain !== null) {
+      const t = scene.terrain;
+      if (!(t && num(t.x0) && num(t.y0) && num(t.dx) && num(t.dy) && t.dx > 0 && t.dy > 0 && Number.isInteger(t.nx) && Number.isInteger(t.ny) && t.nx >= 2 && t.ny >= 2 && Array.isArray(t.z) && t.z.length === t.nx * t.ny && t.z.every(num)))
+        bad('terrain must be { x0, y0, dx, dy, nx, ny, z } with nx * ny heights in metres (nx and ny at least 2)');
+    }
     const B = sceneBounds(scene);
     if (B[2] - B[0] > 20000 || B[3] - B[1] > 20000) warnings.push('the scene is more than 20 km across: expect it to be slow');
     if (scene.buildings.length > 30000) warnings.push(scene.buildings.length + ' buildings: expect it to be slow');
@@ -1855,7 +1881,7 @@
         const na = node(ax, ay), nb = node(bx, by);
         const len = Math.hypot(bx - ax, by - ay);
         if (len < 0.1) continue;
-        const e = { id: edges.length, a: na, b: nb, ax, ay, bx, by, len, cls: r.class, width: cls.width, pavement: cls.pavement,
+        const e = { id: edges.length, a: na, b: nb, ax, ay, bx, by, az: r.z ? r.z[i] : undefined, bz: r.z ? r.z[i + 1] : undefined, len, cls: r.class, width: cls.width, pavement: cls.pavement,
                     tram: !!cls.tram, cycle: !!cls.cycle, roadId: r.id, centre: cls.centre };
         edges.push(e); na.edges.push(e); nb.edges.push(e);
       }
@@ -1964,11 +1990,16 @@
     // Buildings are entities too: each carries its footprint fit and, when the footprint fits an asset slot, its asset parameters.
     if (!A.fitFootprint) throw new Error('buildinglib.js must be loaded before vizlib.js');
     const stats = { buildings: scene.buildings.length, assets: 0, extruded: 0, reasons: {} };
+    const relief = opts.relief === undefined ? 1 : +opts.relief, T = scene.terrain ? makeTerrain(scene.terrain) : null;     // heights are baked in here, scaled by opts.relief
+    let zmax = 0;
+    for (const r of scene.roads) if (r.z) for (const z of r.z) zmax = Math.max(zmax, z * relief);
+    if (T) zmax = Math.max(zmax, T.hi * relief);
     const rIdx = A.roadIndex(scene.roads);                       // a spatial index, so a city of tens of thousands of buildings stays fast
     const buildings = scene.buildings.map(b => {
       const fit = A.fitFootprint(b.footprint, rIdx), seed = A.hashStr(String(b.id)) ^ opts.seed;
       const kind = (b.archetype && b.archetype !== 'auto' && A.ARCH[b.archetype]) ? b.archetype : A.pickArchetype(opts.region, b.levels, A.hash(seed + 5));
-      const e = { src: b, id: b.id, group: 'buildings', kind, seed, fit, params: fit.ok ? A.buildingParams(opts.region, kind, b.levels, fit, seed) : null,
+      const bz = (b.z !== undefined ? b.z : (T ? T.at(fit.cx, fit.cy) : 0)) * relief; if (bz > zmax) zmax = bz;
+      const e = { src: b, id: b.id, group: 'buildings', kind, seed, fit, z: bz, params: fit.ok ? A.buildingParams(opts.region, kind, b.levels, fit, seed) : null,
                   get state() { return b.state; }, get investor() { return b.investor; }, get levels() { return b.levels; } };
       if (e.params && opts.detail) e.params.fs = Object.assign({}, e.params.fs, { rich: true });   // opt-in detail: roof clutter and varied glazing
       if (e.params) stats.assets++; else { stats.extruded++; stats.reasons[fit.reason] = (stats.reasons[fit.reason] || 0) + 1; }
@@ -1978,9 +2009,11 @@
     if (!A.pickTree) throw new Error('treelib.js must be loaded before vizlib.js');
     const trees = scene.trees.map((t, i) => {
       const seed = A.hashStr('t' + i) ^ opts.seed, tp = A.treeParams(seed), fixed = !!(t[2] && A.TREES[t[2]]);
-      return { id: 't' + i, group: 'trees', x: t[0], y: t[1], seed, v: tp.v, s: t[3] || tp.s, fixed, kind: fixed ? t[2] : A.pickTree(opts.region, A.hash(seed + 1), th) };
+      const tz = (t[4] !== undefined && t[4] !== null ? t[4] : (T ? T.at(t[0], t[1]) : 0)) * relief; if (tz > zmax) zmax = tz;
+      return { id: 't' + i, group: 'trees', x: t[0], y: t[1], z: tz, seed, v: tp.v, s: t[3] || tp.s, fixed, kind: fixed ? t[2] : A.pickTree(opts.region, A.hash(seed + 1), th) };
     });
-    return { scene, net, agents, buildings, trees, stats, rng: R, time: 0, opts, theme: th, palette: th, bindings: [], buildingStyle: null, warnings: check.warnings, density };
+    return { scene, net, agents, buildings, trees, stats, rng: R, time: 0, opts, theme: th, palette: th, bindings: [], buildingStyle: null, warnings: check.warnings, density,
+             terrain: T, relief, zmax };
   }
 
   // Swap the theme (register, look) on a running sim: agents are redressed from their stored seeds, so nothing respawns.
@@ -2081,7 +2114,7 @@
 
   // position and heading of an agent in world coordinates
   function agentPose(a, sim) {
-    if (a.pose) return Object.assign({ dx: Math.cos(a.pose.heading), dy: Math.sin(a.pose.heading) }, a.pose);
+    if (a.pose) return Object.assign({ dx: Math.cos(a.pose.heading), dy: Math.sin(a.pose.heading), z: 0 }, a.pose);
     const e = a.edge;
     const t = Math.max(0, Math.min(1, a.s / e.len));
     const x = e.ax + (e.bx - e.ax) * t, y = e.ay + (e.by - e.ay) * t;
@@ -2094,7 +2127,9 @@
     else if (a.network === 'cycle') off = e.width * 0.3 * driveSign;
     else if (a.network === 'rail') off = 0;
     else off = e.width * 0.22 * driveSign;
-    return { x: x - dy * off, y: y + dx * off, heading, dx, dy };
+    let z = 0;                                                     // on the road's own heights if it has them, else on the terrain
+    if (e.az !== undefined && sim) z = (e.az + (e.bz - e.az) * t) * sim.relief; else if (sim && sim.terrain) z = sim.terrain.at(x, y) * sim.relief;
+    return { x: x - dy * off, y: y + dx * off, heading, dx, dy, z };
   }
 
   // ---------- rendering ----------
@@ -2107,15 +2142,27 @@
     return (scene._bounds = [x0 - 30, y0 - 30, x1 + 30, y1 + 30]);
   }
 
+  // The tallest ground in a scene, in metres (from its terrain grid and its own z values; 0 for a scene without terrain). The camera leaves room for it.
+  function sceneRelief(scene) {
+    let m = 0;
+    if (scene.terrain && Array.isArray(scene.terrain.z)) for (const z of scene.terrain.z) if (z > m) m = z;
+    for (const b of scene.buildings) if (b.z > m) m = b.z;
+    for (const r of scene.roads) if (r.z) for (const z of r.z) if (z > m) m = z;
+    return m;
+  }
+
   // Ground: a base plane (plots and gardens), a faint grid in the formal register, landuse, then roads with a surface
   // (asphalt, concrete joints, setts, earth tracks) and markings. Surface detail is drawn only when it can be seen.
   // The ground is painted in steps: a generator that yields between landuse polygons and roads, so a layer repaint can be spread over frames
   // (see worldLayer). drawGround runs it to the end.
-  function drawGround(ctx, view, scene, th, reg) { for (const _ of drawGroundSteps(ctx, view, scene, th, reg)); }
-  function* drawGroundSteps(ctx, view, scene, th, reg) {
-    const lod = view.scale >= 4, B = sceneBounds(scene), P = (x, y) => proj(view, x, y, 0);
-    poly(ctx, [[B[0], B[1]], [B[2], B[1]], [B[2], B[3]], [B[0], B[3]]].map(p => P(p[0], p[1])), th.ground, null, 0);
-    if (th.grid && view.scale >= 0.8) {
+  function drawGround(ctx, view, scene, th, reg, G) { for (const _ of drawGroundSteps(ctx, view, scene, th, reg, G)); }
+  // G, when the sim has terrain: { T (the height grid), relief }. Without it (or with nothing to lift) the ground is drawn flat, as it always was.
+  function* drawGroundSteps(ctx, view, scene, th, reg, G) {
+    const lod = view.scale >= 4, B = sceneBounds(scene), T = G && G.T, rl = G ? G.relief : 0, lifted = !!T && rl !== 0;
+    const P0 = lifted ? (x, y) => proj(view, x, y, T.at(x, y) * rl) : (x, y) => proj(view, x, y, 0), P = P0;
+    const reliefCv = T ? yield* drawTerrain(ctx, view, T, rl, th, B) : null;
+    if (!T) poly(ctx, [[B[0], B[1]], [B[2], B[1]], [B[2], B[3]], [B[0], B[3]]].map(p => P(p[0], p[1])), th.ground, null, 0);
+    if (th.grid && view.scale >= 0.8 && !T) {
       ctx.strokeStyle = th.grid; ctx.lineWidth = 0.6; const g = 20;
       for (let x = Math.ceil(B[0] / g) * g; x <= B[2]; x += g) { const a = P(x, B[1]), b = P(x, B[3]); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
       for (let y = Math.ceil(B[1] / g) * g; y <= B[3]; y += g) { const a = P(B[0], y), b = P(B[2], y); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
@@ -2134,6 +2181,9 @@
         const [ax, ay] = r.pts[i], [bx, by] = r.pts[i + 1];
         const L = Math.hypot(bx - ax, by - ay); if (L < 0.1) continue;
         const ux = (bx - ax) / L, uy = (by - ay) / L, nx = -uy, ny = ux;
+        // a road's height runs along its centre line (its own z per point, else the terrain's), and is the same across it
+        const za = r.z ? r.z[i] * (G ? G.relief : 1) : (lifted ? T.at(ax, ay) * rl : 0), zb = r.z ? r.z[i + 1] * (G ? G.relief : 1) : (lifted ? T.at(bx, by) * rl : 0);
+        const P = (za === 0 && zb === 0) ? P0 : (x, y) => { const t = ((x - ax) * ux + (y - ay) * uy) / L; return proj(view, x, y, za + (zb - za) * (t < 0 ? 0 : (t > 1 ? 1 : t))); };
         const hw = cls.width / 2 + cls.pavement, hr = cls.width / 2;
         if (cls.pavement > 0) poly(ctx, [[ax + nx * hw, ay + ny * hw], [bx + nx * hw, by + ny * hw], [bx - nx * hw, by - ny * hw], [ax - nx * hw, ay - ny * hw]].map(p => P(p[0], p[1])), th.pave, null, 0);
         const isTrack = r.class === 'cycle', ped = r.class === 'pedestrian';
@@ -2167,6 +2217,55 @@
       for (let y = y0 + 8; y < y1; y += 8) { const a = P(x0, y), b = P(x1, y); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
     }
     ctx.restore();
+    // relief shading lies over everything on the ground (roads and parks too), so a slope reads the same whatever it is covered with
+    if (reliefCv) { ctx.save(); ctx.globalCompositeOperation = 'soft-light'; ctx.drawImage(reliefCv, 0, 0, view.w, view.h); ctx.restore(); }
+  }
+
+  // The terrain surface: the grid's cells in painter's order (far to near), each filled with the ground colour at its true height, so the ground
+  // stands where the hills are. Returns a canvas of grey relief shading (50% grey is flat; lighter faces the sun, darker faces away; the sun is where
+  // the building shadows say it is) that the caller lays over the finished ground with soft-light.
+  const RELIEF_GAIN = 24, RELIEF_AMP = 90;          // a 4% slope facing the sun lifts the grey by about 85 of 255 (the shading is stylised: real slopes are gentle)
+  function* drawTerrain(ctx, view, T, rl, th, B) {
+    const A = A_(), q = A.sprites.dpr || 1, F = A.sprites.factory;
+    let sc = null, sg = null;
+    if (F) { sc = F(Math.ceil(view.w * q), Math.ceil(view.h * q)); sg = sc.getContext('2d'); sg.scale(q, q); sg.fillStyle = 'rgb(128,128,128)'; sg.fillRect(0, 0, view.w, view.h); }
+    // cells of about 18 px a side or less, so a close view is smooth and a far one costs one polygon per grid cell. Neighbouring cells are drawn a hair
+    // too big (0.8 px) instead of being outlined: they are painted far to near, so the overlap is covered, and a stroke would double the cost.
+    const sub = Math.max(1, Math.min(8, Math.ceil(Math.min(T.dx, T.dy) * view.scale / 18))), cw = T.dx / sub, ch = T.dy / sub;
+    const gi0 = Math.floor((B[0] - T.x0) / cw), gi1 = Math.ceil((B[2] - T.x0) / cw), gj0 = Math.floor((B[1] - T.y0) / ch), gj1 = Math.ceil((B[3] - T.y0) / ch);
+    const i0 = Math.max(0, gi0), i1 = Math.min((T.nx - 1) * sub, gi1), j0 = Math.max(0, gj0), j1 = Math.min((T.ny - 1) * sub, gj1);
+    const pad = 4, W = view.w, H = view.h, k = view.scale, grow = 1 + 0.8 / Math.max(1, cw * k * C30);
+    const LX = 0.94, LY = -0.34, n = i1 - i0 + 1;
+    ctx.fillStyle = th.ground;
+    if (n < 2 || j1 <= j0) return sc;
+    let prev = new Float32Array(n), next = new Float32Array(n);
+    const row = (arr, j) => { const y = T.y0 + j * ch; for (let i = 0; i < n; i++) arr[i] = T.at(T.x0 + (i0 + i) * cw, y); };     // true heights (metres) of one row of corners
+    row(prev, j0);
+    for (let j = j0; j < j1; j++) {
+      row(next, j + 1);
+      const y0 = T.y0 + j * ch, y1 = y0 + ch;
+      for (let i = 0; i < n - 1; i++) {
+        const x0 = T.x0 + (i0 + i) * cw, x1 = x0 + cw, h00 = prev[i], h10 = prev[i + 1], h01 = next[i], h11 = next[i + 1];
+        const ax = view.ox + (x0 - y0) * k * C30, ay = view.oy + (x0 + y0) * k * 0.5 - h00 * rl * k,
+              bx = view.ox + (x1 - y0) * k * C30, by = view.oy + (x1 + y0) * k * 0.5 - h10 * rl * k,
+              cx = view.ox + (x1 - y1) * k * C30, cy = view.oy + (x1 + y1) * k * 0.5 - h11 * rl * k,
+              dx = view.ox + (x0 - y1) * k * C30, dy = view.oy + (x0 + y1) * k * 0.5 - h01 * rl * k;
+        if ((ax < -pad && bx < -pad && cx < -pad && dx < -pad) || (ax > W + pad && bx > W + pad && cx > W + pad && dx > W + pad) ||
+            (ay < -pad && by < -pad && cy < -pad && dy < -pad) || (ay > H + pad && by > H + pad && cy > H + pad && dy > H + pad)) continue;
+        const mx = (ax + bx + cx + dx) / 4, my = (ay + by + cy + dy) / 4;
+        const pa = [mx + (ax - mx) * grow, my + (ay - my) * grow], pb = [mx + (bx - mx) * grow, my + (by - my) * grow], pc = [mx + (cx - mx) * grow, my + (cy - my) * grow], pd = [mx + (dx - mx) * grow, my + (dy - my) * grow];
+        ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); ctx.lineTo(pc[0], pc[1]); ctx.lineTo(pd[0], pd[1]); ctx.closePath(); ctx.fill();
+        if (sg) {
+          const gx = ((h10 + h11) - (h00 + h01)) / (2 * cw), gy = ((h01 + h11) - (h00 + h10)) / (2 * ch);            // slope east and south, from the four corners
+          const sh = Math.max(-1, Math.min(1, -(gx * LX + gy * LY) * RELIEF_GAIN)), g = Math.round(128 + sh * RELIEF_AMP);
+          sg.fillStyle = 'rgb(' + g + ',' + g + ',' + g + ')';
+          sg.beginPath(); sg.moveTo(pa[0], pa[1]); sg.lineTo(pb[0], pb[1]); sg.lineTo(pc[0], pc[1]); sg.lineTo(pd[0], pd[1]); sg.closePath(); sg.fill();
+        }
+      }
+      const t = prev; prev = next; next = t;
+      if (((j - j0) & 7) === 7) yield;
+    }
+    return sc;
   }
 
   function buildingDepth(b) {
@@ -2221,18 +2320,18 @@
       if (it.kind === 'b') {
         const e = it.o;
         if (plain && e._asset && e._fast && e._th === pal && e._st === e.state && e._inv === e.investor && e._cols) {
-          const p = proj(view, e.fit.cx, e.fit.cy, 0); place = A.spritePlacement(e._asset, e._cols, areg, p[0], p[1], view.scale);
+          const p = proj(view, e.fit.cx, e.fit.cy, e.z); place = A.spritePlacement(e._asset, e._cols, areg, p[0], p[1], view.scale);
         }
       } else if (it.kind === 't') {
         const e = it.o;
         if (plain && e._asset && e._cols && e._ck === pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + e.kind + '|' + null) {
-          const p = proj(view, e.x, e.y, 0); place = A.spritePlacement(e._asset, e._cols, areg, p[0], p[1], view.scale);
+          const p = proj(view, e.x, e.y, e.z); place = A.spritePlacement(e._asset, e._cols, areg, p[0], p[1], view.scale);
           if (place) { const bb = e._asset.bbox, w = (bb.maxX - bb.minX) * view.scale, rx = Math.max(2, w * 0.36), ry = Math.max(1, w * 0.13); shadow = [(p[0] - rx - 1) * q, (p[1] - ry - 1) * q, (p[0] + rx + 1) * q, (p[1] + ry + 1) * q]; }
         }
       } else if (it.kind === 'a') {
         const a = it.o;
         if (plain && !a.rider && (a.group === 'people' ? view.scale >= 1.6 : view.scale >= 0.9)) {
-          const h = A.snapHeading(it.pose.heading), p = proj(view, it.pose.x, it.pose.y, 0), sc = view.scale * (a.group === 'people' ? A.STYLE.person : A.STYLE.vehicle);
+          const h = A.snapHeading(it.pose.heading), p = proj(view, it.pose.x, it.pose.y, it.pose.z), sc = view.scale * (a.group === 'people' ? A.STYLE.person : A.STYLE.vehicle);
           const asset = a.group === 'vehicles' ? A.getAsset('vehicles', a.kind, h) : A.getAsset('people', a.kind, h, A.flagsOf(a.outfits));
           const cols = agentColours(sim, a, sareg);
           place = A.spritePlacement(asset, cols, sareg, p[0], p[1], sc);
@@ -2327,19 +2426,19 @@
     // screen and anchored to the world, so panning only moves a window over it (see worldLayer).
     const drawStaticSteps = function* (c, v) {
       c.fillStyle = pal.bg; c.fillRect(0, 0, v.w, v.h); c.lineJoin = 'round';
-      yield* drawGroundSteps(c, v, sim.scene, pal, reg);
+      yield* drawGroundSteps(c, v, sim.scene, pal, reg, { T: sim.terrain, relief: sim.relief });
       let nb = 0;
       if (layers.buildings) for (const e of sim.buildings) {
         if ((++nb & 31) === 0) yield;
-        const b = e.src, H = heightOfEntity(e), q = proj(v, b.footprint[0][0], b.footprint[0][1], 0);
+        const b = e.src, H = heightOfEntity(e), ez = e.z, q = proj(v, b.footprint[0][0], b.footprint[0][1], ez);
         if (q[0] < -v.w * 0.5 - H * v.scale || q[0] > v.w * 1.5 + H * v.scale || q[1] < -v.h * 0.5 - H * v.scale || q[1] > v.h * 1.5 + H * v.scale) continue;
         if (detail && v.scale >= 0.6) {                // soft contact shadow: a longer, fainter cast shadow, then three stepped rings around the footprint
-          poly(c, b.footprint.map(p => proj(v, p[0] - H * 0.55, p[1] + H * 0.19, 0)), 'rgba(' + sRgb.join(',') + ',0.16)', null, 0);
+          poly(c, b.footprint.map(p => proj(v, p[0] - H * 0.55, p[1] + H * 0.19, ez)), 'rgba(' + sRgb.join(',') + ',0.16)', null, 0);
         }
-        poly(c, b.footprint.map(p => proj(v, p[0] - H * 0.35, p[1] + H * 0.12, 0)), shadow, null, 0);
+        poly(c, b.footprint.map(p => proj(v, p[0] - H * 0.35, p[1] + H * 0.12, ez)), shadow, null, 0);
         if (detail && v.scale >= 0.6) {
           let cx = 0, cy = 0; for (const p of b.footprint) { cx += p[0]; cy += p[1]; } cx /= b.footprint.length; cy /= b.footprint.length;
-          for (const g of [3.0, 1.8, 0.8]) poly(c, b.footprint.map(p => { const dx = p[0] - cx, dy = p[1] - cy, L = Math.hypot(dx, dy) || 1; return proj(v, p[0] + dx / L * g, p[1] + dy / L * g, 0); }), 'rgba(' + sRgb.join(',') + ',0.10)', null, 0);
+          for (const g of [3.0, 1.8, 0.8]) poly(c, b.footprint.map(p => { const dx = p[0] - cx, dy = p[1] - cy, L = Math.hypot(dx, dy) || 1; return proj(v, p[0] + dx / L * g, p[1] + dy / L * g, ez); }), 'rgba(' + sRgb.join(',') + ',0.10)', null, 0);
         }
       }
     };
@@ -2355,16 +2454,17 @@
       const pad = v.scale * 12;
       if (layers.buildings) for (const e of sim.buildings) {
         const H = heightOfEntity(e) * v.scale; let vis = false;
-        for (const p of e.src.footprint) { const q = proj(v, p[0], p[1], 0); if (q[0] > -pad && q[0] < v.w + pad && q[1] > -pad && q[1] < v.h + pad + H) { vis = true; break; } }
-        if (vis) out.push({ d: e.fit.cx + e.fit.cy, kind: 'b', o: e });
+        for (const p of e.src.footprint) { const q = proj(v, p[0], p[1], e.z); if (q[0] > -pad && q[0] < v.w + pad && q[1] > -pad && q[1] < v.h + pad + H) { vis = true; break; } }
+        if (vis) out.push({ d: e.fit.cx + e.fit.cy + e.z, kind: 'b', o: e });
       }
       if (layers.trees) for (const t of sim.trees) {
-        const q = proj(v, t.x, t.y, 0), H = A.treeHeight(t.kind, t.s) * v.scale;
-        if (q[0] > -pad && q[0] < v.w + pad && q[1] > -pad && q[1] < v.h + pad + H) out.push({ d: t.x + t.y + 0.5, kind: 't', o: t });
+        const q = proj(v, t.x, t.y, t.z), H = A.treeHeight(t.kind, t.s) * v.scale;
+        if (q[0] > -pad && q[0] < v.w + pad && q[1] > -pad && q[1] < v.h + pad + H) out.push({ d: t.x + t.y + t.z + 0.5, kind: 't', o: t });
       }
       for (const l of sim.scene.landuse) if (l.kind === 'square') {
         let cx = 0, cy = 0; l.footprint.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= l.footprint.length; cy /= l.footprint.length;
-        out.push({ d: cx + cy, kind: 'fountain', o: [cx, cy] });
+        const fz = sim.terrain ? sim.terrain.at(cx, cy) * sim.relief : 0;
+        out.push({ d: cx + cy + fz, kind: 'fountain', o: [cx, cy, fz] });
       }
       return out;
     };
@@ -2372,15 +2472,15 @@
       const pad = view.scale * 12;
       for (const a of sim.agents) {
         if (a.group === 'people' ? !layers.people : !layers.vehicles) continue;
-        const pose = agentPose(a, sim), p = proj(view, pose.x, pose.y, 0);
+        const pose = agentPose(a, sim), z = pose.z, p = proj(view, pose.x, pose.y, z);
         if (!(p[0] > -pad && p[0] < view.w + pad && p[1] > -pad && p[1] < view.h + pad)) continue;
-        out.push({ d: pose.x + pose.y, kind: 'a', o: a, pose });
+        out.push({ d: pose.x + pose.y + z, kind: 'a', o: a, pose });
       }
       return out;
     };
     const drawItem = (target, it, v) => {
       if (it.kind === 'b') drawBuildingEntity(target, v, reg, pal, shadow, sim, it.o);
-      else if (it.kind === 'fountain') drawFountain(target, v, pal, reg, it.o[0], it.o[1]);
+      else if (it.kind === 'fountain') drawFountain(target, v, pal, reg, it.o[0], it.o[1], it.o[2]);
       else if (it.kind === 't') drawTreeEntity(target, v, sim, it.o, pal, reg, shadow);
       else drawAgent(target, v, reg, shadow, sim, it.o, it.pose, layers);
     };
@@ -2540,7 +2640,7 @@
     // A style with a frame version (sim.frameVersion, a number) is asked again only when the number has changed: no style call, no key string, no allocation.
     const ver = sim.buildingStyle && typeof sim.frameVersion === 'number' ? sim.frameVersion : null;
     const segOn = view.scale >= (sim.opts.segMinScale === undefined ? SEG_MIN_SCALE : sim.opts.segMinScale);
-    if (ver !== null && !bound && e._fv === ver && e._th === pal && (!e._seg || e._sm === segOn)) { if (e._asset) drawBuildingSprite(ctx, view, A, areg, e); else drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, e._fdata); return; }
+    if (ver !== null && !bound && e._fv === ver && e._th === pal && (!e._seg || e._sm === segOn)) { if (e._asset) drawBuildingSprite(ctx, view, A, areg, e); else drawExtruded(ctx, view, reg, pal, e, shadowCol, e._fdata); return; }
     const wall = A.wallFor(pal, e.seed);
     const style = (sim.buildingStyle || retrofitStyle)(e, areg, pal, wall) || {};
     let data = style.data || null, seg = null;
@@ -2550,7 +2650,7 @@
       if (seg && !(segOn && e.params)) { data = A.mix(data || wall, style.seg.done, 0.85 * style.seg.k / style.seg.n); seg = null; }
     }
     e._seg = !!style.seg; e._sm = segOn;
-    if (!e.params) { e._fv = ver; e._th = pal; e._asset = null; e._fdata = data || wall; drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, data || wall); return; }
+    if (!e.params) { e._fv = ver; e._th = pal; e._asset = null; e._fdata = data || wall; drawExtruded(ctx, view, reg, pal, e, shadowCol, data || wall); return; }
     const ov = style.overlays || [], key = pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + wall + '|' + data + '|' + ov.join(',') + (seg ? '|' + seg[0] + ':' + seg[1] + ':' + style.seg.done + ':' + (style.seg.todo || '') : '');
     if (e._ck !== key) {
       e._cols = A.buildingColours(areg, pal, { wall, data, seed: e.seed, seg: seg ? style.seg : null });
@@ -2560,8 +2660,13 @@
     e._fast = fastOk; e._th = pal; e._st = e.state; e._inv = e.investor; e._fv = ver;
     drawBuildingSprite(ctx, view, A, areg, e);
   }
+  // The generic extrusion, standing at the building's ground height (the whole drawing is lifted: no per-point z).
+  function drawExtruded(ctx, view, reg, pal, e, shadowCol, wall) {
+    if (!e.z) { drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, wall); return; }
+    ctx.save(); ctx.translate(0, -e.z * view.scale); drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, wall); ctx.restore();
+  }
   function drawBuildingSprite(ctx, view, A, areg, e) {
-    const p = proj(view, e.fit.cx, e.fit.cy, 0);
+    const p = proj(view, e.fit.cx, e.fit.cy, e.z);
     A.drawSprite(ctx, e._asset, e._cols, areg, p[0], p[1], view.scale);
   }
 
@@ -2571,7 +2676,7 @@
     for (const b of sim.bindings) if (b.match(e)) { data = b.scale.colour(b.value(e)); break; }
     const key = th.famId + '/' + th.lookId + '/' + th.reg + '|' + e.kind + '|' + data;
     if (e._ck !== key) { e._cols = A.treeColours(areg, th, e.seed, e.kind, data); e._asset = A.getAsset('trees', e.kind, e.seed & 3, { s: e.s, v: e.v }); e._ck = key; }
-    const p = proj(view, e.x, e.y, 0), bb = e._asset.bbox, w = (bb.maxX - bb.minX) * view.scale;
+    const p = proj(view, e.x, e.y, e.z), bb = e._asset.bbox, w = (bb.maxX - bb.minX) * view.scale;
     ctx.beginPath(); ctx.ellipse(p[0], p[1], Math.max(2, w * 0.36), Math.max(1, w * 0.13), 0, 0, Math.PI * 2); ctx.fillStyle = shadowCol; ctx.fill();
     A.drawSprite(ctx, e._asset, e._cols, areg, p[0], p[1], view.scale);
   }
@@ -2597,7 +2702,7 @@
     const A = A_(), areg = A.REG[sim.opts.register] || A.REG.colorfigures;
     // level of detail: zoomed far out a person is under two pixels and a vehicle is a dot
     if (a.group === 'people' && view.scale < 1.6) return;
-    const h = A.snapHeading(pose.heading), p = proj(view, pose.x, pose.y, 0);
+    const h = A.snapHeading(pose.heading), p = proj(view, pose.x, pose.y, pose.z);
     if (a.group === 'vehicles' && view.scale < 0.9) {
       const col = agentColours(sim, a, areg), d = Math.max(1.5, view.scale * 3.2);
       ctx.fillStyle = col.data; ctx.fillRect(p[0] - d / 2, p[1] - d, d, d);
@@ -2615,24 +2720,24 @@
     }
   }
   // Fountain: a stepped basin with water and a central jet, all in world units.
-  function drawFountain(ctx, view, th, reg, cx, cy) {
-    const R = 6.5, N = 18;
-    const ring = (r, z) => { const out = []; for (let i = 0; i < N; i++) { const a = i / N * Math.PI * 2; out.push(proj(view, cx + Math.cos(a) * r, cy + Math.sin(a) * r, z)); } return out; };
+  function drawFountain(ctx, view, th, reg, cx, cy, gz) {
+    const R = 6.5, N = 18, z0 = gz || 0;
+    const ring = (r, z) => { const out = []; for (let i = 0; i < N; i++) { const a = i / N * Math.PI * 2; out.push(proj(view, cx + Math.cos(a) * r, cy + Math.sin(a) * r, z + z0)); } return out; };
     poly(ctx, ring(R, 0.9), th.kerb, reg.ink, reg.lw);
     poly(ctx, ring(R - 1.2, 1.0), th.water, reg.ink, reg.lw * 0.8);
-    const top = proj(view, cx, cy, 2.6), base = proj(view, cx, cy, 1.0), jet = mixHex(th.water, '#ffffff', 0.45);
+    const top = proj(view, cx, cy, 2.6 + z0), base = proj(view, cx, cy, 1.0 + z0), jet = mixHex(th.water, '#ffffff', 0.45);
     ctx.beginPath(); ctx.moveTo(base[0], base[1]); ctx.lineTo(top[0], top[1]); ctx.strokeStyle = jet; ctx.lineWidth = Math.max(1, view.scale * 0.35); ctx.stroke();
     ctx.beginPath(); ctx.arc(top[0], top[1], Math.max(1.5, view.scale * 0.6), 0, Math.PI * 2); ctx.fillStyle = mixHex(th.water, '#ffffff', 0.65); ctx.fill(); ctx.strokeStyle = reg.ink; ctx.lineWidth = reg.lw; ctx.stroke();
   }
   // view fit: centre the scene in a w x h canvas
-  function fitView(scene, w, h, margin) {
-    const B = sceneBounds(scene), dx = B[2] - B[0], dy = B[3] - B[1], S = dx + dy;        // an iso box is (dx + dy) * cos30 wide and (dx + dy) / 2 tall
-    const scale = Math.min((w * (1 - margin)) / (S * C30 + 1), (h * (1 - margin)) / (S * 0.5 + 1));
+  function fitView(scene, w, h, margin, zmax) {
+    const B = sceneBounds(scene), dx = B[2] - B[0], dy = B[3] - B[1], S = dx + dy, zm = zmax || 0;        // an iso box is (dx + dy) * cos30 wide and (dx + dy) / 2 tall (plus the relief)
+    const scale = Math.min((w * (1 - margin)) / (S * C30 + 1), (h * (1 - margin)) / (S * 0.5 + zm + 1));
     const cx = (B[0] + B[2]) / 2, cy = (B[1] + B[3]) / 2;
-    return { w, h, scale, ox: w / 2 - (cx - cy) * scale * C30, oy: h / 2 - (cx + cy) * scale * 0.5 };
+    return { w, h, scale, ox: w / 2 - (cx - cy) * scale * C30, oy: h / 2 - (cx + cy) * scale * 0.5 + zm * scale / 2 };
   }
 
-  root.VizLib = { LIB, rng, validateScene, roadCls, sceneBounds, makePlaceholderScene, buildNetwork, createSim, setTheme, stepSim, setMotion, bindData, retrofitStyle, renderFrame, fitView, proj, agentPose, entityHeight };
+  root.VizLib = { LIB, rng, validateScene, roadCls, sceneBounds, makePlaceholderScene, buildNetwork, createSim, setTheme, stepSim, setMotion, bindData, retrofitStyle, renderFrame, fitView, proj, agentPose, entityHeight, sceneRelief };
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
@@ -2885,13 +2990,13 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
   function create(opts) {
-    opts = Object.assign({ bounds: [0, 0, 100, 100], width: 1200, height: 700, maxScale: 32, margin: 0.2, fitMargin: 0.06, minFactor: 0.85 }, opts || {});
+    opts = Object.assign({ bounds: [0, 0, 100, 100], width: 1200, height: 700, maxScale: 32, margin: 0.2, fitMargin: 0.06, minFactor: 0.85, zmax: 0 }, opts || {});
     const cam = { cx: 0, cy: 0, scale: 1, w: opts.width, h: opts.height, fit: 1, minScale: 1, maxScale: opts.maxScale, bounds: opts.bounds.slice() };
 
     // The scale that shows the whole scene. An isometric box of ground (dx by dy metres) is (dx + dy) * cos30 wide and (dx + dy) / 2 tall.
     function computeFit() {
       const B = cam.bounds, S = (B[2] - B[0]) + (B[3] - B[1]);
-      cam.fit = Math.max(1e-4, Math.min((cam.w * (1 - opts.fitMargin)) / (S * C30 + 1), (cam.h * (1 - opts.fitMargin)) / (S * 0.5 + 1)));
+      cam.fit = Math.max(1e-4, Math.min((cam.w * (1 - opts.fitMargin)) / (S * C30 + 1), (cam.h * (1 - opts.fitMargin)) / (S * 0.5 + opts.zmax + 1)));
       cam.minScale = cam.fit * opts.minFactor;
       if (cam.maxScale < cam.minScale * 2) cam.maxScale = cam.minScale * 2;
     }
@@ -2933,7 +3038,9 @@
     cam.zoomFraction = function () { return Math.log(cam.scale / cam.minScale) / Math.log(cam.maxScale / cam.minScale); };
     cam.setZoomFraction = function (t) { return cam.zoomTo(cam.minScale * Math.pow(cam.maxScale / cam.minScale, clamp(t, 0, 1))); };
 
-    cam.fitAll = function () { const B = cam.bounds; cam.cx = (B[0] + B[2]) / 2; cam.cy = (B[1] + B[3]) / 2; cam.scale = cam.fit; return cam; };
+    cam.fitAll = function () { const B = cam.bounds, d = opts.zmax / 2; cam.cx = (B[0] + B[2]) / 2 - d; cam.cy = (B[1] + B[3]) / 2 - d; cam.scale = cam.fit; return cam; };   // a point z metres up is drawn where the ground point (x - z, y - z) is: the hills stretch the picture upward, so aim half the relief up the screen
+    // The tallest ground in the scene, in metres (terrain): the fit leaves room for it above the map and fitAll centres the map and its hills together.
+    cam.setRelief = function (zmax) { opts.zmax = Math.max(0, zmax || 0); computeFit(); return cam; };
     cam.setBounds = function (bounds) { cam.bounds = bounds.slice(); computeFit(); return cam.fitAll(); };
     // The canvas changed size: keep the same ground point at the middle, and keep the scale unless it now falls outside the limits.
     cam.resize = function (w, h) { cam.w = w; cam.h = h; computeFit(); cam.scale = clamp(cam.scale, cam.minScale, cam.maxScale); clampCentre(); return cam; };
@@ -3107,7 +3214,7 @@
   let scene = EMBEDDED_SCENE || V.makePlaceholderScene(7);
   let sim = null;
   const zoomEl = document.getElementById('zoom');
-  const cam = LabCamera.create({ bounds: V.sceneBounds(scene), width: canvas.clientWidth || 1200, height: canvas.clientHeight || 700 });
+  const cam = LabCamera.create({ bounds: V.sceneBounds(scene), zmax: V.sceneRelief(scene), width: canvas.clientWidth || 1200, height: canvas.clientHeight || 700 });
   let sliderHeld = false;
   const syncZoom = () => { if (!sliderHeld) zoomEl.value = cam.zoomFraction(); };       // the slider follows the camera, except while it is being dragged
   const box = document.getElementById('stagebox'), hold = ZoomHold.create(canvas, { settleMs: 120 });   // the box takes the input and clips the canvas, which a zoom moves with a CSS transform
@@ -3122,7 +3229,7 @@
   zoomEl.oninput = () => cam.setZoomFraction(+zoomEl.value);
   document.getElementById('fit').onclick = () => { cam.fitAll(); syncZoom(); };
   window.labViewer = { camera: cam, controls, refocus: rf, frames: () => frames, get sim() { return sim; } };                                         // a handle for tests and for the browser console
-  function focusScene() { cam.setBounds(V.sceneBounds(scene)); syncZoom(); }
+  function focusScene() { cam.setRelief(V.sceneRelief(scene)); cam.setBounds(V.sceneBounds(scene)); syncZoom(); }
   function showScene() {
     const a = scene.area || {}, el = document.getElementById('attrib');
     el.textContent = a.source === 'osm' ? (a.name + ': ' + a.attribution + '. The frame is rotated ' + a.rotation_deg + ' degrees so most buildings sit on the isometric axes; north points ' + a.north_on_screen_deg + ' degrees clockwise from the top of the screen. Drag or A and D to pan; wheel or W and S to zoom.') : 'Placeholder scene: synthetic, not a real place. Drag or A and D to pan; wheel or W and S to zoom.';

@@ -4,7 +4,7 @@ import math
 import random
 from collections import Counter
 
-from . import __version__, adjacency, classify, readers
+from . import __version__, adjacency, classify, elevation, readers
 from .geo import (DEG, LocalFrame, axis_deviation_deg, dominant_angle, min_rect, point_in_ring, resample_line, ring_area,
                   ring_centroid, simplify_ring)
 
@@ -77,8 +77,11 @@ def _fits(info, rot_deg):
     return bool(info and min(info["a"], info["b"]) >= FIT["min_side"] and info["rect"] >= FIT["min_rectangularity"] and axis_deviation_deg(info["theta"], rot_deg) <= FIT["max_dev_deg"])
 
 
-def ingest(path, rotation="auto", bbox=None, boundary_relation=None, name=None, max_buildings=None, scatter=True, seed=7):
-    """Read an OSM extract and return (scene dict, report dict). Raises IngestError for input that cannot become a scene."""
+def ingest(path, rotation="auto", bbox=None, boundary_relation=None, name=None, max_buildings=None, scatter=True, seed=7, elevation_file=None, terrain_cell=25.0):
+    """Read an OSM extract and return (scene dict, report dict). Raises IngestError for input that cannot become a scene.
+
+    elevation_file: a local GeoTIFF, Esri ASCII grid or XYZ/CSV file (see ingest/elevation.py). The scene then gets a terrain grid (terrain_cell metres) and z on
+    buildings, road points and trees. Without it nothing changes."""
     feats, notes, fmt = readers.read_file(path)
     assume, skipped, warnings = classify.Assumptions(), Counter(), []
 
@@ -347,6 +350,19 @@ def ingest(path, rotation="auto", bbox=None, boundary_relation=None, name=None, 
                  "generated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "ingest_version": __version__},
         "roads": road_out, "buildings": bld_out, "landuse": land_out, "trees": trees,
     }
+    elev_rep = None
+    if elevation_file:
+        try:
+            src = elevation.read_elevation(elevation_file)
+            elev_rep = elevation.attach(scene, frame, src, terrain_cell)
+        except elevation.ElevationError as e:
+            raise IngestError(f"elevation: {e}")
+        elev_rep["file"] = str(elevation_file)
+        assume.add("elevation", f"heights from {elev_rep['source']} ({elevation_file}): a {elev_rep['cell_m']:g} m ground grid; each building takes the mean over its footprint corners and centroid", elev_rep["buildings_with_z"])
+        if elev_rep["buildings_without_z"]:
+            warnings.append(f"{elev_rep['buildings_without_z']} building(s) lie outside the elevation file and take the ground grid's height instead.")
+        if elev_rep["grid_covered_share"] < 0.98:
+            warnings.append(f"The elevation file covers {round(elev_rep['grid_covered_share'] * 100)}% of the scene; the rest of the ground takes the nearest height.")
     if ext[0] > 15000 or ext[1] > 15000:
         warnings.append(f"The extent is {ext[0]} x {ext[1]} m: very large for one scene. Consider --bbox or a smaller boundary.")
     if len(bld_out) > 25000:
@@ -370,6 +386,7 @@ def ingest(path, rotation="auto", bbox=None, boundary_relation=None, name=None, 
         "levels_sources": dict(Counter(b["osm"]["levels_source"] for b in bld_out)),
         "levels_assumed": sum(1 for b in bld_out if b["levels_assumed"]),
         "residential": dict(Counter(b["residential"] for b in bld_out)),
+        "elevation": elev_rep,
         "neighbours": {"threshold_m": adjacency.NEIGHBOUR_M, "buildings_with_neighbours": n_with_nb, "links": sum(len(b["neighbours"]) for b in bld_out) // 2,
                        "max_per_building": max((len(b["neighbours"]) for b in bld_out), default=0)},
     }

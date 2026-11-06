@@ -328,7 +328,7 @@ def cmd_ingest(a):
     rot = a.rotation if a.rotation in ("auto", "none") else float(a.rotation)
     try:
         scene, rep = build.ingest(a.input, rotation=rot, bbox=bbox, boundary_relation=a.boundary_relation, name=a.name,
-                                  max_buildings=a.max_buildings, scatter=not a.no_scatter, seed=a.seed)
+                                  max_buildings=a.max_buildings, scatter=not a.no_scatter, seed=a.seed, elevation_file=a.elevation, terrain_cell=a.terrain_cell)
     except (build.IngestError, ValueError) as e:
         raise SystemExit(f"ingest failed: {e}")
     out = Path(a.out)
@@ -377,7 +377,9 @@ def main(argv=None):
     s.add_argument("input"); s.add_argument("--out", default="scene.json"); s.add_argument("--rotation", default="auto", help="auto, none, or degrees")
     s.add_argument("--bbox", help="south,west,north,east"); s.add_argument("--boundary-relation", type=int, help="clip to this boundary relation (needs rel(ID) in the extract)")
     s.add_argument("--name"); s.add_argument("--max-buildings", type=int); s.add_argument("--no-scatter", action="store_true", help="do not scatter trees into parks and woods")
-    s.add_argument("--seed", type=int, default=7); s.set_defaults(f=cmd_ingest)
+    s.add_argument("--seed", type=int, default=7)
+    s.add_argument("--elevation", metavar="FILE", help="a local elevation file (GeoTIFF in lon/lat, Esri ASCII grid, or lon,lat,z text points): adds a ground grid and z to buildings, roads and trees")
+    s.add_argument("--terrain-cell", type=float, default=25.0, help="ground grid cell in metres (default 25)"); s.set_defaults(f=cmd_ingest)
     s = sub.add_parser("osm-query", help="print the Overpass query for an area (both the bounding-box and the relation form have run live)")
     s.add_argument("--relation", type=int); s.add_argument("--bbox", help="south,west,north,east"); s.add_argument("--out"); s.set_defaults(f=cmd_osm_query)
     s = sub.add_parser("osm-fetch", help="run the Overpass query and save the extract (needs network access; one request, no retries: be gentle with the public server)")

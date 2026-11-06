@@ -40,6 +40,14 @@ def report_markdown(scene, rep):
           "`other`: a non-dwelling type, a use tag (shop, amenity, office, craft, industrial, tourism, healthcare, ...), a shed, or an outbuilding under 30 m2.", "",
           f"`neighbours`: buildings whose footprints touch or come within {nb.get('threshold_m', '?')} m: {nb.get('buildings_with_neighbours', 0)} buildings have at least one, "
           f"{nb.get('links', 0)} links, at most {nb.get('max_per_building', 0)} for one building.", ""]
+    el = rep.get("elevation")
+    if el:
+        L += ["### Elevation", "",
+              f"Heights from `{el['file']}` ({el['source']}), written as `terrain` (a {el['cell_m']:g} m grid, {el['grid'][0]} x {el['grid'][1]} cells, range {el['range_m'][0]} to {el['range_m'][1]} m) "
+              f"and as `z` on {el['buildings_with_z']} of {c['buildings']} buildings (the mean over footprint corners and centroid), on {el['roads_with_z']} of {el['roads_total']} roads (per point) and "
+              f"on {el['trees_with_z']} trees. {round(el['grid_covered_share'] * 100)}% of the grid lay inside the file. A building's z is the ground, not its floor level, and the renderer stands it "
+              "there as one rigid block: on a steep plot the downhill side floats and the uphill side sinks by half the height difference across the footprint. "
+              "A DTM gives the ground under a bridge or viaduct, not the deck.", ""]
     L += ["## Left out", ""]
     L += [_table(sorted(rep["skipped"].items(), key=lambda kv: -kv[1]), ["what", "how many"])] if rep["skipped"] else ["Nothing was skipped."]
     L += ["", "## Warnings", ""]
