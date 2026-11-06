@@ -147,7 +147,7 @@
   sim.opts.layerMs = 12;                                // a patch repaints the far-zoom layer in slices: twice the renderer's 6 ms a frame finishes it in about a third of the frames (viz/README.md)
   const canvas = $('stage'), canvas2 = $('stage2'), ctx = canvas.getContext('2d'), ctx2 = canvas2.getContext('2d'), ctxOf = new Map([[canvas, ctx], [canvas2, ctx2]]);
   const hilite = $('hilite'), hctx = hilite.getContext('2d');
-  const cam = LabCamera.create({ bounds: V.sceneBounds(scene), width: canvas.clientWidth || 1200, height: canvas.clientHeight || 700 });
+  const cam = LabCamera.create({ bounds: V.sceneBounds(scene), zmax: V.sceneRelief(scene), width: canvas.clientWidth || 1200, height: canvas.clientHeight || 700 });
   const box = $('stagebox'), hold = ZoomHold.create(canvas, { settleMs: 120 });
   const calm = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const controls = LabControls.attach(box, cam, { smoothZoom: !calm });

@@ -123,3 +123,11 @@ Other scene keys: `area{name, source, osm_relation, attribution, origin{lat,lon}
 - **Picking now exists** (`viz/packpick.js`), built the way (c) above proposed: inverse projection, footprint lifted by height, painter's order, 25 m grid. It does not touch `vizlib.js` beyond `entityHeight`, and works on the sim's scene, so it also works for any other page that has a sim. The silhouette uses the renderer's height; a gabled sprite's ridge can stand a little above it, so a click just above a ridge can miss.
 - **What the benchmark found** (`viz/README.md`, "Live model frames"): the per-frame cost of a patch is no longer the limit. At far zoom the limit is the far layer itself: it is painted in slices of `LAYER_MS` and a patch is fully on screen only when the repaint ends (the old layer stays up meanwhile, a newer patch restarts the repaint).
 - **Still true**: no elevation, no per-building z; sprite cache keyed as in (a); placement of entities on scene buildings is invented until P3.
+
+---
+
+## Update after P7 (terrain)
+
+- **Elevation now exists** (`docs/terrain-spike.md`). Scenes may carry `z` on buildings, road points and trees and a `terrain` height grid; `createSim` bakes them (scaled by `opts.relief`) into `e.z`; every draw site, the shadows, the occlusion test and the paint order (`cx + cy + z`) use it; `Pick` shifts by `z`. A scene without heights draws byte for byte as before. `paperdolls ingest --elevation FILE` writes them.
+- Corrects (b) above: the cache key is unchanged (no height in it), culling needed no widening because it tests lifted positions, and the old depth key `cx + cy` is now `cx + cy + z`.
+

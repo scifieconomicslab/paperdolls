@@ -8,6 +8,8 @@
  * The projection is sx = ox + (x - y) k cos30, sy = oy + (x + y) k / 2 - z k. A point at height z lands on the screen exactly where the ground point
  * (x - z, y - z) does. So a pixel's ground point g (z = 0) is on a building of height h when some z in [0, h] puts (g + (z, z)) inside the footprint:
  * the segment from g to g + (h, h) touches the polygon. That is the footprint lifted by the building's height (its silhouette), without drawing anything.
+ * With terrain a building stands on its ground height z0 (e.z, metres): the same lift moves it up the screen by z0, which is the ground point (x - z0, y - z0),
+ * so the test is the same one made from g + (z0, z0). hitGround(gx, gy) is therefore the answer for a point on the z = 0 plane, and hit() the one for a pixel.
  * Several buildings can claim a pixel; the one drawn last wins, which is what the painter's order shows on top: the greatest fit.cx + fit.cy (the renderer's
  * sort key), and for a tie the later one in sim.buildings (the sort is stable). Trees and people are decoration and do not block a pick.
  * A 25 m grid keeps the test to the few buildings near the point: each building is listed in every cell its silhouette can reach.
@@ -37,14 +39,16 @@
     sim.buildings.forEach((e, i) => {
       const f = e.src.footprint; let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const p of f) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
-      const h = Math.max(0, height(e)), it = { i, f, h, d: e.fit.cx + e.fit.cy, x0: x0 - h, y0: y0 - h, x1, y1, bx0: x0, by0: y0, bx1: x1, by1: y1, dmin: x0 - y1, dmax: x1 - y0 };
+      const h = Math.max(0, height(e)), z = e.z || 0, it = { i, f, h, z, d: e.fit.cx + e.fit.cy + z, x0: x0 - h, y0: y0 - h, x1, y1, bx0: x0, by0: y0, bx1: x1, by1: y1, dmin: x0 - y1, dmax: x1 - y0 };
       items.push(it);
-      for (let cx = Math.floor(it.x0 / CELL); cx <= Math.floor(it.x1 / CELL); cx++) for (let cy = Math.floor(it.y0 / CELL); cy <= Math.floor(it.y1 / CELL); cy++) {
+      // the pixel's ground points that can reach this building: the footprint lifted by z0 .. z0 + h, i.e. shifted back by (z0 + h) .. z0
+      for (let cx = Math.floor((it.x0 - z) / CELL); cx <= Math.floor((it.x1 - z) / CELL); cx++) for (let cy = Math.floor((it.y0 - z) / CELL); cy <= Math.floor((it.y1 - z) / CELL); cy++) {
         const k = cellKey(cx, cy), l = grid.get(k); if (l) l.push(it); else grid.set(k, [it]);
       }
     });
     const stats = { tested: 0, queries: 0 };
     const touches = (it, gx, gy) => {
+      gx += it.z; gy += it.z;                                                // the building stands z0 up: see it from the shifted ground point
       if (gx < it.x0 || gx > it.x1 || gy < it.y0 || gy > it.y1) return false;
       const dd = gx - gy; if (dd < it.dmin || dd > it.dmax) return false;      // lifting keeps x - y, so the pixel column must cross the footprint's x - y range
       const f = it.f;
@@ -66,7 +70,7 @@
     }
     // the same answer without the grid (for the tests)
     function hitBrute(gx, gy) { let best = null; for (const it of items) if (touches(it, gx, gy) && better(it, best)) best = it; return best ? best.i : -1; }
-    return { hit, hitGround, hitBrute, stats, silhouette: i => ({ footprint: items[i].f, h: items[i].h }), count: items.length, cells: grid.size };
+    return { hit, hitGround, hitBrute, stats, silhouette: i => ({ footprint: items[i].f, h: items[i].h, z: items[i].z }), count: items.length, cells: grid.size };
   }
 
   root.Pick = { create, inside, crosses, CELL };

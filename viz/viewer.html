@@ -138,7 +138,7 @@
   let scene = EMBEDDED_SCENE || V.makePlaceholderScene(7);
   let sim = null;
   const zoomEl = document.getElementById('zoom');
-  const cam = LabCamera.create({ bounds: V.sceneBounds(scene), width: canvas.clientWidth || 1200, height: canvas.clientHeight || 700 });
+  const cam = LabCamera.create({ bounds: V.sceneBounds(scene), zmax: V.sceneRelief(scene), width: canvas.clientWidth || 1200, height: canvas.clientHeight || 700 });
   let sliderHeld = false;
   const syncZoom = () => { if (!sliderHeld) zoomEl.value = cam.zoomFraction(); };       // the slider follows the camera, except while it is being dragged
   const box = document.getElementById('stagebox'), hold = ZoomHold.create(canvas, { settleMs: 120 });   // the box takes the input and clips the canvas, which a zoom moves with a CSS transform
@@ -153,7 +153,7 @@
   zoomEl.oninput = () => cam.setZoomFraction(+zoomEl.value);
   document.getElementById('fit').onclick = () => { cam.fitAll(); syncZoom(); };
   window.labViewer = { camera: cam, controls, refocus: rf, frames: () => frames, get sim() { return sim; } };                                         // a handle for tests and for the browser console
-  function focusScene() { cam.setBounds(V.sceneBounds(scene)); syncZoom(); }
+  function focusScene() { cam.setRelief(V.sceneRelief(scene)); cam.setBounds(V.sceneBounds(scene)); syncZoom(); }
   function showScene() {
     const a = scene.area || {}, el = document.getElementById('attrib');
     el.textContent = a.source === 'osm' ? (a.name + ': ' + a.attribution + '. The frame is rotated ' + a.rotation_deg + ' degrees so most buildings sit on the isometric axes; north points ' + a.north_on_screen_deg + ' degrees clockwise from the top of the screen. Drag or A and D to pan; wheel or W and S to zoom.') : 'Placeholder scene: synthetic, not a real place. Drag or A and D to pan; wheel or W and S to zoom.';

@@ -145,6 +145,19 @@ A road's `width`, `pavement`, `cycle` and `tram` override its class. `pedestrian
 
 `makePlaceholderScene(seed)` is a synthetic stand-in. `paperdolls ingest` builds the same shape from an OpenStreetMap extract (see the plugin README): it rotates the frame so the dominant street direction lies on an axis, maps OSM tags to classes, archetypes, storeys and tree kinds, and writes a report listing every assumption. The viewer (`viewer_built.html`) loads a scene file with its Scene control, pans by dragging, zooms with the wheel, and shows the OpenStreetMap attribution.
 
+### Terrain (optional)
+
+Every height is optional and in metres. A scene without any is drawn exactly as before (a regression test compares the pixels of the placeholder scene byte for byte against the renderer from before terrain existed).
+
+```
+  buildings: [{ …, z? }]                          ground height at the building (the ingest writes the mean over footprint corners and centroid)
+  roads:     [{ …, z? : [one per point] }]        height of the centre line at each point; linear between points, flat across the road
+  trees:     [[x, y, kind | null, scale | null, z?], …]
+  terrain:   { x0, y0, dx, dy, nx, ny, z: [nx * ny] }   a regular grid of heights (row j is y = y0 + j * dy), bilinear, clamped at the edge
+```
+
+An explicit `z` wins over the grid; with neither, z is 0. Agents on a road follow its heights (or the grid's). The renderer draws the grid as the ground surface (cells painted far to near, `drawTerrain` in `vizlib.js`) and lays a relief shading over the whole ground layer with `soft-light`: slopes facing the sun (the building shadows say where it is) are lighter, the others darker. The shading is stylised and stronger than a real hillshade: Jette's slopes are 2 to 4 percent. Buildings, trees, agents, the fountain, the shadows and the paint order (`x + y + z`, because a point `z` up draws where the ground point `(x - z, y - z)` does) all take the height. `sim.opts.relief` scales every height (default 1; 0 keeps the shading and lifts nothing; 2 or 3 exaggerates) and is applied when the sim is created. `VizLib.sceneRelief(scene)` is the tallest ground, and `LabCamera.create({ zmax })` or `cam.setRelief(zmax)` leaves room for it. `Pick` accounts for each building's `z`. `viz/terrainlib.js` makes a synthetic hilly grid for tests and demos (`Terrain.synthetic`, `Terrain.attach`). `paperdolls ingest --elevation FILE` writes all of the above from a local GeoTIFF, Esri ASCII grid or lon/lat/z points (`paperdolls/ingest/elevation.py`). Measurements and the design decision: `docs/terrain-spike.md`.
+
 ### Rendering cost
 
 Measured with node-canvas (a software canvas, so a browser will differ). On the 1,023-building placeholder a street-zoom frame costs about 22 ms (1,048 items in view), about 11 ms at 3 px/m, about 5 ms at 5 px/m and about 4 ms at 8 px/m. A synthetic scene of 12,276 buildings and 4,093 agents (the placeholder tiled twelve times; `node viz/scale_bench.js` reproduces it) takes 4.6 ms settled and 4.8 ms panning at 0.7 px/m, 17.5 and 19.2 ms at 1.7 px/m, and 10.9 and 11.2 ms at 4 px/m. Its first frame takes 4.9 s fully zoomed out, 0.37 s at 1.7 px/m and 0.09 s at 4 px/m, because the far layer and the sprites are built then.

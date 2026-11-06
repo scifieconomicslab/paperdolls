@@ -393,8 +393,9 @@
       for (const [k, dashed] of items) {
         const si = binding.index[k]; if (si < 0) continue; const sh = pick.silhouette(si), P = (p, z) => V.proj(view, p[0], p[1], z);
         ctx.save(); ctx.lineJoin = 'round'; ctx.lineWidth = dashed ? 1.5 : 2.5; ctx.strokeStyle = dashed ? 'rgba(20,20,20,0.7)' : '#1d4ed8'; ctx.setLineDash(dashed ? [4, 3] : []);
-        for (const z of [0, sh.h]) { ctx.beginPath(); sh.footprint.forEach((p, j) => { const q = P(p, z); if (j) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); ctx.stroke(); }
-        ctx.beginPath(); for (const p of sh.footprint) { const a = P(p, 0), b = P(p, sh.h); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); } ctx.stroke();
+        const z0 = sh.z || 0;                                                   // the ground height the building stands at (terrain)
+        for (const z of [z0, z0 + sh.h]) { ctx.beginPath(); sh.footprint.forEach((p, j) => { const q = P(p, z); if (j) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); ctx.stroke(); }
+        ctx.beginPath(); for (const p of sh.footprint) { const a = P(p, z0), b = P(p, z0 + sh.h); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); } ctx.stroke();
         ctx.restore();
       }
     }
