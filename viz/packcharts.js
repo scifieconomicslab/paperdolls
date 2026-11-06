@@ -248,7 +248,7 @@
       const vx = (clientX - r.left) / r.width * W, t = Math.round((vx - M.l) / geo.pw * geo.hz);
       return Math.max(0, Math.min(geo.hz, t));
     }
-    const hoverAt = t => { hoverT = t === null || t === undefined ? null : Math.max(0, Math.min(spec.horizon, Math.round(t))); redrawCursor(); if (spec.onHover) spec.onHover(hoverT); };
+    const hoverAt = (t, silent) => { hoverT = t === null || t === undefined ? null : Math.max(0, Math.min(spec.horizon, Math.round(t))); redrawCursor(); if (!silent && spec.onHover) spec.onHover(hoverT); };
     svg.addEventListener('pointermove', e => { const t = tFromX(e.clientX); if (t !== null && t !== hoverT) hoverAt(t); });
     svg.addEventListener('pointerleave', () => { if (hoverT !== null) hoverAt(null); });
     svg.addEventListener('click', e => { const t = tFromX(e.clientX); if (t !== null && spec.onPick) spec.onPick(t); });

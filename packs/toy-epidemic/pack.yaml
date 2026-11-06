@@ -69,8 +69,17 @@ series:
   counts: {label: Buildings by state, unit: buildings, y: [S, E, I, R]}
 
 layout:
-  left:   [{control: params}, {control: presets}]
-  right:  [{control: legend}, {control: display}]
-  bottom: [{control: timeline}]
+  left:   [{control: params}, {control: presets}, {control: compare}]
+  right:
+    - {control: legend}
+    - {chart: line, series: counts, title: Buildings by state over time}
+    - {chart: bar,  series: counts, title: Buildings by state on the day shown}
+    - {control: display, items: [fog, ink, pixel, people, vehicles]}
+  bottom:
+    - {control: timeline}
+    - kpis:
+        - {label: Peak infectious, series: counts, y: I, at: max, unit: buildings, decimals: 0}
+        - {label: Susceptible on the day shown, series: counts, y: S, unit: buildings, decimals: 0}
+        - {label: Recovered by the end, series: counts, y: R, at: final, unit: buildings, decimals: 0}
 
 banner: "A toy model: one model building per residential building of the loaded scene (the synthetic placeholder unless a real one is given). The contact network is not the street network, and nothing here is evidence about any disease."
