@@ -313,6 +313,22 @@
   }
   const entityTitle = sel => sel.entity.charAt(0).toUpperCase() + sel.entity.slice(1) + ' ' + (sel.id + 1);
 
+  // ---- the readout under the timeline: one line per series with the numbers formatted (never a raw float, never NaN) ----
+  const hasDashboard = manifest => ['left', 'right', 'bottom'].some(r => ((manifest.layout || {})[r] || []).some(it => it && (it.chart || it.kpis)));
+  const fmtNum = (v, unit) => {
+    if (typeof v !== 'number' || !isFinite(v)) return 'n/a';
+    const F = root.PackCharts && root.PackCharts.fmt, t = F ? F(v) : String(Math.round(v * 100) / 100);
+    return t + (unit && unit !== 'share' && unit !== 'ratio' ? ' ' + unit : '');
+  };
+  function readoutRows(manifest, store) {
+    const out = [];
+    for (const [n, s] of Object.entries(manifest.series || {})) {
+      const pt = store.latest(n); if (!pt) continue;
+      out.push({ label: s.label || n, parts: s.y.map((y, i) => ({ name: y, text: fmtNum(pt[i], s.unit) })) });
+    }
+    return out;
+  }
+
   // ---- UI ----
   // o.display: the viewer's own switches [{id, label, checked, onchange}] for the Display control, which a layout item may reduce and reorder (items: [ink, fog]).
   // o.compare / o.register: the A/B compare (packdash.js) and the chart register ('colorfigures' or 'formal'). Charts and KPI tiles are made by PackDash.components.
@@ -349,14 +365,26 @@
       if (p.help) row.title = p.help;
       return row;
     }
+    // The text readout under the timeline exists only for a pack that declares no chart and no KPI tile (those show the same numbers properly).
+    const showReadout = !hasDashboard(manifest);
+    const drawReadout = (host, rows) => {
+      const key = JSON.stringify(rows); if (host._key === key) return; host._key = key;
+      host.textContent = '';
+      if (!rows.length) return;
+      const list = el('ul', {}, ...rows.map(r => el('li', {}, el('b', { text: r.label + ': ' }), r.parts.map(p => p.name + ' ' + p.text).join(' · '))));
+      host.appendChild(rows.length > 4 ? el('details', {}, el('summary', { text: 'Values at this time (' + rows.length + ' series)' }), list) : list);
+    };
     const components = {
       params(item) {
         const all = []; for (const [n, p] of Object.entries(P)) { const g = p.group || 'General'; if (!all.includes(g)) all.push(g); }
         const groups = item.groups || all, box = el('div', { class: 'pk-params' });
+        // every group is a collapsible section: open on a wide screen, closed on a phone (one tap opens it) so the map is not buried under the sliders
+        const mq = doc.defaultView && doc.defaultView.matchMedia ? doc.defaultView.matchMedia('(max-width: 860px)') : null, narrow = !!(mq && mq.matches);
         for (const g of groups) {
           const names = Object.keys(P).filter(n => (P[n].group || 'General') === g);
-          if (names.length) box.appendChild(el('fieldset', {}, el('legend', { text: g }), ...names.map(paramRow)));
+          if (names.length) box.appendChild(el('details', { class: 'pk-group', open: !narrow }, el('summary', { text: g }), el('div', { class: 'pk-gbody' }, ...names.map(paramRow))));
         }
+        if (mq && mq.addEventListener) mq.addEventListener('change', e => { for (const d of box.querySelectorAll('details.pk-group')) d.open = !e.matches; });          // the window crossed the phone breakpoint (rotated, resized): reset to that layout's default
         return box;
       },
       presets() {
@@ -390,7 +418,7 @@
       },
       timeline() {
         const tm = manifest.time, play = el('button', { type: 'button', 'data-play': '' }), slider = el('input', { type: 'range', min: 0, max: tm.steps, step: 1, value: 0, 'aria-label': tm.unit, 'data-time': '' });
-        const label = el('span', { class: 'pk-time' }), read = el('div', { class: 'pk-readout', 'aria-live': 'off' });
+        const label = el('span', { class: 'pk-time' }), read = showReadout ? el('div', { class: 'pk-readout', 'aria-live': 'off' }) : null;
         const speed = el('select', { 'aria-label': 'Speed', 'data-speed': '' }, ...(tm.speeds || [store.time().speed]).map(s => el('option', { value: s, text: s + ' ' + tm.unit + (s === 1 ? '' : 's') + ' per second' })));
         play.onclick = () => ctl.togglePlay();
         slider.oninput = () => { store.setPlaying(false); ctl.ensure(+slider.value); store.setTime(+slider.value); };
@@ -399,8 +427,7 @@
         const draw = () => {
           const t = store.time(); play.textContent = t.playing ? 'Pause' : 'Play'; slider.value = t.t; speed.value = t.speed;
           label.textContent = cap(tm.unit) + ' ' + t.t + ' of ' + tm.steps;
-          const parts = Object.entries(manifest.series || {}).map(([n, s]) => { const pt = store.latest(n); return pt ? (s.label || n) + ': ' + s.y.map((y, i) => y + ' ' + pt[i]).join(' · ') : null; }).filter(Boolean);
-          read.textContent = parts.join('   ');
+          if (read) drawReadout(read, readoutRows(manifest, store));
         };
         refreshers.push(draw);
         return el('div', { class: 'pk-timeline' }, play, slider, label, el('label', {}, 'Speed ', speed), read);
@@ -453,8 +480,13 @@
         const n = make && make(item); if (n) { n.setAttribute('data-item', item.control || (item.chart ? 'chart' : 'kpis')); host.appendChild(n); mounted.push(n); }
       }
     }
-    const ihost = reg.inspector || reg.right;
-    if (ihost) ihost.appendChild(inspector());
+    // The inspector is docked: when the page gives it a region (the map's box) it lies over the map's corner, always in view, whatever the side columns scroll to.
+    // A press, move or wheel on the panel must not reach the map under it (it would select another building or drag the camera).
+    const ihost = reg.inspector || reg.right, panel = ihost ? inspector() : null;
+    if (panel) {
+      if (reg.inspector) { panel.classList.add('pk-docked'); for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'pointerleave', 'wheel', 'dblclick']) panel.addEventListener(ev, e => e.stopPropagation()); }
+      ihost.appendChild(panel);
+    }
     const refresh = () => refreshers.forEach(f => f());
     const offs = [store.subscribe('params', refresh), store.subscribe('time', refresh), store.subscribe('frames', refresh)];
     refresh();
@@ -532,6 +564,6 @@
     } };
   }
 
-  root.PackHost = { legendFor, scaleFor, createController, bindRenderer, bindInteraction, mountUI, entityRows, entityTitle, NO_DATA };
+  root.PackHost = { legendFor, scaleFor, createController, bindRenderer, bindInteraction, mountUI, entityRows, entityTitle, readoutRows, hasDashboard, NO_DATA };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.PackHost;
 })(typeof window !== 'undefined' ? window : globalThis);

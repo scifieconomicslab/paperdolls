@@ -47,3 +47,7 @@ Found during the audit of v0.1.0 and kept up to date. Severity is in brackets.
 - The spec rejects the final week index, which the model does not export.
 - The model's licence is settled: MIT, with the licence text in `vendor/greatretrofit_v2/LICENSE`.
 - `paperdolls doctor` replaces the missing setup step. It checks the install and prints the fix for each problem.
+
+## First paint at far zoom (pack page, Jette scale) — not changed, documented
+
+On a scene of about 9,000 buildings the first frame at "Fit" stalls for roughly 0.4 to 0.6 s (headless Chromium, software rendering; `TheGreatRetrofit/docs/verification/jette-integration.md`, bug 10). While the far layer is first painted in slices (`worldLayer`, `sim.opts.layerMs`, 12 ms on the pack page) no old layer exists to stand in, so those frames draw every building directly. A coarse first pass (flat footprint polygons instead of sprites, then the sliced sprite layer replacing it) would remove the stall, but it belongs in the renderer's far layer (`vizlib.js`, `pd-render`/`pd-visual` territory), is more than a cheap change, and could not be judged here: the built-in browser pane's compositor runs at 1 to 3 fps at DPR 2, so a frame-time gain cannot be measured in it. Playback at far zoom still repaints the layer a slice per frame, so the colours there update in steps (`viz/README.md`, "Live model frames").

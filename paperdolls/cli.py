@@ -402,7 +402,7 @@ def main(argv=None):
     def _pack_args(i, scene_help):
         i.add_argument("path", help="a pack folder (with pack.yaml) or a pack.yaml")
         i.add_argument("--scene", help=scene_help)
-        i.add_argument("--include", action="append", metavar="FILE", help="a runtime source file to load before the entry (repeatable), such as a shared prng.js")
+        i.add_argument("--include", action="append", metavar="FILE", help="a runtime source file to load before the entry (repeatable), such as a shared prng.js; a pack with runtime.files lists its helpers there instead")
     i = psub.add_parser("check", help="validate the manifest, then run the runtime (determinism, frames against the manifest); exits 1 on errors")
     _pack_args(i, "a scene.json: the runtime is bound to it (bindScene) and run on its buildings")
     i.add_argument("--json", action="store_true"); i.add_argument("--strict", action="store_true", help="warnings fail the check too")
@@ -415,7 +415,7 @@ def main(argv=None):
     _pack_args(i, "a scene.json from 'paperdolls ingest' (embedded compactly)")
     i.add_argument("--out", default="pack.html"); i.add_argument("--max-mb", type=float, default=16, help="the page size limit; a scene is trimmed (and the trim reported) to fit")
     i.add_argument("--trim", help="trim stages to apply regardless of size (precision, centroid, osm, height, neighbours)")
-    i = psub.add_parser("dev", help="serve the pack on 127.0.0.1 and reload the page when pack.yaml, runtime.js or bind.js change")
+    i = psub.add_parser("dev", help="serve the pack on 127.0.0.1 and reload the page when pack.yaml or a runtime file changes")
     _pack_args(i, "a scene.json to draw the pack on")
     i.add_argument("--port", type=int, default=8765); i.add_argument("--max-mb", type=float, default=16); i.add_argument("--trim", help="trim stages (see pack build)")
     s.set_defaults(f=cmd_pack)

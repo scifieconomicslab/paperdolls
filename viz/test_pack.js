@@ -5,7 +5,7 @@
 const fs = require('fs'), path = require('path'), vm = require('vm'), assert = require('assert');
 const g = { console, Math, Object, Map, WeakMap, Array, Infinity, JSON, Set, Date, Number, String, Promise, Int8Array, Int16Array, Float32Array, ArrayBuffer }; g.globalThis = g; vm.createContext(g);
 const load = f => vm.runInContext(fs.readFileSync(path.join(__dirname, f), 'utf8'), g);
-for (const f of ['assetlib.js', 'buildinglib.js', 'treelib.js', 'vizlib.js', 'replay.js', 'packvalidate.js', 'packstore.js', 'packruntime.js', 'packhost.js']) load(f);
+for (const f of ['assetlib.js', 'buildinglib.js', 'treelib.js', 'vizlib.js', 'replay.js', 'packvalidate.js', 'packstore.js', 'packruntime.js', 'packcharts.js', 'packhost.js']) load(f);
 const A = g.AssetLib, V = g.VizLib, PS = g.PackSpec, PStore = g.PackStore, PR = g.PackRuntime, PH = g.PackHost, PD = g.PaperDolls;
 const arg = n => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : null; };
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -192,6 +192,15 @@ else {
     ctl.advance(0.35); assert.strictEqual(store.time().t, 3); ctl.advance(1); assert.strictEqual(store.time().t, 13);
     ctl.advance(100); assert.strictEqual(store.time().t, TOY.time.steps); assert.strictEqual(store.time().playing, false);
     ctl.togglePlay(); assert.strictEqual(store.time().t, 0); assert.strictEqual(store.time().playing, true);       // play at the end starts over
+  });
+  test('shell: the text readout rounds, names units, shows n/a for no data and is dropped when the pack declares charts', () => {
+    const m = { series: { cash: { label: 'Cash', unit: 'euros', y: ['a', 'b'] }, share: { label: 'Take-up', unit: 'share', y: ['q1'] } }, layout: { bottom: [{ control: 'timeline' }] } };
+    const store = { latest: n => (n === 'cash' ? [1234567.891, NaN] : [0.0079425790754]) };
+    const rows = PH.readoutRows(m, store);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(rows)), [{ label: 'Cash', parts: [{ name: 'a', text: '1.23 m euros' }, { name: 'b', text: 'n/a' }] }, { label: 'Take-up', parts: [{ name: 'q1', text: '0.0079' }] }]);
+    assert(!/NaN|0\.00794257/.test(JSON.stringify(rows)));
+    assert.strictEqual(PH.hasDashboard(m), false); m.layout.right = [{ chart: 'line', series: 'cash' }]; assert.strictEqual(PH.hasDashboard(m), true);
+    assert.strictEqual(PH.hasDashboard({ layout: { right: [{ kpis: ['cash'] }] } }), true);
   });
   test('shell: a "continue" model makes frames only as the clock reaches them', () => {
     const cont = clone(TOY); cont.runtime.on_params = 'continue'; const { store, ctl } = mkHost(cont);
