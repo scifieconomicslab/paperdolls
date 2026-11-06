@@ -141,7 +141,7 @@ mappings:
 - `channel: overlay` marks the building: `overlay` is `null` or one of `scaffold`, `solar`, `band`, `marker`, `insulation`, `community`. A sequential scale cannot be an overlay.
 - A value with no entry is drawn as "no data" (walls) or unmarked (overlays), and the validator warns. A missing value (NaN, -1) is drawn as "no data", never as zero.
 - `channel: overlay` also takes `insulation` and `community` (see [Visual channels](#visual-channels-p6)).
-- `segments` is described under [Visual channels](#visual-channels-p6). `outline` and `halo` likewise. `height` and `ground` are reserved (P6): they validate with a warning and are ignored until their section lands.
+- `segments` is described under [Visual channels](#visual-channels-p6). `outline` and `halo` likewise. `groundtint` too. `height` and `ground` are reserved (P6): they validate with a warning and are ignored until their section lands (`ground` is only a reserved name; the channel is `groundtint`).
 - The legend is made from these mappings, so it can describe only what is drawn. Every entry needs a label.
 
 Only the first entity that has a wall, overlay or segments mapping is drawn.
@@ -190,6 +190,28 @@ mappings:
 - **Selection is the same layer.** `store.selection()` is drawn as a halo and a solid outline in blue (`#1d4ed8`) under the hover outline, after the pack's own highlights, so a selected building that also "cannot retrofit" shows both.
 - The legend lists each highlighted value with a bordered (outline) or glowing (halo) swatch; plain values are not listed. Several outline mappings may be given: for a building the first that has a colour wins.
 - Drawn by `PackHost.bindInteraction(...).drawHighlight`, which the page already calls every frame; a page that does not create the interaction layer shows no highlights.
+
+#### `groundtint`: who is left behind
+
+The ground under the buildings is tinted by an aggregate of one field over a neighbourhood: an adoption rate, an income quintile.
+
+```yaml
+mappings:
+  - entity: building
+    field: retrofitted           # a number, int or boolean field (a boolean aggregates to a share)
+    channel: groundtint
+    group: {grid: 250}           # neighbourhoods: a square grid of this many metres (10 to 2000) ...
+    # group: {field: district, cell: 40}   # ... or the group a field names (an int or category), drawn in cells of `cell` metres (10 to 500, default 40)
+    aggregate: mean              # mean (default), sum, min or max; missing values are ignored
+    opacity: 0.5                 # above 0, at most 1 (default 0.5)
+    scale: {type: sequential, label: Retrofit rate, domain: [0, 1], colours: ["#fdf0d5", "#c8452f"]}
+```
+
+- A cell is drawn only where the model has buildings; a cell whose aggregate is missing (every value NaN, or no group) is left untinted, never drawn as zero. With a field group, each small cell takes the group most of its buildings belong to (the lowest group number on a tie) and the whole group's aggregate colours all its cells, so a district reads as one tone with a stepped edge.
+- Computed per frame version and cached: the shell gathers the cells' colours once when `sim.frameVersion` moves (`binding.tint()`); `VizLib.drawGroundTint` paints them, opaque, into one canvas the size of the view and blits it with the opacity, repainting only when the version or the view changes (`sim.tintPaints`). The ground layer is cached on its own key, so a new frame does not repaint it.
+- Drawn right after the ground and shadows and before buildings, trees and agents: the buildings are on top of it. The far-zoom layer is unaffected (it holds only buildings and trees).
+- The legend has a labelled ramp "<label> (ground tint)" with the aggregate and the neighbourhood ("mean over a 250 m grid") and an entry for ground the model does not cover.
+- One entity is drawn per pack and the first `groundtint` mapping of it is used.
 
 #### `overlay: insulation` and `overlay: community`
 

@@ -112,8 +112,11 @@
       "type": "object", "required": ["entity", "field", "channel"],
       "properties": {
         "entity": { "type": "string" }, "field": { "type": "string" },
-        "channel": { "enum": ["wall", "overlay", "segments", "height", "outline", "halo", "ground"] },
+        "channel": { "enum": ["wall", "overlay", "segments", "height", "outline", "halo", "ground", "groundtint"] },
         "total": { "type": "string" }, "max": { "type": "integer", "minimum": 2, "maximum": 12 },
+        "group": { "type": "object", "additionalProperties": false, "properties": { "grid": { "type": "number", "minimum": 10, "maximum": 2000 }, "field": { "type": "string" }, "cell": { "type": "number", "minimum": 10, "maximum": 500 } },
+                   "oneOf": [{ "required": ["grid"] }, { "required": ["field"] }] },
+        "aggregate": { "enum": ["mean", "sum", "min", "max"] }, "opacity": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
         "scale": {
           "type": "object", "required": ["type"],
           "properties": {

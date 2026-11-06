@@ -182,6 +182,28 @@
       }
      }
     }
+   },
+   {
+    "entity": "thing",
+    "field": "load",
+    "channel": "groundtint",
+    "group": {
+     "grid": 150
+    },
+    "aggregate": "mean",
+    "opacity": 0.5,
+    "scale": {
+     "type": "sequential",
+     "label": "Mean load by neighbourhood",
+     "domain": [
+      0,
+      1
+     ],
+     "colours": [
+      "#f4e9c8",
+      "#c8452f"
+     ]
+    }
    }
   ],
   "series": {
@@ -1043,6 +1065,114 @@
    "warnings": [
     "mappings[4].scale.values: no entry for a: drawn with no outline"
    ]
+  },
+  {
+   "name": "a groundtint by field is accepted",
+   "patch": {
+    "mappings.6.group": {
+     "field": "kind",
+     "cell": 40
+    }
+   },
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "a groundtint needs a group",
+   "patch": {
+    "mappings.6.group": "$delete"
+   },
+   "errors": [
+    "mappings[6].group: required"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a groundtint group is a grid or a field, not both",
+   "patch": {
+    "mappings.6.group": {
+     "grid": 100,
+     "field": "kind"
+    }
+   },
+   "errors": [
+    "mappings[6].group: give either grid or field"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a groundtint grid has a sane size",
+   "patch": {
+    "mappings.6.group.grid": 3
+   },
+   "errors": [
+    "mappings[6].group.grid: must be a cell size in metres from 10 to 2000"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a groundtint group field must exist",
+   "patch": {
+    "mappings.6.group": {
+     "field": "ghost"
+    }
+   },
+   "errors": [
+    "mappings[6].group.field: entity thing has no field ghost"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a groundtint aggregates a number, not a category",
+   "patch": {
+    "mappings.6.field": "kind"
+   },
+   "errors": [
+    "mappings[6].field: the groundtint channel needs a number, int or boolean field"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a groundtint aggregate is one of a few",
+   "patch": {
+    "mappings.6.aggregate": "median"
+   },
+   "errors": [
+    "mappings[6].aggregate: must be one of mean, sum, min, max"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a groundtint needs a sequential scale",
+   "patch": {
+    "mappings.6.scale": {
+     "type": "categorical",
+     "values": {
+      "a": {
+       "colour": "#112233",
+       "label": "A"
+      }
+     }
+    }
+   },
+   "errors": [
+    "mappings[6].scale.type: the groundtint channel needs a sequential scale"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a groundtint opacity is above 0 and at most 1",
+   "patch": {
+    "mappings.6.opacity": 0
+   },
+   "errors": [
+    "mappings[6].opacity: must be above 0 and at most 1"
+   ],
+   "warnings": [],
+   "schema": "fail"
   }
  ]
 }

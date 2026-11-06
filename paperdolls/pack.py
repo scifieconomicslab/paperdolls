@@ -15,8 +15,9 @@ NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 RUNTIMES = ["js", "pyodide", "remote"]
 PARAM_TYPES = ["number", "integer", "boolean", "enum"]
 FIELD_TYPES = ["category", "number", "int", "boolean"]
-CHANNELS = ["wall", "overlay", "segments", "outline", "halo"]
+CHANNELS = ["wall", "overlay", "segments", "outline", "halo", "groundtint"]
 PLANNED_CHANNELS = ["height", "ground"]
+AGGREGATES = ["mean", "sum", "min", "max"]
 OVERLAYS = ["scaffold", "solar", "band", "marker", "insulation", "community"]
 SEG_MAX = 12
 REGIONS = ["left", "right", "bottom"]
@@ -284,7 +285,7 @@ def validate(m):
             err(at, "must be a mapping")
             continue
         for k in mp:
-            if k not in ("entity", "field", "channel", "scale", "total", "max"):
+            if k not in ("entity", "field", "channel", "scale", "total", "max", "group", "aggregate", "opacity"):
                 err(f"{at}.{k}", "unknown key")
         if mp.get("channel") in PLANNED_CHANNELS:
             warn(f"{at}.channel", f"{mp['channel']} is a planned channel and is ignored for now")
@@ -321,6 +322,45 @@ def validate(m):
                 err(f"{at}.scale.colour", "needs a #rrggbb colour")
             if "todo" in sc and not (isinstance(sc["todo"], str) and HEX.match(sc["todo"])):
                 err(f"{at}.scale.todo", "must be a #rrggbb colour")
+            if not _is_str(sc.get("label")):
+                warn(f"{at}.scale.label", "missing: the legend will show the field name")
+            continue
+        if mp["channel"] == "groundtint":  # the ground under the buildings, tinted by an aggregate of the field over a neighbourhood
+            if f.get("type") == "category":
+                err(f"{at}.field", f"the groundtint channel needs a number, int or boolean field to aggregate, {mp['field']} is a category")
+            gr = mp.get("group")
+            if not _obj(gr):
+                err(f"{at}.group", "required: {grid: metres} or {field: name, cell: metres}")
+            else:
+                for k in gr:
+                    if k not in ("grid", "field", "cell"):
+                        err(f"{at}.group.{k}", "unknown key")
+                if ("grid" in gr) == ("field" in gr):
+                    err(f"{at}.group", "give either grid or field")
+                elif "grid" in gr:
+                    if not (_is_num(gr["grid"]) and 10 <= gr["grid"] <= 2000):
+                        err(f"{at}.group.grid", "must be a cell size in metres from 10 to 2000")
+                    if "cell" in gr:
+                        err(f"{at}.group.cell", "only with a field group")
+                else:
+                    gf = field_spec(mp["entity"], gr["field"]) if isinstance(gr.get("field"), str) else None
+                    if not isinstance(gr.get("field"), str) or not _obj(gf):
+                        err(f"{at}.group.field", f"entity {mp['entity']} has no field {gr.get('field')}")
+                    if "cell" in gr and not (_is_num(gr["cell"]) and 10 <= gr["cell"] <= 500):
+                        err(f"{at}.group.cell", "must be a cell size in metres from 10 to 500")
+            if "aggregate" in mp and mp["aggregate"] not in AGGREGATES:
+                err(f"{at}.aggregate", "must be one of " + ", ".join(AGGREGATES))
+            if "opacity" in mp and not (_is_num(mp["opacity"]) and 0 < mp["opacity"] <= 1):
+                err(f"{at}.opacity", "must be above 0 and at most 1")
+            if not _obj(sc) or sc.get("type") != "sequential":
+                err(f"{at}.scale.type", "the groundtint channel needs a sequential scale")
+                continue
+            dom = sc.get("domain")
+            if not (isinstance(dom, list) and len(dom) == 2 and all(_is_num(d) for d in dom) and dom[0] < dom[1]):
+                err(f"{at}.scale.domain", "must be [low, high] with low below high")
+            cols = sc.get("colours")
+            if not (isinstance(cols, list) and len(cols) >= 2 and all(isinstance(c, str) and HEX.match(c) for c in cols)):
+                err(f"{at}.scale.colours", "must be at least two #rrggbb colours")
             if not _is_str(sc.get("label")):
                 warn(f"{at}.scale.label", "missing: the legend will show the field name")
             continue

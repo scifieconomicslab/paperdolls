@@ -16,14 +16,19 @@
   const wallMaps = manifest => (manifest.mappings || []).filter(m => m.channel === 'wall');
   const overlayMaps = manifest => (manifest.mappings || []).filter(m => m.channel === 'overlay');
   const segMaps = manifest => (manifest.mappings || []).filter(m => m.channel === 'segments');
-  const DRAWN = ['wall', 'overlay', 'segments', 'outline', 'halo'];
+  const DRAWN = ['wall', 'overlay', 'segments', 'outline', 'halo', 'groundtint'];
   const drawnEntity = manifest => { const m = (manifest.mappings || []).find(x => DRAWN.includes(x.channel)); return m ? m.entity : null; };
+  const tintMap = (manifest, en) => (manifest.mappings || []).find(m => m.channel === 'groundtint' && m.entity === en) || null;
   const num = v => (Math.round(v * 1000) / 1000);
 
   // ---- legend: made from the mappings, so it can describe only what is drawn ----
   function legendFor(manifest) {
     return (manifest.mappings || []).filter(m => DRAWN.includes(m.channel)).map(m => {
       const f = fieldOf(manifest, m.entity, m.field), title = m.scale.label || (f && f.label) || m.field;
+      if (m.channel === 'groundtint') {
+        const g = m.group || {}, how = (m.aggregate || 'mean') + ' over ' + (g.grid ? 'a ' + g.grid + ' m grid' : 'each ' + g.field + ' (cells of ' + (g.cell || 40) + ' m)');
+        return { title: title + ' (ground tint)', kind: 'ramp', colours: m.scale.colours.slice(), domain: m.scale.domain.slice(), noData: null, noDataLabel: 'No buildings of the model', note: 'Ground under the buildings: ' + how };
+      }
       if (m.channel === 'outline' || m.channel === 'halo') {          // one entry per value that is highlighted; values with no colour are not drawn and not listed
         const f2 = fieldOf(manifest, m.entity, m.field), names = f2 && f2.type === 'category' ? f2.values : Object.keys(m.scale.values);
         return { title, kind: 'swatches', items: names.filter(k => m.scale.values[k] && m.scale.values[k].colour).map(k => ({ label: m.scale.values[k].label, colour: m.scale.values[k].colour, mode: m.channel })) };
@@ -248,10 +253,47 @@
       }
       ctx.restore(); return drawn;
     }
+    // ground tint: the ground under the buildings coloured by an aggregate of one field over a neighbourhood. A neighbourhood is a cell of a coarse grid ({grid: metres}) or the
+    // group a field names ({field, cell}): the ground is cut into small cells ({cell} metres), each takes the group most of its buildings are in, and a group's aggregate
+    // (mean, sum, min or max of the field, over the buildings of the model, ignoring missing values) colours all its cells. The cells are fixed at bind time; the colours are
+    // gathered once per frame version (sim.groundTint.cells(version)) and VizLib.drawGroundTint draws them under the buildings.
+    const tm = tintMap(manifest, en), GT = { ver: NaN, cells: [], builds: 0, info: null };
+    if (tm) {
+      const gr = tm.group, size = gr.grid || gr.cell || 40, byField = !!gr.field, agg = tm.aggregate || 'mean', colourOf = scaleFor(manifest, tm).colour, lo = tm.scale.domain[0], hi = tm.scale.domain[1];
+      const gfield = byField ? fieldOf(manifest, en, gr.field) : null, cellMap = new Map(), cellList = [];
+      for (let i = 0; i < nScene; i++) {
+        if (modelOf[i] < 0) continue; const e = sim.buildings[i], ix = Math.floor(e.fit.cx / size), iy = Math.floor(e.fit.cy / size), key = ix + ',' + iy; let c = cellMap.get(key);
+        if (!c) { c = { x0: ix * size, y0: iy * size, x1: (ix + 1) * size, y1: (iy + 1) * size, members: [] }; cellMap.set(key, c); cellList.push(c); }
+        c.members.push(i);
+      }
+      const fold = (acc, v) => { if (v === v) { acc.n++; acc.sum += v; if (v < acc.min) acc.min = v; if (v > acc.max) acc.max = v; } };
+      const value = acc => (acc.n ? (agg === 'sum' ? acc.sum : agg === 'min' ? acc.min : agg === 'max' ? acc.max : acc.sum / acc.n) : NaN);
+      const fresh = () => ({ n: 0, sum: 0, min: Infinity, max: -Infinity });
+      GT.refresh = () => {
+        if (GT.ver === sim.frameVersion) return GT.cells; GT.ver = sim.frameVersion; GT.builds++;
+        const out = [], vals = F[tm.field];
+        if (!live) { GT.cells = out; return out; }
+        if (!byField) { for (const c of cellList) { const acc = fresh(); for (const i of c.members) fold(acc, vals[i]); const v = value(acc); if (v === v) out.push({ x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1, v, colour: colourOf(Math.max(lo, Math.min(hi, v))) }); } GT.info = { groups: out.length }; }
+        else {
+          const gv = F[gr.field], groups = new Map(), cellGroup = new Array(cellList.length);
+          const gid = i => { const g = gv[i]; return g === g && g >= 0 ? g : null; };       // a missing group (NaN, -1 for a category) belongs to no neighbourhood
+          cellList.forEach((c, ci) => {
+            const tally = new Map(); let best = null, bn = 0;
+            for (const i of c.members) { const g = gid(i); if (g === null) continue; const n = (tally.get(g) || 0) + 1; tally.set(g, n); if (n > bn || (n === bn && g < best)) { best = g; bn = n; } }
+            cellGroup[ci] = best;
+          });
+          for (let i = 0; i < nScene; i++) { if (modelOf[i] < 0) continue; const g = gid(i); if (g === null) continue; let acc = groups.get(g); if (!acc) groups.set(g, acc = fresh()); fold(acc, vals[i]); }
+          cellList.forEach((c, ci) => { const acc = cellGroup[ci] === null ? null : groups.get(cellGroup[ci]); const v = acc ? value(acc) : NaN; if (v === v) out.push({ x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1, v, group: cellGroup[ci], colour: colourOf(Math.max(lo, Math.min(hi, v))) }); });
+          GT.info = { groups: groups.size };
+        }
+        GT.cells = out; return out;
+      };
+      sim.groundTint = { cells: () => GT.refresh(), opacity: tm.opacity === undefined ? 0.5 : tm.opacity, version: () => sim.frameVersion };
+    }
     const offs = ['time', 'frames', 'view'].map(t => store.subscribe(t, sync));
     const entityOf = bound ? (k => (index[k] >= 0 ? sim.buildings[index[k]] : null)) : (k => sim.buildings[placement.order[k]]);
-    return { ok: true, bound: !!bound, placement, entityOf, count, placed, warnings: bound ? bound.warnings : [], entity: en, index, modelOf, nScene, sync, drawChannels, highlights: () => { refreshHL(); return { halo: HL.halo, outline: HL.outline, builds: HL.builds }; },
-             styleCount: () => table.size, dispose() { offs.forEach(f => f()); sim.buildingStyle = null; sim.frameVersion = undefined; } };
+    return { ok: true, bound: !!bound, placement, entityOf, count, placed, warnings: bound ? bound.warnings : [], entity: en, index, modelOf, nScene, sync, drawChannels, highlights: () => { refreshHL(); return { halo: HL.halo, outline: HL.outline, builds: HL.builds }; }, tint: tm ? () => { GT.refresh(); return { cells: GT.cells, builds: GT.builds, info: GT.info }; } : null,
+             styleCount: () => table.size, dispose() { offs.forEach(f => f()); sim.buildingStyle = null; sim.frameVersion = undefined; sim.groundTint = null; } };
   }
 
   // ---- what one entity looks like at the time shown: the frame's own values, labelled the way the legend labels them ----
@@ -326,7 +368,7 @@
         for (const sec of legendFor(manifest)) {
           const row = el('div', { class: 'pk-legrow' }, el('b', { text: sec.title }));
           const sw = (colour, text, mode) => el('span', { class: 'pk-sw' }, el('i', { style: mode === 'outline' ? 'background:transparent;border:2px solid ' + colour : mode === 'halo' ? 'background:transparent;box-shadow:0 0 5px 2px ' + colour : 'background:' + (colour || 'repeating-linear-gradient(45deg,#fff 0 3px,#ddd 3px 6px)') }), text);
-          if (sec.kind === 'ramp') { row.appendChild(el('span', { class: 'pk-ramp' }, String(sec.domain[0]), el('i', { style: 'background:linear-gradient(90deg,' + sec.colours.join(',') + ')' }), String(sec.domain[1]))); row.appendChild(sw(sec.noData, 'No data')); }
+          if (sec.kind === 'ramp') { row.appendChild(el('span', { class: 'pk-ramp' }, String(sec.domain[0]), el('i', { style: 'background:linear-gradient(90deg,' + sec.colours.join(',') + ')' }), String(sec.domain[1]))); row.appendChild(sw(sec.noData, sec.noDataLabel || 'No data')); if (sec.note) row.appendChild(el('small', { text: sec.note })); }
           else for (const it of sec.items) row.appendChild(it.overlay !== undefined ? el('span', { text: (it.overlay ? it.overlay + ' on the building' : 'no marking') + ' = ' + it.label }) : sw(it.colour, it.label, it.mode));
           box.appendChild(row);
         }

@@ -253,4 +253,60 @@ else {
   });
 }
 
+// ================= ground tint =================
+const TINT = (group, extra) => Object.assign({ entity: 'block', field: 'adopt', channel: 'groundtint', group, scale: { type: 'sequential', label: 'Adoption', domain: [0, 1], colours: ['#ffffff', '#ff0000'] } }, extra || {});
+function bindTint(group, extra, mutate) {
+  const M = JSON.parse(J(BLOCKS)); M.mappings.push(TINT(group, extra)); if (mutate) mutate(M);
+  const store = PStore.create(M), sim = mkSim(), fr = mkFrames();
+  fr[0].entities.block.adopt = Float32Array.from({ length: 30 }, (_, i) => i / 29); fr[0].entities.block.district = Int32Array.from({ length: 30 }, (_, i) => i % 3);
+  fr[1].patch.block.adopt = { idx: Int32Array.from([0, 29]), val: Float32Array.from([1, 0]) };
+  store.pushFrames(fr, { replace: true });
+  const b = PackHost.bindRenderer({ manifest: M, store, controller: { wall: 0 }, sim }); assert(b.ok, b.error);
+  return { M, store, sim, b };
+}
+const near2 = (x, y) => x * x + y * y;
+test('groundtint by grid: each cell is the mean of the field over the buildings inside it, coloured from the scale, cached per frame version', () => {
+  const { store, sim, b } = bindTint({ grid: 80 }), size = 80, F = store.bound('block').fields.adopt, T = b.tint();
+  const want = new Map(); for (let k = 0; k < 30; k++) { const e = b.entityOf(k), key = Math.floor(e.fit.cx / size) + ',' + Math.floor(e.fit.cy / size); const a = want.get(key) || { s: 0, n: 0 }; a.s += F[b.index[k]]; a.n++; want.set(key, a); }
+  assert.strictEqual(T.cells.length, want.size, 'one cell per occupied grid cell'); assert(T.cells.length >= 2, 'the sample spans several cells: ' + T.cells.length);
+  for (const c of T.cells) { const a = want.get(c.x0 / size + ',' + c.y0 / size); assert(a, 'a cell with buildings'); assert(Math.abs(c.v - a.s / a.n) < 1e-6, 'mean ' + c.v + ' vs ' + a.s / a.n); assert.strictEqual(c.colour, PackHost.scaleFor(JSON.parse(J(BLOCKS)), TINT({ grid: 80 })).colour(c.v)); assert.strictEqual(c.x1 - c.x0, size); }
+  const builds = T.builds; b.tint(); b.tint(); assert.strictEqual(b.tint().builds, builds, 'not gathered again at the same version'); store.setTime(1); const T1 = b.tint(); assert.strictEqual(T1.builds, builds + 1, 'gathered once for the new version');
+  assert(T1.cells.some(c => c.v !== T.cells.find(d => d.x0 === c.x0 && d.y0 === c.y0).v), 'and the patch moved a cell');
+  assert(typeof sim.groundTint.cells === 'function' && sim.groundTint.opacity === 0.5); b.dispose(); assert.strictEqual(sim.groundTint, null);
+});
+test('groundtint by a field: a group takes one value for all its cells (mean, sum, min, max), each cell the group most of its buildings are in', () => {
+  for (const [agg, f] of [['mean', xs => xs.reduce((a, c) => a + c, 0) / xs.length], ['sum', xs => xs.reduce((a, c) => a + c, 0)], ['min', xs => Math.min(...xs)], ['max', xs => Math.max(...xs)]]) {
+    const { store, b } = bindTint({ field: 'district', cell: 40 }, { aggregate: agg }), F = store.bound('block').fields, T = b.tint();
+    const byG = [[], [], []]; for (let k = 0; k < 30; k++) byG[F.district[b.index[k]]].push(F.adopt[b.index[k]]);
+    assert(T.cells.length > 0 && T.info.groups === 3, agg + ': three groups ' + J(T.info));
+    for (const c of T.cells) assert(Math.abs(c.v - f(byG[c.group])) < 1e-5, agg + ' group ' + c.group + ': ' + c.v + ' vs ' + f(byG[c.group]));
+    b.dispose();
+  }
+});
+test('groundtint: a boolean field gives a share; missing values leave the ground untinted, not zero', () => {
+  const t = bindTint({ grid: 4000 }, { field: 'cannot' }); t.store.setTime(1);
+  const T = t.b.tint(); assert.strictEqual(T.cells.length, 1, 'one cell covers the scene'); assert(Math.abs(T.cells[0].v - 2 / 30) < 1e-6, 'two of thirty cannot: ' + T.cells[0].v);
+  const n = bindTint({ grid: 80 }, null, M => { M.mappings[M.mappings.length - 1].field = 'adopt'; }); n.store.pushFrames([{ t: 2, patch: { block: { adopt: { idx: Int32Array.from({ length: 30 }, (_, i) => i), val: Float32Array.from({ length: 30 }, () => NaN) } } }, series: {} }]);
+  n.store.setTime(2); assert.strictEqual(n.b.tint().cells.length, 0, 'every value missing: nothing tinted');
+});
+test('groundtint: the legend is a labelled ramp with what it aggregates over', () => {
+  const M = JSON.parse(J(BLOCKS)); M.mappings.push(TINT({ field: 'district', cell: 50 }, { aggregate: 'max' }));
+  const e = PackHost.legendFor(M).find(x => /ground tint/.test(x.title)); assert(e && e.kind === 'ramp' && e.title === 'Adoption (ground tint)' && J(e.domain) === '[0,1]' && e.colours.length === 2);
+  assert(/max over each district \(cells of 50 m\)/.test(e.note), e.note); assert(/No buildings/.test(e.noDataLabel));
+});
+if (createCanvas) test('groundtint render: the tint is under the buildings, repainted once per version, and does not touch the cached ground layer', () => {
+  A.sprites.factory = (w, h) => createCanvas(w, h); A.sprites.cache.clear(); A.sprites.pixels = 0;
+  const { store, sim, b } = bindTint({ grid: 80 }), W = 900, H = 600, ctx = createCanvas(W, H).getContext('2d'), e3 = b.entityOf(3);
+  const near = { w: W, h: H, scale: 6, ox: W / 2 - (e3.fit.cx - e3.fit.cy) * 6 * 0.866, oy: H / 2 - (e3.fit.cx + e3.fit.cy) * 3 };
+  const frame = v => { for (let i = 0; i < 8; i++) V.renderFrame(ctx, sim, v, { buildings: true, vehicles: false, people: false, trees: false }); return Buffer.from(ctx.getImageData(0, 0, W, H).data); };
+  const tint = sim.groundTint; sim.groundTint = null; const plain = frame(near); sim.groundTint = tint; const tinted = frame(near);
+  let diff = 0; for (let i = 0; i < plain.length; i += 4) if (Math.abs(plain[i] - tinted[i]) + Math.abs(plain[i + 1] - tinted[i + 1]) + Math.abs(plain[i + 2] - tinted[i + 2]) > 12) diff++;
+  assert(diff > 5000, 'a large part of the ground changed colour: ' + diff);
+  const c = V.proj(near, e3.fit.cx, e3.fit.cy, 2), at = (buf, p) => { const o = (Math.round(p[1]) * W + Math.round(p[0])) * 4; return [buf[o], buf[o + 1], buf[o + 2]]; };
+  assert.strictEqual(J(at(plain, c)), J(at(tinted, c)), 'a point on the building is the same with and without the tint: the buildings are drawn over it');
+  const r0 = sim.layerRepaints, p0 = sim.tintPaints; frame(near); assert.strictEqual(sim.tintPaints, p0, 'a still view repaints nothing'); assert.strictEqual(sim.layerRepaints, r0);
+  store.setTime(1); frame(near); assert.strictEqual(sim.tintPaints, p0 + 1, 'a new frame repaints the tint once'); assert.strictEqual(sim.layerRepaints, r0, 'and the ground layer not at all');
+  const tr = frame(Object.assign({}, near, { ox: near.ox + 37 })); assert(sim.tintPaints === p0 + 2, 'a pan repaints it for the new view'); b.dispose();
+});
+
 console.log(passed + ' passed' + (process.exitCode ? ', with failures' : ''));

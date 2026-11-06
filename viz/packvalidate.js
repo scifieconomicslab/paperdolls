@@ -12,7 +12,8 @@
   const RUNTIMES = ['js', 'pyodide', 'remote'];
   const PARAM_TYPES = ['number', 'integer', 'boolean', 'enum'];
   const FIELD_TYPES = ['category', 'number', 'int', 'boolean'];
-  const CHANNELS = ['wall', 'overlay', 'segments', 'outline', 'halo'], PLANNED_CHANNELS = ['height', 'ground'];
+  const CHANNELS = ['wall', 'overlay', 'segments', 'outline', 'halo', 'groundtint'], PLANNED_CHANNELS = ['height', 'ground'];
+  const AGGREGATES = ['mean', 'sum', 'min', 'max'];
   const OVERLAYS = ['scaffold', 'solar', 'band', 'marker', 'insulation', 'community'];
   const SEG_MAX = 12;
   const REGIONS = ['left', 'right', 'bottom'];
@@ -162,7 +163,7 @@
     maps.forEach((mp, i) => {
       const at = 'mappings[' + i + ']';
       if (!isObj(mp)) { err(at, 'must be a mapping'); return; }
-      for (const k of Object.keys(mp)) if (!['entity', 'field', 'channel', 'scale', 'total', 'max'].includes(k)) err(at + '.' + k, 'unknown key');
+      for (const k of Object.keys(mp)) if (!['entity', 'field', 'channel', 'scale', 'total', 'max', 'group', 'aggregate', 'opacity'].includes(k)) err(at + '.' + k, 'unknown key');
       if (PLANNED_CHANNELS.includes(mp.channel)) { warn(at + '.channel', mp.channel + ' is a planned channel and is ignored for now'); return; }
       if (!CHANNELS.includes(mp.channel)) { err(at + '.channel', 'must be one of ' + CHANNELS.join(', ')); return; }
       const f = fieldSpec(mp.entity, mp.field);
@@ -177,6 +178,28 @@
         if (!isObj(sc) || sc.type !== 'segments') { err(at + '.scale.type', 'must be segments'); return; }
         if (!(typeof sc.colour === 'string' && HEX.test(sc.colour))) err(at + '.scale.colour', 'needs a #rrggbb colour');
         if (sc.todo !== undefined && !(typeof sc.todo === 'string' && HEX.test(sc.todo))) err(at + '.scale.todo', 'must be a #rrggbb colour');
+        if (!isStr(sc.label)) warn(at + '.scale.label', 'missing: the legend will show the field name');
+        return;
+      }
+      if (mp.channel === 'groundtint') {              // the ground under the buildings, tinted by an aggregate of the field over a neighbourhood
+        if (f.type === 'category') err(at + '.field', 'the groundtint channel needs a number, int or boolean field to aggregate, ' + mp.field + ' is a category');
+        const gr = mp.group;
+        if (!isObj(gr)) err(at + '.group', 'required: {grid: metres} or {field: name, cell: metres}');
+        else {
+          for (const k of Object.keys(gr)) if (!['grid', 'field', 'cell'].includes(k)) err(at + '.group.' + k, 'unknown key');
+          if ((gr.grid === undefined) === (gr.field === undefined)) err(at + '.group', 'give either grid or field');
+          else if (gr.grid !== undefined) { if (!(isNum(gr.grid) && gr.grid >= 10 && gr.grid <= 2000)) err(at + '.group.grid', 'must be a cell size in metres from 10 to 2000'); if (gr.cell !== undefined) err(at + '.group.cell', 'only with a field group'); }
+          else {
+            const gf = fieldSpec(mp.entity, gr.field);
+            if (!isStr(gr.field) || !isObj(gf)) err(at + '.group.field', 'entity ' + mp.entity + ' has no field ' + gr.field);
+            if (gr.cell !== undefined && !(isNum(gr.cell) && gr.cell >= 10 && gr.cell <= 500)) err(at + '.group.cell', 'must be a cell size in metres from 10 to 500');
+          }
+        }
+        if (mp.aggregate !== undefined && !AGGREGATES.includes(mp.aggregate)) err(at + '.aggregate', 'must be one of ' + AGGREGATES.join(', '));
+        if (mp.opacity !== undefined && !(isNum(mp.opacity) && mp.opacity > 0 && mp.opacity <= 1)) err(at + '.opacity', 'must be above 0 and at most 1');
+        if (!isObj(sc) || sc.type !== 'sequential') { err(at + '.scale.type', 'the groundtint channel needs a sequential scale'); return; }
+        if (!(Array.isArray(sc.domain) && sc.domain.length === 2 && sc.domain.every(isNum) && sc.domain[0] < sc.domain[1])) err(at + '.scale.domain', 'must be [low, high] with low below high');
+        if (!(Array.isArray(sc.colours) && sc.colours.length >= 2 && sc.colours.every(c => typeof c === 'string' && HEX.test(c)))) err(at + '.scale.colours', 'must be at least two #rrggbb colours');
         if (!isStr(sc.label)) warn(at + '.scale.label', 'missing: the legend will show the field name');
         return;
       }
