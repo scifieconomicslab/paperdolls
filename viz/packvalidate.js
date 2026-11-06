@@ -60,10 +60,19 @@
     const rt = m.runtime;
     if (!isObj(rt)) err('runtime', 'required: {type: js, entry: runtime.js}');
     else {
-      for (const k of Object.keys(rt)) if (!['type', 'entry', 'seed', 'on_params', 'options'].includes(k)) err('runtime.' + k, 'unknown key');
+      for (const k of Object.keys(rt)) if (!['type', 'entry', 'files', 'seed', 'on_params', 'options'].includes(k)) err('runtime.' + k, 'unknown key');
       if (!RUNTIMES.includes(rt.type)) err('runtime.type', 'must be one of ' + RUNTIMES.join(', '));
       else if (rt.type !== 'js') warn('runtime.type', rt.type + ' runtimes are planned; only js runs today');
       if (rt.type === 'js' && !isStr(rt.entry)) err('runtime.entry', 'required for a js runtime: the file that registers it');
+      if (rt.files !== undefined) {
+        if (!Array.isArray(rt.files) || !rt.files.length || !rt.files.every(isStr)) err('runtime.files', 'must be a non-empty list of file names, in the order they load (the entry among them)');
+        else {
+          const norm = f => { if (f.startsWith('/') || f.includes('\\') || /^[A-Za-z]:/.test(f)) return null; const parts = f.split('/').filter(x => x !== '' && x !== '.'); return !parts.length || parts.includes('..') ? null : parts.join('/'); };
+          const seen = new Set();
+          rt.files.forEach((f, i) => { const n = norm(f); if (n === null) err('runtime.files[' + i + ']', 'must be a relative path inside the pack folder (no leading / and no ..)'); else if (seen.has(n)) err('runtime.files[' + i + ']', f + ' is listed twice'); seen.add(n); });
+          if (isStr(rt.entry) && !seen.has(norm(rt.entry))) err('runtime.files', 'must include the entry ' + rt.entry + ' (list every file that is inlined, in load order)');
+        }
+      }
       if (rt.seed !== undefined && !isInt(rt.seed)) err('runtime.seed', 'must be a whole number');
       if (rt.on_params !== undefined && !['rerun', 'continue'].includes(rt.on_params)) err('runtime.on_params', 'must be rerun or continue');
       if (rt.options !== undefined && !isObj(rt.options)) err('runtime.options', 'must be a mapping');

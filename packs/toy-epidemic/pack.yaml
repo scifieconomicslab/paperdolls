@@ -5,7 +5,7 @@ description: >
   A small stochastic S-E-I-R model on a contact network of buildings. It exists to prove the model-pack loop (manifest, runtime, shared store,
   controls, map), not to say anything about disease.
 
-runtime: {type: js, entry: runtime.js, seed: 7, on_params: rerun}
+runtime: {type: js, entry: runtime.js, files: [runtime.js], seed: 7, on_params: rerun}
 time: {unit: day, steps: 160, speeds: [5, 20, 60], speed: 20}
 
 params:

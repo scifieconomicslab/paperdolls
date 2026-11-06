@@ -16,7 +16,7 @@ Four commands, all in `paperdolls pack ...`:
 
 | Command | What it does |
 |---|---|
-| `dev PACK --scene SCENE.json [--port N]` | Serves the page on `127.0.0.1` and reloads it when you save `pack.yaml`, `runtime.js`, `bind.js` (or the scene). Validation errors appear in the page. |
+| `dev PACK --scene SCENE.json [--port N]` | Serves the page on `127.0.0.1` and reloads it when you save `pack.yaml`, any runtime file (`runtime.js`, `bind.js`, the others in `runtime.files`) or the scene. Validation errors appear in the page. |
 | `check PACK [--scene SCENE.json]` | The manifest, then the runtime actually run: determinism, frames against the manifest. Exit code 0 or 1. |
 | `check PACK --runtime-parity ref.py` | Also compares the runtime with a Python reference, case by case. |
 | `build PACK --scene SCENE.json --out page.html` | One offline HTML file, no network, to send to someone. |
@@ -99,8 +99,18 @@ Rules the page and `pack check` hold you to:
 - After time 0 a frame may be a **patch** (only what changed) instead of the whole state. The toy does this; use it when thousands of buildings stay the same each step. See the spec.
 - `snapshot`/`restore` together (optional) and `inspect(handle, selection, t)` (optional, what the inspector shows for a clicked building).
 
-If the runtime needs another file (a shared random-number generator, say), the page inlines only the entry and `bind.js`. Either keep the pieces in `runtime.js`, or name the extra files with
-`--include path/to/prng.js` on `dev`, `check` and `build` (repeatable; they load before the entry).
+If the runtime is more than one file (a shared random-number generator, a hook, a separate `bind.js`), list every file in `pack.yaml`, in the order they must load:
+
+```yaml
+runtime:
+  type: js
+  entry: runtime.js                       # the file that registers the runtime; it must be in the list
+  files: [prng.js, hook.js, runtime.js, bind.js]
+```
+
+`dev`, `check` and `build` then inline exactly those files in that order, and `dev` reloads when any of them changes. Nothing is guessed: a listed file that does not exist, or a file that
+`require('./x.js')`s or `importScripts('x.js')`s a script that is not in the list, stops `check` and `build` with the file named (a page missing a helper would otherwise load and fail silently).
+A pack with only `entry` still works: the page then inlines the entry and a `bind.js` beside it. `--include path/to/prng.js` (repeatable) adds files before the list, as before.
 
 Save, and the page reloads with your slider settings and time kept.
 

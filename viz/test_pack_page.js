@@ -24,7 +24,7 @@ async function test(name, fn) { try { await fn(); console.log('PASS ' + name); }
       const el = d.querySelector('[data-param=' + name + ']'); assert(el, 'control for ' + name);
       const label = d.querySelector('label[for=' + el.id + ']'); assert(label && label.textContent.startsWith(p.label || name), 'label for ' + name + ': ' + (label && label.textContent));
       if (p.unit && p.type !== 'boolean') assert(label.textContent.includes(p.unit), 'unit for ' + name);
-      assert.strictEqual(el.closest('fieldset').querySelector('legend').textContent, p.group, 'group of ' + name);
+      assert.strictEqual(el.closest('details.pk-group').querySelector('summary').textContent, p.group, 'group of ' + name);
     }
     assert.strictEqual(d.querySelector('[data-param=beta]').type, 'range'); assert.strictEqual(d.querySelector('[data-param=masks]').type, 'checkbox'); assert.strictEqual(d.querySelector('[data-param=lockdown]').tagName, 'SELECT');
     assert.strictEqual(d.querySelector('[data-param=lockdown]').options[1].textContent, 'Partial');
@@ -64,7 +64,7 @@ async function test(name, fn) { try { await fn(); console.log('PASS ' + name); }
     const slider = d.querySelector('[data-time]'), label = d.querySelector('.pk-time'), play = d.querySelector('[data-play]');
     assert.strictEqual(+slider.max, M.time.steps); assert.strictEqual(label.textContent, 'Day ' + store.time().t + ' of ' + M.time.steps);
     slider.value = '25'; fire(slider, 'input'); assert.strictEqual(store.time().t, 25); assert.strictEqual(label.textContent, 'Day 25 of ' + M.time.steps);
-    assert(/Buildings by state: S \d+ · E \d+ · I \d+ · R \d+/.test(d.querySelector('.pk-readout').textContent), d.querySelector('.pk-readout').textContent);
+    assert(!d.querySelector('.pk-readout'), 'a pack that declares charts has no text dump under the timeline');
     const sp = d.querySelector('[data-speed]'); sp.value = String(M.time.speeds[2]); fire(sp, 'change'); assert.strictEqual(store.time().speed, M.time.speeds[2]);
     play.click(); assert.strictEqual(play.textContent, 'Pause'); assert(await until(() => store.time().t > 25), 'playing moves the time: ' + store.time().t);
     play.click(); assert.strictEqual(store.time().playing, false); assert.strictEqual(play.textContent, 'Play');
@@ -110,6 +110,13 @@ async function test(name, fn) { try { await fn(); console.log('PASS ' + name); }
     const t = store.time().t === 30 ? 31 : 30; store.setTime(t);
     assert(await until(() => box.querySelector('.pk-extra dt').textContent === 'State on day ' + t), 'asked again for the new time: ' + box.querySelector('.pk-extra dt').textContent);
     P.interaction.drawHighlight(Object.assign({ log: [] }, ...['clearRect', 'beginPath', 'moveTo', 'lineTo', 'closePath', 'stroke', 'save', 'restore', 'setLineDash'].map(n => ({ [n]() { this.log.push(n); } }))), cam.view());
+  });
+  await test('layout: the inspector is docked over the map (always in view), and a press on it does not reach the map', () => {
+    const box = d.querySelector('.pk-inspector'), stage = d.getElementById('stagebox'); assert.strictEqual(box.parentNode, stage, 'in the map box, not in a side column'); assert(box.classList.contains('pk-docked'));
+    const s0 = spot(); store.select({ entity: 'building', id: s0.k }); assert(!box.hidden, 'shown at once');
+    for (const t of ['pointerdown', 'pointerup']) box.dispatchEvent(new w.Event(t, { bubbles: true }));
+    assert.strictEqual(store.selection().id, s0.k, 'pressing the panel does not select or clear'); store.select(null); assert(box.hidden, 'hidden when the selection is cleared');
+    assert(d.querySelector('details.pk-group summary'), 'parameter groups are collapsible sections'); assert(!d.querySelector('.pk-readout'), 'no text dump under the timeline when charts are declared');
   });
   await test('pick: a drag does not select, a click on nothing clears, Esc clears, and the buttons work', async () => {
     let s0 = spot(); const box = d.querySelector('.pk-inspector'); store.select({ entity: 'building', id: s0.k }); assert.strictEqual(store.selection().id, s0.k, 'set up');

@@ -107,7 +107,7 @@ def validate(m):
         err("runtime", "required: {type: js, entry: runtime.js}")
     else:
         for k in rt:
-            if k not in ("type", "entry", "seed", "on_params", "options"):
+            if k not in ("type", "entry", "files", "seed", "on_params", "options"):
                 err(f"runtime.{k}", "unknown key")
         if rt.get("type") not in RUNTIMES:
             err("runtime.type", "must be one of " + ", ".join(RUNTIMES))
@@ -115,6 +115,21 @@ def validate(m):
             warn("runtime.type", rt["type"] + " runtimes are planned; only js runs today")
         if rt.get("type") == "js" and not _is_str(rt.get("entry")):
             err("runtime.entry", "required for a js runtime: the file that registers it")
+        if "files" in rt:
+            files = rt["files"]
+            if not isinstance(files, list) or not files or not all(_is_str(f) for f in files):
+                err("runtime.files", "must be a non-empty list of file names, in the order they load (the entry among them)")
+            else:
+                seen = set()
+                for i, f in enumerate(files):
+                    n = norm_file(f)
+                    if n is None:
+                        err(f"runtime.files[{i}]", "must be a relative path inside the pack folder (no leading / and no ..)")
+                    elif n in seen:
+                        err(f"runtime.files[{i}]", f"{f} is listed twice")
+                    seen.add(n)
+                if _is_str(rt.get("entry")) and norm_file(rt["entry"]) not in seen:
+                    err("runtime.files", f"must include the entry {rt['entry']} (list every file that is inlined, in load order)")
         if "seed" in rt and not _is_int(rt["seed"]):
             err("runtime.seed", "must be a whole number")
         if "on_params" in rt and rt["on_params"] not in ("rerun", "continue"):
@@ -576,6 +591,16 @@ def load(path):
     return data
 
 
+def norm_file(f):
+    """A runtime file name as a comparable relative path ('./a//b.js' -> 'a/b.js'), or None when it leaves the pack folder."""
+    if not isinstance(f, str) or f.startswith("/") or "\\" in f or re.match(r"^[A-Za-z]:", f):
+        return None
+    parts = [x for x in f.split("/") if x not in ("", ".")]
+    if not parts or ".." in parts:
+        return None
+    return "/".join(parts)
+
+
 def check(path):
     """Validate a pack on disk. Returns (errors, warnings): the manifest, and that the runtime file it names exists."""
     try:
@@ -588,6 +613,14 @@ def check(path):
         entry = manifest_path(path).parent / rt["entry"]
         if not entry.is_file():
             errors.append(f"runtime.entry: {rt['entry']} does not exist next to pack.yaml")
+        if isinstance(rt.get("files"), list):
+            for f in rt["files"]:
+                if _is_str(f) and norm_file(f) and not (manifest_path(path).parent / norm_file(f)).is_file():
+                    errors.append(f"runtime.files: {f} does not exist next to pack.yaml")
+        if not errors:
+            e2, w2 = undeclared_scripts(path)
+            errors += e2
+            warnings += w2
     return errors, warnings
 
 
@@ -598,21 +631,61 @@ def _json_for_script(obj):
 # ---- the sources a page is built from ----
 
 def runtime_files(path, include=()):
-    """The files inlined as the pack's runtime, in order: --include files, the runtime.entry, then bind.js when it sits beside it.
+    """The files inlined as the pack's runtime, in load order.
 
-    `bind.js` is a convention, not a manifest key: a pack that keeps its bindScene in a second file gets it loaded after the entry
-    (it may use what the entry exposes). Returns a list of Paths (not checked for existence here)."""
+    With `runtime.files` in the manifest: --include files, then exactly the files listed, in the order listed (the entry is one of them).
+    Without it (the single-entry form): --include files, the runtime.entry, then bind.js when it sits beside it. That `bind.js` rule is
+    a convention kept for older packs, not a manifest key. Returns a list of Paths (not checked for existence here)."""
     base = manifest_path(path).parent
     files = [Path(f) for f in include]
     m = load(path)
     rt = m.get("runtime") if _obj(m) else None
-    if _obj(rt) and _is_str(rt.get("entry")):
+    if _obj(rt) and isinstance(rt.get("files"), list):
+        files += [base / norm_file(f) for f in rt["files"] if _is_str(f) and norm_file(f)]
+    elif _obj(rt) and _is_str(rt.get("entry")):
         entry = base / rt["entry"]
         files.append(entry)
         bind = base / "bind.js"
         if bind.is_file() and bind.resolve() != entry.resolve():
             files.append(bind)
     return files
+
+
+# a script that names another file by path: require('./prng.js'), importScripts('prng.js')
+_REF = re.compile(r"""(?:\brequire|\bimportScripts)\s*\(\s*(['"])([^'"]+)\1""")
+
+
+def undeclared_scripts(path, include=()):
+    """(errors, warnings) about runtime files the page would not contain. Error: an inlined file names a sibling script (require('./prng.js'),
+    importScripts('prng.js')) that sits in the pack folder and is not among the inlined files, so the built page would fail at run time. Warning: other .js files
+    sit beside pack.yaml and are not inlined (a helper a runtime uses as a global would be missing the same way)."""
+    base = manifest_path(path).parent
+    try:
+        files = runtime_files(path, include)
+    except PackError:
+        return [], []
+    have = {f.resolve() for f in files}
+    errors = []
+    for f in files:
+        if not f.is_file():
+            continue
+        src = f.read_text(encoding="utf-8", errors="replace")
+        for m_ in _REF.finditer(src):
+            name = m_.group(2)
+            if not (name.startswith(".") or name.endswith(".js")):
+                continue                                          # a bare module name (fs, path) is not a sibling file
+            tgt = (f.parent / name)
+            cands = [tgt] if tgt.suffix else [tgt, tgt.with_suffix(".js")]
+            if any(c.resolve() in have for c in cands):
+                continue
+            real = next((c for c in cands if c.is_file()), None)
+            if real is None or base.resolve() not in real.resolve().parents:
+                continue                                          # not a file of this pack (a node-only path such as ../../v3/prng.js behind a typeof-require guard): nothing to inline
+            errors.append(f"{f.name} refers to {name}, a file of the pack that is not inlined into the page: add it to runtime.files (in load order) or remove the reference")
+    declared = {f.name for f in files}
+    extra = sorted(c.name for c in base.glob("*.js") if c.resolve() not in have and c.name not in declared)
+    warnings = [f"{n} sits beside pack.yaml but is not inlined into the page; if the runtime uses it, list it in runtime.files" for n in extra]
+    return errors, warnings
 
 
 def watched_files(path, include=(), scene_path=None):

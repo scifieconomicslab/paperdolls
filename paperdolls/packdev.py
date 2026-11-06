@@ -1,7 +1,7 @@
 """`paperdolls pack dev`: a local development server for a model pack. Standard library only, bound to 127.0.0.1.
 
 GET /            the pack page, built from the files on disk (cached until one of them changes), with a small reload client added
-GET /__events    server-sent events: "version" whenever pack.yaml, runtime.js, bind.js (or the scene or an --include file) changed
+GET /__events    server-sent events: "version" whenever pack.yaml, a runtime file (runtime.files, or runtime.js and bind.js), the scene or an --include file changed
 GET /__status    JSON: {version, ok, errors, warnings, bytes}; the client polls this when EventSource is not available
 
 A pack that does not validate, or a runtime that cannot be inlined, is shown as a page listing the problems, not as a blank screen, and it

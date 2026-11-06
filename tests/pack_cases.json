@@ -1527,6 +1527,66 @@
     "mappings[2].colour: only a wall mapping chooses its surfaces (wall, roof or wall+roof)"
    ],
    "warnings": []
+  },
+  {
+   "name": "runtime.files lists the entry among the helpers",
+   "patch": {
+    "runtime.files": [
+     "prng.js",
+     "runtime.js"
+    ]
+   },
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "runtime.files must be a non-empty list",
+   "patch": {
+    "runtime.files": []
+   },
+   "errors": [
+    "runtime.files: must be a non-empty list"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "runtime.files must include the entry",
+   "patch": {
+    "runtime.files": [
+     "prng.js"
+    ]
+   },
+   "errors": [
+    "runtime.files: must include the entry"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "runtime.files may not leave the pack folder",
+   "patch": {
+    "runtime.files": [
+     "../x.js",
+     "runtime.js"
+    ]
+   },
+   "errors": [
+    "runtime.files[0]: must be a relative path"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "runtime.files lists a file once",
+   "patch": {
+    "runtime.files": [
+     "runtime.js",
+     "./runtime.js"
+    ]
+   },
+   "errors": [
+    "runtime.files[1]: ./runtime.js is listed twice"
+   ],
+   "warnings": []
   }
  ]
 }

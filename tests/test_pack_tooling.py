@@ -149,6 +149,94 @@ def test_bind_js_beside_the_entry_is_loaded_after_it(tmp_path):
     assert [f.name for f in pack.runtime_files(d)] == ["runtime.js", "bind.js"]
 
 
+def with_files(d, files, entry="runtime.js"):
+    m = yaml.safe_load((d / "pack.yaml").read_text(encoding="utf-8"))
+    m["runtime"]["files"] = files
+    m["runtime"]["entry"] = entry
+    (d / "pack.yaml").write_text(yaml.safe_dump(m, sort_keys=False), encoding="utf-8")
+
+
+def test_runtime_files_are_inlined_in_the_declared_order(tmp_path):
+    d = mini(tmp_path)
+    for n in ("prng.js", "hook.js", "bind.js"):
+        (d / n).write_text(f"/* file {n} */", encoding="utf-8")
+    with_files(d, ["prng.js", "hook.js", "runtime.js", "bind.js"])
+    html = pack.build_page(d)
+    assert html.index("file prng.js") < html.index("file hook.js") < html.index("registerRuntime('mini'") < html.index("file bind.js")
+    assert [f.name for f in pack.runtime_files(d)] == ["prng.js", "hook.js", "runtime.js", "bind.js"]
+    # the declared list is the whole list: a bind.js that is not in it is not picked up by the old convention
+    with_files(d, ["prng.js", "runtime.js"])
+    assert [f.name for f in pack.runtime_files(d)] == ["prng.js", "runtime.js"]
+    assert "file bind.js" not in pack.build_page(d)
+
+
+def test_the_single_entry_form_still_works(tmp_path):
+    d = mini(tmp_path)
+    assert [f.name for f in pack.runtime_files(d)] == ["runtime.js"]
+    assert pack.check(d) == ([], [])
+
+
+def test_a_declared_file_that_is_missing_fails_check_and_build(tmp_path):
+    d = mini(tmp_path)
+    with_files(d, ["prng.js", "runtime.js"])
+    errors, _ = pack.check(d)
+    assert any("prng.js does not exist" in e for e in errors)
+    with pytest.raises(pack.PackError, match="prng.js"):
+        pack.build_page(d)
+    res = packcheck.run(d)
+    assert not res.ok()
+
+
+def test_an_undeclared_sibling_script_that_a_file_requires_fails_loudly(tmp_path):
+    d = mini(tmp_path)
+    (d / "prng.js").write_text("module.exports = {};", encoding="utf-8")
+    (d / "runtime.js").write_text(MINI_JS + "\nconst P = typeof require === 'function' ? require('./prng.js') : null;\n", encoding="utf-8")
+    errors, warnings = pack.check(d)
+    assert any("runtime.js refers to ./prng.js" in e and "runtime.files" in e for e in errors)
+    assert any("prng.js sits beside pack.yaml" in w for w in warnings)
+    with pytest.raises(pack.PackError, match="prng.js"):
+        pack.build_page(d)
+    with_files(d, ["prng.js", "runtime.js"])                # declared: fine
+    assert pack.check(d)[0] == []
+    assert "module.exports = {};" in pack.build_page(d)
+    (d / "prng.js").unlink()
+    (d / "runtime.js").write_text(MINI_JS + "\nrequire('./gone.js');\n", encoding="utf-8")
+    with_files(d, ["runtime.js"])
+    assert pack.check(d)[0] == []                           # a path that is not a file of the pack (guarded node-only code) is not our business
+
+
+def test_an_include_file_counts_as_declared(tmp_path):
+    d = mini(tmp_path)
+    (d / "prng.js").write_text("/* x */", encoding="utf-8")
+    (d / "runtime.js").write_text(MINI_JS + "\nrequire('./prng.js');\n", encoding="utf-8")
+    assert pack.undeclared_scripts(d, include=[d / "prng.js"])[0] == []
+
+
+def test_a_stray_script_beside_the_manifest_is_a_warning_not_an_error(tmp_path):
+    d = mini(tmp_path)
+    (d / "helper.js").write_text("/* unused */", encoding="utf-8")
+    errors, warnings = pack.check(d)
+    assert errors == [] and any("helper.js sits beside pack.yaml" in w for w in warnings)
+
+
+def test_the_dev_server_watches_every_declared_file(tmp_path):
+    d = mini(tmp_path)
+    (d / "prng.js").write_text("/* p */", encoding="utf-8")
+    with_files(d, ["prng.js", "runtime.js"])
+    assert {f.name for f in pack.watched_files(d)} == {"pack.yaml", "prng.js", "runtime.js"}
+
+
+@needs_node
+def test_check_runs_the_runtime_with_all_declared_files(tmp_path):
+    d = mini(tmp_path)
+    (d / "k.js").write_text("globalThis.__K = 2;", encoding="utf-8")
+    (d / "runtime.js").write_text("if (!globalThis.__K) throw new Error('helper k.js was not loaded');\n" + MINI_JS, encoding="utf-8")
+    with_files(d, ["k.js", "runtime.js"])
+    assert packcheck.run(d).ok()
+    with_files(d, ["runtime.js"])
+    assert not packcheck.run(d).ok()
+
+
 # ---- the dev server ----
 
 def get(srv, path="/", host=None):
@@ -227,8 +315,9 @@ def test_dev_server_hot_reloads_on_runtime_manifest_and_bind_changes(dev):
     touch_later(d / "pack.yaml", (d / "pack.yaml").read_text(encoding="utf-8").replace("title: Toy epidemic", "title: Renamed epidemic"))
     assert len(ev.wait_for(3)) == 3
     assert "<title>Renamed epidemic</title>" in get(srv)[1]
-    # bind.js appears
+    # a new file is declared in runtime.files (the toy declares its files, so a stray bind.js alone is not picked up)
     (d / "bind.js").write_text("/* new bind file */", encoding="utf-8")
+    touch_later(d / "pack.yaml", (d / "pack.yaml").read_text(encoding="utf-8").replace("files: [runtime.js]", "files: [runtime.js, bind.js]"))
     assert len(ev.wait_for(4)) == 4
     assert "new bind file" in get(srv)[1]
     assert json.loads(get(srv, "/__status")[1])["version"] > v0
