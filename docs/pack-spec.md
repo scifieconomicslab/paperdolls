@@ -6,9 +6,9 @@ add a slider, a preset or a colouring.
 
 This is the interactive-model work, phases P1 (the shell), P2 (live rendering) and P4 (interaction). What works today, and what does not yet:
 
-| Works (P1) | Planned |
+| Works (P1 to P4, P6) | Planned |
 |---|---|
-| `js` runtimes, run in a Web Worker (with a same-thread fallback); patch frames; manifest, schema and validators; store with typed arrays bound to scene buildings; shell with parameter groups, presets, play/pause/speed/timeline, legend, display switches; `wall` and `overlay` channels; hover, click selection, tooltip, inspector, Esc and arrow keys; `paperdolls pack check` and `pack build` | binding to real scene buildings (P3, **done**: see [Binding to the scene](#binding-to-the-scene-bindscene)), charts, KPI tiles, presets bar and A/B compare (P5, **done**: see [Dashboard](#dashboard-p5)), new channels (P6), terrain (P7), `pyodide` and `remote` runtimes (P9), custom components (P10) |
+| `js` runtimes, run in a Web Worker (with a same-thread fallback); patch frames; manifest, schema and validators; store with typed arrays bound to scene buildings; shell with parameter groups, presets, play/pause/speed/timeline, legend, display switches; `wall`, `overlay` and the P6 channels (`segments`, `outline`, `halo`, `groundtint`, the `insulation` and `community` overlays); hover, click selection, tooltip, inspector, Esc and arrow keys; `paperdolls pack check` and `pack build` | binding to real scene buildings (P3, **done**: see [Binding to the scene](#binding-to-the-scene-bindscene)), charts, KPI tiles, presets bar and A/B compare (P5, **done**: see [Dashboard](#dashboard-p5)), a `height` channel (evaluated in P6 and not built: see [`height`](#height-not-built-and-why)), terrain (P7), `pyodide` and `remote` runtimes (P9), custom components (P10) |
 
 A pack whose runtime has **no** `bindScene` has its entities drawn on scene buildings in a **fixed, invented order** (the same rule as `paperdolls replay`, `Replay.place`): where an entity stands carries no meaning, and
 the page says so. A pack with `bindScene` makes its entities from the real scene and each stands on the building it came from (below). See [`pack-architecture-findings.md`](pack-architecture-findings.md) for how this fits the renderer.
@@ -141,12 +141,106 @@ mappings:
 ```
 
 - `channel: wall` colours the building's data surface. Categorical entries need `label` and `colour` (`#rrggbb`); sequential needs `domain` `[low, high]` and at least two `colours`. Several wall mappings give a "Colour walls by" chooser.
-- `channel: overlay` marks the building: `overlay` is `null` or one of `scaffold`, `solar`, `band`, `marker`. A sequential scale cannot be an overlay.
+- `channel: overlay` marks the building: `overlay` is `null` or one of `scaffold`, `solar`, `band`, `marker`, `insulation`, `community`. A sequential scale cannot be an overlay.
 - A value with no entry is drawn as "no data" (walls) or unmarked (overlays), and the validator warns. A missing value (NaN, -1) is drawn as "no data", never as zero.
-- `segments`, `height`, `outline`, `halo`, `insulation` and `ground` are reserved (P6): they validate with a warning and are ignored.
+- `channel: overlay` also takes `insulation` and `community` (see [Visual channels](#visual-channels-p6)).
+- `segments` is described under [Visual channels](#visual-channels-p6). `outline` and `halo` likewise. `groundtint` too. `height` and `ground` are reserved (P6): they validate with a warning and are ignored until their section lands (`ground` is only a reserved name; the channel is `groundtint`).
 - The legend is made from these mappings, so it can describe only what is drawn. Every entry needs a label.
 
-Only the first entity that has a wall or overlay mapping is drawn.
+Only the first entity that has a wall, overlay or segments mapping is drawn.
+
+### Visual channels (P6)
+
+Mappings beyond `wall` and `overlay`. All of them are drawn from the typed arrays of the frame on screen, none of them allocates per draw, and the legend lists each one from its scale. The toy pack uses all of them (`packs/toy-epidemic/pack.yaml`: units infectious as segments, the smallest quarter of buildings outlined, active cases haloed, recovered buildings insulated, meeting places with a community pavilion, the share exposed as ground tint), on fields its runtime sends; they stand for the retrofit story's, and say nothing about disease.
+
+#### `segments`: k of n units
+
+A building's walls are divided into `n` sections and the first `k` are drawn in a second colour: "2 of 6 units retrofitted" in a block.
+
+```yaml
+entities: {building: {fields: {units: int, units_done: int}}}
+mappings:
+  - entity: building
+    field: units_done            # k: a number or int field
+    channel: segments
+    total: units                 # n: the field that holds the number of units
+    max: 8                       # optional, 2 to 12 (default 12): the most sections drawn
+    scale: {type: segments, label: Units retrofitted, colour: "#2e9d6a", todo: "#e6e0d0"}   # todo is optional: default is a tint of the wall
+```
+
+- `n` below 2 (a single dwelling), or a missing value (NaN), draws nothing extra. More than `max` units are drawn as `max` sections with `k` scaled to match (`AssetLib.segmentsFor`); a partial block never rounds to empty or complete.
+- Near (`view.scale` at least 1.4, `sim.opts.segMinScale`) the walls carry the sections: a coloured panel on every wall, under the windows and doors, so the facade stays readable and the colour of the wall that carries the wall mapping still frames it. Far, there is nothing to divide, so the wall colour is mixed toward `colour` by `0.85 * k / n`. A building drawn as a generic extrusion (a footprint that does not fit an asset) always gets the mixed colour.
+- Cache: `n` and `k` are part of the asset id and `colour` and `todo` of the colour set, so a sprite is shared by every building with the same shape, `n`, `k` and colours: at most 78 sections-states per shape and heading (n = 2..12, k = 0..n), not one per building. It works with patch frames: a patch that changes `units_done` moves the version, and only the buildings whose pair changed fetch a different sprite.
+- Only the first `segments` mapping of the drawn entity is used. It combines with `wall`, `overlay`, and the insulation overlay (the sections are drawn over the cladding).
+
+#### `outline` and `halo`: highlighting a building
+
+```yaml
+mappings:
+  - entity: building
+    field: cannot_retrofit       # a boolean, or a category
+    channel: outline             # or halo
+    scale:
+      type: categorical
+      label: Cannot retrofit
+      values:
+        true:  {colour: "#c0392b", label: "Cannot: no credit access"}
+        false: {colour: null,      label: Can}
+```
+
+- `outline` strokes the building's footprint, and (zoomed in) its top and edges, in the colour of its value. `halo` strokes a soft ring a little outside the footprint (two translucent strokes). A value whose `colour` is `null` (or has no entry) is not highlighted. A boolean field uses the keys `true` and `false` (or `1` and `0`); a category uses its value names. A sequential scale is an error.
+- **No sprite is built or changed.** Both are drawn on the canvas above the map (the one the selection uses), so a highlight cannot multiply the sprite cache, and the far-zoom layer is not repainted for it. Per frame version the shell gathers the buildings to highlight, grouped by colour (`binding.highlights()`); a draw strokes one path per colour and kind and skips buildings off screen.
+- **Selection is the same layer.** `store.selection()` is drawn as a halo and a solid outline in blue (`#1d4ed8`) under the hover outline, after the pack's own highlights, so a selected building that also "cannot retrofit" shows both.
+- The legend lists each highlighted value with a bordered (outline) or glowing (halo) swatch; plain values are not listed. Several outline mappings may be given: for a building the first that has a colour wins.
+- Drawn by `PackHost.bindInteraction(...).drawHighlight`, which the page already calls every frame; a page that does not create the interaction layer shows no highlights.
+
+#### `groundtint`: who is left behind
+
+The ground under the buildings is tinted by an aggregate of one field over a neighbourhood: an adoption rate, an income quintile.
+
+```yaml
+mappings:
+  - entity: building
+    field: retrofitted           # a number, int or boolean field (a boolean aggregates to a share)
+    channel: groundtint
+    group: {grid: 250}           # neighbourhoods: a square grid of this many metres (10 to 2000) ...
+    # group: {field: district, cell: 40}   # ... or the group a field names (an int or category), drawn in cells of `cell` metres (10 to 500, default 40)
+    aggregate: mean              # mean (default), sum, min or max; missing values are ignored
+    opacity: 0.5                 # above 0, at most 1 (default 0.5)
+    scale: {type: sequential, label: Retrofit rate, domain: [0, 1], colours: ["#fdf0d5", "#c8452f"]}
+```
+
+- A cell is drawn only where the model has buildings; a cell whose aggregate is missing (every value NaN, or no group) is left untinted, never drawn as zero. With a field group, each small cell takes the group most of its buildings belong to (the lowest group number on a tie) and the whole group's aggregate colours all its cells, so a district reads as one tone with a stepped edge.
+- Computed per frame version and cached: the shell gathers the cells' colours once when `sim.frameVersion` moves (`binding.tint()`); `VizLib.drawGroundTint` paints them, opaque, into one canvas the size of the view and blits it with the opacity, repainting only when the version or the view changes (`sim.tintPaints`). The ground layer is cached on its own key, so a new frame does not repaint it.
+- Drawn right after the ground and shadows and before buildings, trees and agents: the buildings are on top of it. The far-zoom layer is unaffected (it holds only buildings and trees).
+- The legend has a labelled ramp "<label> (ground tint)" with the aggregate and the neighbourhood ("mean over a 250 m grid") and an entry for ground the model does not cover.
+- One entity is drawn per pack and the first `groundtint` mapping of it is used.
+
+#### `height`: not built, and why
+
+A channel that scales a building's drawn height by a field (energy use, say) was evaluated for P6 and is **not built**. It does not fit the building asset system cleanly:
+
+- Height is baked into the asset: the storey count `N` is part of the asset id, and the facade grammar draws windows, balconies and doors from one seeded random stream storey by storey and wall by wall, so changing `N` re-rolls the facade (a different building, not a taller one) and a continuous quantity would have to be snapped to whole storeys.
+- A building's height also feeds the cached ground layer (its cast shadow, painted once and keyed without any height), the pick silhouette, the culling margins and the painter's order. A per-frame-version height would repaint the ground layer (35 to 50 ms in a browser, `viz/README.md`) on every change, and it touches the projection and depth code that the terrain work (P7) is changing.
+- Cheaper channels already carry a quantity: `segments` for a count of a building's units, a sequential `wall` colour, `groundtint` for a neighbourhood aggregate, and the P5 charts for a number that needs reading. If a pack needs storeys to change (demolition, extension), that is a change of the scene, not of a frame.
+
+`channel: height` therefore stays reserved: it validates with a warning and is ignored.
+
+#### `overlay: insulation` and `overlay: community`
+
+Two more markings for `channel: overlay`, next to `scaffold`, `solar`, `band` and `marker` (several can be on at once, from one or several overlay mappings):
+
+```yaml
+- entity: building
+  field: insulated
+  channel: overlay
+  scale: {type: categorical, label: Insulation, values: {true: {overlay: insulation, label: Insulated}, false: {overlay: null, label: Not yet}}}
+```
+
+- `insulation` is the visible change of a retrofit: the walls get a cladding colour (the wall pushed toward the look's "finished" green, a panel on every wall inset 0.12 m and clear of the plinth and parapet, under the windows and doors, so the wall colour of the data surface still frames it) and the roof a slab (flat roofs) or a band along the eaves (pitched and hipped roofs) in a darker step of it.
+- `community` is a small pavilion with a flag on the roof, in the look's cooperative colour: a building that belongs to an energy community, a cooperative, a shared installation.
+- Both are asset geometry in their own roles (`insul`, `insulroof`, `community`, plus `frame` for the pole), part of the asset id like the older overlays, so the cost is one sprite per (shape, heading, overlay set, colours), shared by every building in that state. A building drawn as a generic extrusion (its footprint fits no asset) has no overlays, as before.
+- In a style's overlay mask the bits are appended after the older four (`scaffold` 1, `solar` 2, `band` 4, `marker` 8, `insulation` 16, `community` 32), so existing packs are unaffected.
 
 ### `series`
 

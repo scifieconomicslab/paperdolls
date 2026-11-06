@@ -112,18 +112,23 @@
       "type": "object", "required": ["entity", "field", "channel"],
       "properties": {
         "entity": { "type": "string" }, "field": { "type": "string" },
-        "channel": { "enum": ["wall", "overlay", "segments", "height", "outline", "halo", "insulation", "ground"] },
+        "channel": { "enum": ["wall", "overlay", "segments", "height", "outline", "halo", "ground", "groundtint"] },
+        "total": { "type": "string" }, "max": { "type": "integer", "minimum": 2, "maximum": 12 },
+        "group": { "type": "object", "additionalProperties": false, "properties": { "grid": { "type": "number", "minimum": 10, "maximum": 2000 }, "field": { "type": "string" }, "cell": { "type": "number", "minimum": 10, "maximum": 500 } },
+                   "oneOf": [{ "required": ["grid"] }, { "required": ["field"] }] },
+        "aggregate": { "enum": ["mean", "sum", "min", "max"] }, "opacity": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
         "scale": {
           "type": "object", "required": ["type"],
           "properties": {
-            "type": { "enum": ["categorical", "sequential"] }, "label": { "type": "string" },
+            "type": { "enum": ["categorical", "sequential", "segments"] }, "label": { "type": "string" }, "colour": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }, "todo": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
             "domain": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } },
             "colours": { "type": "array", "minItems": 2, "items": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" } },
-            "values": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "object", "required": ["label"], "properties": { "label": { "type": "string", "minLength": 1 }, "colour": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }, "overlay": { "enum": ["scaffold", "solar", "band", "marker", null] } }, "additionalProperties": false } }
+            "values": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "object", "required": ["label"], "properties": { "label": { "type": "string", "minLength": 1 }, "colour": { "type": ["string", "null"], "pattern": "^#[0-9a-fA-F]{6}$" }, "overlay": { "enum": ["scaffold", "solar", "band", "marker", "insulation", "community", null] } }, "additionalProperties": false } }
           },
           "allOf": [
             { "if": { "properties": { "type": { "const": "sequential" } } }, "then": { "required": ["domain", "colours"] } },
-            { "if": { "properties": { "type": { "const": "categorical" } } }, "then": { "required": ["values"] } }
+            { "if": { "properties": { "type": { "const": "categorical" } } }, "then": { "required": ["values"] } },
+            { "if": { "properties": { "type": { "const": "segments" } } }, "then": { "required": ["colour"] } }
           ]
         }
       },

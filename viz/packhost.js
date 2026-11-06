@@ -15,13 +15,25 @@
   const fieldOf = (manifest, en, fn) => { const f = ((manifest.entities || {})[en] || { fields: {} }).fields[fn]; return typeof f === 'string' ? { type: f } : f; };
   const wallMaps = manifest => (manifest.mappings || []).filter(m => m.channel === 'wall');
   const overlayMaps = manifest => (manifest.mappings || []).filter(m => m.channel === 'overlay');
-  const drawnEntity = manifest => { const m = (manifest.mappings || []).find(x => x.channel === 'wall' || x.channel === 'overlay'); return m ? m.entity : null; };
+  const segMaps = manifest => (manifest.mappings || []).filter(m => m.channel === 'segments');
+  const DRAWN = ['wall', 'overlay', 'segments', 'outline', 'halo', 'groundtint'];
+  const drawnEntity = manifest => { const m = (manifest.mappings || []).find(x => DRAWN.includes(x.channel)); return m ? m.entity : null; };
+  const tintMap = (manifest, en) => (manifest.mappings || []).find(m => m.channel === 'groundtint' && m.entity === en) || null;
   const num = v => (Math.round(v * 1000) / 1000);
 
   // ---- legend: made from the mappings, so it can describe only what is drawn ----
   function legendFor(manifest) {
-    return (manifest.mappings || []).filter(m => m.channel === 'wall' || m.channel === 'overlay').map(m => {
+    return (manifest.mappings || []).filter(m => DRAWN.includes(m.channel)).map(m => {
       const f = fieldOf(manifest, m.entity, m.field), title = m.scale.label || (f && f.label) || m.field;
+      if (m.channel === 'groundtint') {
+        const g = m.group || {}, how = (m.aggregate || 'mean') + ' over ' + (g.grid ? 'a ' + g.grid + ' m grid' : 'each ' + g.field + ' (cells of ' + (g.cell || 40) + ' m)');
+        return { title: title + ' (ground tint)', kind: 'ramp', colours: m.scale.colours.slice(), domain: m.scale.domain.slice(), noData: null, noDataLabel: 'No buildings of the model', note: 'Ground under the buildings: ' + how };
+      }
+      if (m.channel === 'outline' || m.channel === 'halo') {          // one entry per value that is highlighted; values with no colour are not drawn and not listed
+        const f2 = fieldOf(manifest, m.entity, m.field), names = f2 && f2.type === 'category' ? f2.values : Object.keys(m.scale.values);
+        return { title, kind: 'swatches', items: names.filter(k => m.scale.values[k] && m.scale.values[k].colour).map(k => ({ label: m.scale.values[k].label, colour: m.scale.values[k].colour, mode: m.channel })) };
+      }
+      if (m.channel === 'segments') return { title, kind: 'swatches', items: [{ label: 'Done: the first units of the building, drawn as sections of its walls', colour: m.scale.colour }, { label: 'Not yet', colour: m.scale.todo || null }] };
       if (m.scale.type === 'sequential') return { title, kind: 'ramp', colours: m.scale.colours.slice(), domain: m.scale.domain.slice(), noData: NO_DATA };
       const order = f && f.type === 'category' ? f.values.filter(v => v in m.scale.values) : Object.keys(m.scale.values);
       let items;
@@ -127,7 +139,25 @@
   // The store keeps per-building values as typed arrays indexed by scene building (store.bindScene / store.bound). sim.buildingStyle reads them and returns one of a
   // small table of shared style objects (a wall colour and a set of overlays), so a draw allocates nothing. sim.frameVersion is the store's version of "what the map
   // shows": the renderer asks for a building's style again, and repaints its far-zoom layer, only when that number moves.
-  const OVERLAYS = ['scaffold', 'solar', 'band', 'marker'];
+  // ---- outline and halo: drawn on the canvas above the map, never part of a sprite, so a highlight costs no sprite and survives any recolouring ----
+  // ring: a footprint pushed outward by `grow` metres, as one closed subpath at height z. outlineBuilding: footprint at the ground, at height h, and the edges between.
+  function ringPath(ctx, V, view, fp, grow, z) {
+    let cx = 0, cy = 0; for (const p of fp) { cx += p[0]; cy += p[1]; } cx /= fp.length; cy /= fp.length;
+    fp.forEach((p, j) => { const dx = p[0] - cx, dy = p[1] - cy, d = Math.hypot(dx, dy) || 1, q = V.proj(view, p[0] + dx / d * grow, p[1] + dy / d * grow, z || 0); if (j) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
+    ctx.closePath();
+  }
+  function outlinePath(ctx, V, view, fp, h, edges) {
+    for (const z of edges ? [0, h] : [0]) { fp.forEach((p, j) => { const q = V.proj(view, p[0], p[1], z); if (j) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); }
+    if (edges) for (const p of fp) { const a = V.proj(view, p[0], p[1], 0), b = V.proj(view, p[0], p[1], h); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+  }
+  // value -> colour or null for one outline or halo mapping (a category by index, a boolean by 0 and 1)
+  function highlightReader(manifest, m) {
+    const f = fieldOf(manifest, m.entity, m.field), cat = f.type === 'category', vals = m.scale.values, names = cat ? f.values : ['false', 'true'];
+    const lut = names.map((n, j) => { const v = vals[n] || (!cat ? vals[j ? '1' : '0'] : null); return v && v.colour ? v.colour : null; });
+    return { field: m.field, at: cat ? (v => (v >= 0 && v < lut.length ? lut[v] : null)) : (v => (v === v ? lut[v ? 1 : 0] : null)) };
+  }
+
+  const OVERLAYS = ['scaffold', 'solar', 'band', 'marker', 'insulation', 'community'];       // the bit of an overlay in a style's mask is its position here: only ever append
   const LEVELS = 128;                                       // a sequential scale is read in this many steps: a table of colours, not a string per building
   function bindRenderer(o) {
     const { manifest, store, controller: ctl, sim } = o, R = o.Replay || root.Replay, en = drawnEntity(manifest);
@@ -160,12 +190,19 @@
       return { field: m.field, code, cols, bits };
     };
     const walls = wallMaps(manifest).filter(m => m.entity === en).map(reader), overlays = overlayMaps(manifest).filter(m => m.entity === en).map(reader);
-    const NONE = { data: null, overlays: [] }, table = new Map();
-    const styleOf = (w, code, mask) => {                    // one shared object per (wall mapping, wall code, overlay set)
-      const key = (w * 1024 + code) * 16 + mask; let st = table.get(key);
+    // segments: k of n units. Both come from the frame; n is capped for drawing (AssetLib.segmentsFor) and the style carries the capped pair, so there are at most
+    // 12 * 13 + 1 distinct values per mapping and the style objects stay shared. Only the first segments mapping of the drawn entity is used.
+    const sm = segMaps(manifest).find(m => m.entity === en) || null, segCap = sm ? Math.min(sm.max || 12, (R && root.AssetLib ? root.AssetLib.SEG_MAX : 12)) : 0;
+    const segOf = sm ? (i => {
+      const n = F[sm.total][i], k = F[sm.field][i]; if (!(n >= 2) || !(k >= 0)) return 0;
+      const sg = root.AssetLib.segmentsFor(Math.min(n, 1e6), k, segCap); return sg ? sg[0] * 13 + sg[1] + 1 : 0;
+    }) : null;
+    const NONE = { data: null, overlays: [], seg: null }, table = new Map();
+    const styleOf = (w, code, mask, sg) => {                // one shared object per (wall mapping, wall code, overlay set, segment pair)
+      const key = ((w * 1024 + code) * 64 + mask) * 256 + sg; let st = table.get(key);
       if (!st) {
         const ov = []; for (let b = 0; b < OVERLAYS.length; b++) if (mask & (1 << b)) ov.push(OVERLAYS[b]);
-        st = { data: walls[w] ? walls[w].cols[code] : null, overlays: ov }; table.set(key, st);
+        st = { data: walls[w] ? walls[w].cols[code] : null, overlays: ov, seg: sg ? { n: Math.floor((sg - 1) / 13), k: (sg - 1) % 13, done: sm.scale.colour, todo: sm.scale.todo || null } : null }; table.set(key, st);
       }
       return st;
     };
@@ -176,14 +213,87 @@
       if (!live || modelOf[i] < 0) return NONE;
       const w = Math.min(ctl ? ctl.wall : 0, walls.length - 1);
       let mask = 0; for (let j = 0; j < overlays.length; j++) { const ov = overlays[j]; mask |= ov.bits[ov.code(F[ov.field][i])]; }
-      if (w < 0) return mask ? styleOf(0, 0, mask) : NONE;
-      return styleOf(w, walls[w].code(F[walls[w].field][i]), mask);
+      const sg = segOf ? segOf(i) : 0;
+      if (w < 0) return mask || sg ? styleOf(0, 0, mask, sg) : NONE;
+      return styleOf(w, walls[w].code(F[walls[w].field][i]), mask, sg);
     };
     sync();
+    // outline and halo: per frame version the buildings to highlight are gathered by colour; a draw strokes one path per colour and kind (the canvas above the map)
+    const hlMaps = ['halo', 'outline'].map(ch => (manifest.mappings || []).filter(m => m.channel === ch && m.entity === en).map(m => highlightReader(manifest, m)));
+    const HL = { ver: NaN, halo: [], outline: [], builds: 0 };
+    function refreshHL() {
+      if (HL.ver === sim.frameVersion) return;
+      HL.ver = sim.frameVersion; HL.builds++;
+      ['halo', 'outline'].forEach((kind, ci) => {
+        const by = new Map();
+        if (live && hlMaps[ci].length) for (let i = 0; i < nScene; i++) {
+          if (modelOf[i] < 0) continue;
+          let col = null; for (const r of hlMaps[ci]) { col = r.at(F[r.field][i]); if (col) break; }
+          if (col) { let a = by.get(col); if (!a) by.set(col, a = []); a.push(i); }
+        }
+        HL[kind] = [...by].map(([colour, idx]) => ({ colour, idx: Int32Array.from(idx) }));
+      });
+    }
+    function drawChannels(ctx, view) {
+      if (!hlMaps[0].length && !hlMaps[1].length) return 0;
+      refreshHL();
+      const V = root.VizLib, sc = view.scale, pad = 14 * sc + 20; let drawn = 0;
+      const vis = e => { const p = V.proj(view, e.fit.cx, e.fit.cy, 0), h = V.entityHeight(e) * sc; return p[0] > -pad && p[0] < view.w + pad && p[1] > -pad && p[1] - h < view.h + pad; };
+      ctx.save(); ctx.lineJoin = 'round';
+      for (const g of HL.halo) for (const [w, a] of [[9, 0.18], [4.5, 0.36]]) {           // a soft glow: two translucent strokes of a ring a little outside the footprint
+        ctx.strokeStyle = g.colour; ctx.lineWidth = w; ctx.globalAlpha = a; ctx.beginPath();
+        for (let j = 0; j < g.idx.length; j++) { const e = sim.buildings[g.idx[j]]; if (vis(e)) { ringPath(ctx, V, view, e.src.footprint, 1.6, 0); if (a > 0.3) drawn++; } }
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      for (const g of HL.outline) {
+        ctx.strokeStyle = g.colour; ctx.lineWidth = sc < 0.8 ? 1.6 : 2.4; ctx.beginPath();
+        for (let j = 0; j < g.idx.length; j++) { const e = sim.buildings[g.idx[j]]; if (vis(e)) { outlinePath(ctx, V, view, e.src.footprint, V.entityHeight(e), sc >= 0.8); drawn++; } }
+        ctx.stroke();
+      }
+      ctx.restore(); return drawn;
+    }
+    // ground tint: the ground under the buildings coloured by an aggregate of one field over a neighbourhood. A neighbourhood is a cell of a coarse grid ({grid: metres}) or the
+    // group a field names ({field, cell}): the ground is cut into small cells ({cell} metres), each takes the group most of its buildings are in, and a group's aggregate
+    // (mean, sum, min or max of the field, over the buildings of the model, ignoring missing values) colours all its cells. The cells are fixed at bind time; the colours are
+    // gathered once per frame version (sim.groundTint.cells(version)) and VizLib.drawGroundTint draws them under the buildings.
+    const tm = tintMap(manifest, en), GT = { ver: NaN, cells: [], builds: 0, info: null };
+    if (tm) {
+      const gr = tm.group, size = gr.grid || gr.cell || 40, byField = !!gr.field, agg = tm.aggregate || 'mean', colourOf = scaleFor(manifest, tm).colour, lo = tm.scale.domain[0], hi = tm.scale.domain[1];
+      const gfield = byField ? fieldOf(manifest, en, gr.field) : null, cellMap = new Map(), cellList = [];
+      for (let i = 0; i < nScene; i++) {
+        if (modelOf[i] < 0) continue; const e = sim.buildings[i], ix = Math.floor(e.fit.cx / size), iy = Math.floor(e.fit.cy / size), key = ix + ',' + iy; let c = cellMap.get(key);
+        if (!c) { c = { x0: ix * size, y0: iy * size, x1: (ix + 1) * size, y1: (iy + 1) * size, members: [] }; cellMap.set(key, c); cellList.push(c); }
+        c.members.push(i);
+      }
+      const fold = (acc, v) => { if (v === v) { acc.n++; acc.sum += v; if (v < acc.min) acc.min = v; if (v > acc.max) acc.max = v; } };
+      const value = acc => (acc.n ? (agg === 'sum' ? acc.sum : agg === 'min' ? acc.min : agg === 'max' ? acc.max : acc.sum / acc.n) : NaN);
+      const fresh = () => ({ n: 0, sum: 0, min: Infinity, max: -Infinity });
+      GT.refresh = () => {
+        if (GT.ver === sim.frameVersion) return GT.cells; GT.ver = sim.frameVersion; GT.builds++;
+        const out = [], vals = F[tm.field];
+        if (!live) { GT.cells = out; return out; }
+        if (!byField) { for (const c of cellList) { const acc = fresh(); for (const i of c.members) fold(acc, vals[i]); const v = value(acc); if (v === v) out.push({ x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1, v, colour: colourOf(Math.max(lo, Math.min(hi, v))) }); } GT.info = { groups: out.length }; }
+        else {
+          const gv = F[gr.field], groups = new Map(), cellGroup = new Array(cellList.length);
+          const gid = i => { const g = gv[i]; return g === g && g >= 0 ? g : null; };       // a missing group (NaN, -1 for a category) belongs to no neighbourhood
+          cellList.forEach((c, ci) => {
+            const tally = new Map(); let best = null, bn = 0;
+            for (const i of c.members) { const g = gid(i); if (g === null) continue; const n = (tally.get(g) || 0) + 1; tally.set(g, n); if (n > bn || (n === bn && g < best)) { best = g; bn = n; } }
+            cellGroup[ci] = best;
+          });
+          for (let i = 0; i < nScene; i++) { if (modelOf[i] < 0) continue; const g = gid(i); if (g === null) continue; let acc = groups.get(g); if (!acc) groups.set(g, acc = fresh()); fold(acc, vals[i]); }
+          cellList.forEach((c, ci) => { const acc = cellGroup[ci] === null ? null : groups.get(cellGroup[ci]); const v = acc ? value(acc) : NaN; if (v === v) out.push({ x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1, v, group: cellGroup[ci], colour: colourOf(Math.max(lo, Math.min(hi, v))) }); });
+          GT.info = { groups: groups.size };
+        }
+        GT.cells = out; return out;
+      };
+      sim.groundTint = { cells: () => GT.refresh(), opacity: tm.opacity === undefined ? 0.5 : tm.opacity, version: () => sim.frameVersion };
+    }
     const offs = ['time', 'frames', 'view'].map(t => store.subscribe(t, sync));
     const entityOf = bound ? (k => (index[k] >= 0 ? sim.buildings[index[k]] : null)) : (k => sim.buildings[placement.order[k]]);
-    return { ok: true, bound: !!bound, placement, entityOf, count, placed, warnings: bound ? bound.warnings : [], entity: en, index, modelOf, nScene, sync,
-             styleCount: () => table.size, dispose() { offs.forEach(f => f()); sim.buildingStyle = null; sim.frameVersion = undefined; } };
+    return { ok: true, bound: !!bound, placement, entityOf, count, placed, warnings: bound ? bound.warnings : [], entity: en, index, modelOf, nScene, sync, drawChannels, highlights: () => { refreshHL(); return { halo: HL.halo, outline: HL.outline, builds: HL.builds }; }, tint: tm ? () => { GT.refresh(); return { cells: GT.cells, builds: GT.builds, info: GT.info }; } : null,
+             styleCount: () => table.size, dispose() { offs.forEach(f => f()); sim.buildingStyle = null; sim.frameVersion = undefined; sim.groundTint = null; } };
   }
 
   // ---- what one entity looks like at the time shown: the frame's own values, labelled the way the legend labels them ----
@@ -260,9 +370,9 @@
         const box = el('div', { class: 'pk-legend' });
         for (const sec of legendFor(manifest)) {
           const row = el('div', { class: 'pk-legrow' }, el('b', { text: sec.title }));
-          const sw = (colour, text) => el('span', { class: 'pk-sw' }, el('i', { style: 'background:' + (colour || 'repeating-linear-gradient(45deg,#fff 0 3px,#ddd 3px 6px)') }), text);
-          if (sec.kind === 'ramp') { row.appendChild(el('span', { class: 'pk-ramp' }, String(sec.domain[0]), el('i', { style: 'background:linear-gradient(90deg,' + sec.colours.join(',') + ')' }), String(sec.domain[1]))); row.appendChild(sw(sec.noData, 'No data')); }
-          else for (const it of sec.items) row.appendChild(it.overlay !== undefined ? el('span', { text: (it.overlay ? it.overlay + ' on the building' : 'no marking') + ' = ' + it.label }) : sw(it.colour, it.label));
+          const sw = (colour, text, mode) => el('span', { class: 'pk-sw' }, el('i', { style: mode === 'outline' ? 'background:transparent;border:2px solid ' + colour : mode === 'halo' ? 'background:transparent;box-shadow:0 0 5px 2px ' + colour : 'background:' + (colour || 'repeating-linear-gradient(45deg,#fff 0 3px,#ddd 3px 6px)') }), text);
+          if (sec.kind === 'ramp') { row.appendChild(el('span', { class: 'pk-ramp' }, String(sec.domain[0]), el('i', { style: 'background:linear-gradient(90deg,' + sec.colours.join(',') + ')' }), String(sec.domain[1]))); row.appendChild(sw(sec.noData, sec.noDataLabel || 'No data')); if (sec.note) row.appendChild(el('small', { text: sec.note })); }
+          else for (const it of sec.items) row.appendChild(it.overlay !== undefined ? el('span', { text: (it.overlay ? it.overlay + ' on the building' : 'no marking') + ' = ' + it.label }) : sw(it.colour, it.label, it.mode));
           box.appendChild(row);
         }
         const walls = wallMaps(manifest);
@@ -398,11 +508,17 @@
     // The outline of the selected (solid) and hovered (dashed) building: its footprint on the ground and lifted by its height, and the edges between.
     function drawHighlight(ctx, view) {
       ctx.clearRect(0, 0, view.w, view.h);
+      if (binding.drawChannels) binding.drawChannels(ctx, view);                  // the pack's own outline and halo channels, under the selection
       const sel = store.selection(), items = [];
       if (hover >= 0 && !(sel && sel.id === hover)) items.push([hover, true]);
       if (sel && sel.entity === en && sel.id < binding.count) items.push([sel.id, false]);
       for (const [k, dashed] of items) {
         const si = binding.index[k]; if (si < 0) continue; const sh = pick.silhouette(si), P = (p, z) => V.proj(view, p[0], p[1], z);
+        if (!dashed) {                                                                // selection is the same channel as the pack's own: a halo, then the outline
+          ctx.save(); ctx.lineJoin = 'round'; ctx.strokeStyle = '#1d4ed8';
+          for (const [w, a] of [[9, 0.16], [4.5, 0.3]]) { ctx.lineWidth = w; ctx.globalAlpha = a; ctx.beginPath(); ringPath(ctx, V, view, sh.footprint, 1.6, 0); ctx.stroke(); }
+          ctx.restore();
+        }
         ctx.save(); ctx.lineJoin = 'round'; ctx.lineWidth = dashed ? 1.5 : 2.5; ctx.strokeStyle = dashed ? 'rgba(20,20,20,0.7)' : '#1d4ed8'; ctx.setLineDash(dashed ? [4, 3] : []);
         for (const z of [0, sh.h]) { ctx.beginPath(); sh.footprint.forEach((p, j) => { const q = P(p, z); if (j) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); ctx.stroke(); }
         ctx.beginPath(); for (const p of sh.footprint) { const a = P(p, 0), b = P(p, sh.h); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); } ctx.stroke();

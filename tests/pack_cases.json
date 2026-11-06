@@ -132,6 +132,78 @@
       }
      }
     }
+   },
+   {
+    "entity": "thing",
+    "field": "load",
+    "channel": "segments",
+    "total": "load",
+    "max": 8,
+    "scale": {
+     "type": "segments",
+     "label": "Units retrofitted",
+     "colour": "#2e9d6a",
+     "todo": "#e6e0d0"
+    }
+   },
+   {
+    "entity": "thing",
+    "field": "kind",
+    "channel": "outline",
+    "scale": {
+     "type": "categorical",
+     "label": "Cannot retrofit",
+     "values": {
+      "a": {
+       "colour": null,
+       "label": "Can"
+      },
+      "b": {
+       "colour": "#c0392b",
+       "label": "Cannot: no credit"
+      }
+     }
+    }
+   },
+   {
+    "entity": "thing",
+    "field": "kind",
+    "channel": "halo",
+    "scale": {
+     "type": "categorical",
+     "label": "Priority",
+     "values": {
+      "a": {
+       "label": "Normal"
+      },
+      "b": {
+       "colour": "#f1c40f",
+       "label": "Priority"
+      }
+     }
+    }
+   },
+   {
+    "entity": "thing",
+    "field": "load",
+    "channel": "groundtint",
+    "group": {
+     "grid": 150
+    },
+    "aggregate": "mean",
+    "opacity": 0.5,
+    "scale": {
+     "type": "sequential",
+     "label": "Mean load by neighbourhood",
+     "domain": [
+      0,
+      1
+     ],
+     "colours": [
+      "#f4e9c8",
+      "#c8452f"
+     ]
+    }
    }
   ],
   "series": {
@@ -573,11 +645,11 @@
   {
    "name": "a planned channel warns and is skipped",
    "patch": {
-    "mappings.2.channel": "segments"
+    "mappings.2.channel": "height"
    },
    "errors": [],
    "warnings": [
-    "mappings[2].channel: segments is a planned channel"
+    "mappings[2].channel: height is a planned channel"
    ]
   },
   {
@@ -1170,6 +1242,262 @@
     "banner: must be a string"
    ],
    "warnings": []
+  },
+  {
+   "name": "a segments mapping is accepted",
+   "patch": {},
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "segments need the field that holds the number of units",
+   "patch": {
+    "mappings.3.total": "$delete"
+   },
+   "errors": [
+    "mappings[3].total: required"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "segments total must be a real field",
+   "patch": {
+    "mappings.3.total": "ghost"
+   },
+   "errors": [
+    "mappings[3].total: entity thing has no field ghost"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "segments total cannot be a category",
+   "patch": {
+    "mappings.3.total": "kind"
+   },
+   "errors": [
+    "mappings[3].total: must be a number or int field"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "segments field cannot be a category",
+   "patch": {
+    "mappings.3.field": "kind"
+   },
+   "errors": [
+    "mappings[3].field: a segments channel needs a number or int field"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "segments max is a whole number from 2 to 12",
+   "patch": {
+    "mappings.3.max": 40
+   },
+   "errors": [
+    "mappings[3].max: must be a whole number from 2 to 12"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "segments need the segments scale and a colour",
+   "patch": {
+    "mappings.3.scale": {
+     "type": "categorical",
+     "values": {
+      "a": {
+       "label": "A",
+       "colour": "#112233"
+      }
+     }
+    }
+   },
+   "errors": [
+    "mappings[3].scale.type: must be segments"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "segments colour must be hex",
+   "patch": {
+    "mappings.3.scale.colour": "green"
+   },
+   "errors": [
+    "mappings[3].scale.colour: needs a #rrggbb colour"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "the insulation and community overlays are accepted",
+   "patch": {
+    "mappings.2.scale.values.a.overlay": "insulation",
+    "mappings.2.scale.values.b.overlay": "community"
+   },
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "an outline colour must be hex or null",
+   "patch": {
+    "mappings.4.scale.values.b.colour": "red"
+   },
+   "errors": [
+    "mappings[4].scale.values.b.colour: needs a #rrggbb colour, or null for no outline"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a halo cannot be sequential",
+   "patch": {
+    "mappings.5.scale": {
+     "type": "sequential",
+     "domain": [
+      0,
+      1
+     ],
+     "colours": [
+      "#000000",
+      "#ffffff"
+     ]
+    }
+   },
+   "errors": [
+    "mappings[5]: a sequential scale colours walls; the halo channel needs"
+   ],
+   "warnings": [
+    "mappings[5].scale.label: missing"
+   ]
+  },
+  {
+   "name": "an outline needs a label on every value",
+   "patch": {
+    "mappings.4.scale.values.a.label": "$delete"
+   },
+   "errors": [
+    "mappings[4].scale.values.a: needs a label"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "an outline warns about a value with no entry",
+   "patch": {
+    "mappings.4.scale.values.a": "$delete"
+   },
+   "errors": [],
+   "warnings": [
+    "mappings[4].scale.values: no entry for a: drawn with no outline"
+   ]
+  },
+  {
+   "name": "a groundtint by field is accepted",
+   "patch": {
+    "mappings.6.group": {
+     "field": "kind",
+     "cell": 40
+    }
+   },
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "a groundtint needs a group",
+   "patch": {
+    "mappings.6.group": "$delete"
+   },
+   "errors": [
+    "mappings[6].group: required"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a groundtint group is a grid or a field, not both",
+   "patch": {
+    "mappings.6.group": {
+     "grid": 100,
+     "field": "kind"
+    }
+   },
+   "errors": [
+    "mappings[6].group: give either grid or field"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a groundtint grid has a sane size",
+   "patch": {
+    "mappings.6.group.grid": 3
+   },
+   "errors": [
+    "mappings[6].group.grid: must be a cell size in metres from 10 to 2000"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a groundtint group field must exist",
+   "patch": {
+    "mappings.6.group": {
+     "field": "ghost"
+    }
+   },
+   "errors": [
+    "mappings[6].group.field: entity thing has no field ghost"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a groundtint aggregates a number, not a category",
+   "patch": {
+    "mappings.6.field": "kind"
+   },
+   "errors": [
+    "mappings[6].field: the groundtint channel needs a number, int or boolean field"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a groundtint aggregate is one of a few",
+   "patch": {
+    "mappings.6.aggregate": "median"
+   },
+   "errors": [
+    "mappings[6].aggregate: must be one of mean, sum, min, max"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a groundtint needs a sequential scale",
+   "patch": {
+    "mappings.6.scale": {
+     "type": "categorical",
+     "values": {
+      "a": {
+       "colour": "#112233",
+       "label": "A"
+      }
+     }
+    }
+   },
+   "errors": [
+    "mappings[6].scale.type: the groundtint channel needs a sequential scale"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "a groundtint opacity is above 0 and at most 1",
+   "patch": {
+    "mappings.6.opacity": 0
+   },
+   "errors": [
+    "mappings[6].opacity: must be above 0 and at most 1"
+   ],
+   "warnings": [],
+   "schema": "fail"
   }
  ]
 }

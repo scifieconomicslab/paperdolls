@@ -800,6 +800,7 @@
     const settled = zs.stillView >= 3, zooming = zs.still < 2;
     if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg, drawStaticSteps);
     else drawStatic(ctx, view);
+    if (sim.groundTint) drawGroundTint(ctx, sim, view);                    // under the buildings and agents, over the ground and shadows
     // What can be seen at a view: buildings and trees (and the fountain) that reach it, and the agents. Anything whose screen bounds
     // miss the canvas is skipped (viewport culling).
     const collectStatic = (v, out) => {
@@ -951,10 +952,36 @@
     return true;
   }
 
+  // Ground tint (model packs): sim.groundTint = { cells(version) -> [{ x0, y0, x1, y1, colour }] (world metres), opacity, version() }. The cells are painted opaque into a
+  // canvas the size of the view (so neighbours leave no seams) and blitted once with the opacity. The canvas is repainted only when the version or the view changes, so a still
+  // frame costs one blit; the ground layer is cached on its own key and is not repainted for a new version.
+  function drawGroundTint(ctx, sim, view) {
+    const T = sim.groundTint, A = A_(), ver = T.version ? T.version() : 0, cells = T.cells(ver); if (!cells.length) return;
+    const q = A.sprites.dpr || 1, w = Math.ceil(view.w * q), h = Math.ceil(view.h * q), key = ver + '|' + view.scale + '|' + view.ox + '|' + view.oy + '|' + w + 'x' + h + '|' + cells.length;
+    if (!A.sprites.factory) { ctx.save(); ctx.globalAlpha = T.opacity; for (const c of cells) tintCell(ctx, view, c); ctx.restore(); return; }
+    let C = sim._tint;
+    if (!C || C.cv.width !== w || C.cv.height !== h) C = sim._tint = { cv: A.sprites.factory(w, h), key: null };
+    if (C.key !== key) {
+      const c = C.cv.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); c.scale(q, q); c.lineJoin = 'round';
+      for (const cell of cells) tintCell(c, view, cell);
+      C.key = key; sim.tintPaints = (sim.tintPaints || 0) + 1;
+    }
+    ctx.save(); ctx.globalAlpha = T.opacity; ctx.drawImage(C.cv, 0, 0, w, h, 0, 0, view.w, view.h); ctx.restore();
+  }
+  function tintCell(c, view, cell) {
+    const a = proj(view, cell.x0, cell.y0, 0), b = proj(view, cell.x1, cell.y0, 0), d = proj(view, cell.x1, cell.y1, 0), e = proj(view, cell.x0, cell.y1, 0);
+    if (Math.max(a[0], b[0], d[0], e[0]) < 0 || Math.min(a[0], b[0], d[0], e[0]) > view.w || Math.max(a[1], b[1], d[1], e[1]) < 0 || Math.min(a[1], b[1], d[1], e[1]) > view.h) return;
+    c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.lineTo(d[0], d[1]); c.lineTo(e[0], e[1]); c.closePath();
+    c.fillStyle = cell.colour; c.fill(); c.strokeStyle = cell.colour; c.lineWidth = 1; c.stroke();            // the stroke closes the antialiased seam between neighbours
+  }
+
   // Height of a building in metres, as drawn (an asset's own height, or storeys times the storey height).
   function entityHeight(e) { return e.params ? A_().buildingHeight(e.kind, e.params.N) : e.levels * (LIB.buildings[e.kind] || LIB.buildings.terrace).storeyH; }
 
   // A building: an asset sprite when its footprint fits a slot, otherwise the generic extrusion.
+  // A style may carry seg: { n, k, done, todo } ("k of n units"). Zoomed in (view.scale >= SEG_MIN_SCALE, sim.opts.segMinScale) the wall is divided into
+  // sections; zoomed out, and on a building drawn as a generic extrusion, there is nothing to divide, so the data colour is mixed toward `done` by the share k/n.
+  const SEG_MIN_SCALE = 1.4;
   function drawBuildingEntity(ctx, view, reg, pal, shadowCol, sim, e) {
     const A = A_(), areg = A.REG[pal.reg] || A.REG.colorfigures;
     // Fast path: with the default style and no binding, a building only changes when its state, owner or the theme does.
@@ -964,16 +991,22 @@
     if (fastOk && e._fast && e._th === pal && e._st === e.state && e._inv === e.investor) { drawBuildingSprite(ctx, view, A, areg, e); return; }
     // A style with a frame version (sim.frameVersion, a number) is asked again only when the number has changed: no style call, no key string, no allocation.
     const ver = sim.buildingStyle && typeof sim.frameVersion === 'number' ? sim.frameVersion : null;
-    if (ver !== null && !bound && e._fv === ver && e._th === pal) { if (e._asset) drawBuildingSprite(ctx, view, A, areg, e); else drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, e._fdata); return; }
+    const segOn = view.scale >= (sim.opts.segMinScale === undefined ? SEG_MIN_SCALE : sim.opts.segMinScale);
+    if (ver !== null && !bound && e._fv === ver && e._th === pal && (!e._seg || e._sm === segOn)) { if (e._asset) drawBuildingSprite(ctx, view, A, areg, e); else drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, e._fdata); return; }
     const wall = A.wallFor(pal, e.seed);
     const style = (sim.buildingStyle || retrofitStyle)(e, areg, pal, wall) || {};
-    let data = style.data || null;
+    let data = style.data || null, seg = null;
     for (const b of sim.bindings) if (b.match(e)) { data = b.scale.colour(b.value(e)); break; }   // a data binding wins over the style
+    if (style.seg) {
+      seg = A.segmentsFor(style.seg.n, style.seg.k);
+      if (seg && !(segOn && e.params)) { data = A.mix(data || wall, style.seg.done, 0.85 * style.seg.k / style.seg.n); seg = null; }
+    }
+    e._seg = !!style.seg; e._sm = segOn;
     if (!e.params) { e._fv = ver; e._th = pal; e._asset = null; e._fdata = data || wall; drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, data || wall); return; }
-    const ov = style.overlays || [], key = pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + wall + '|' + data + '|' + ov.join(',');
+    const ov = style.overlays || [], key = pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + wall + '|' + data + '|' + ov.join(',') + (seg ? '|' + seg[0] + ':' + seg[1] + ':' + style.seg.done + ':' + (style.seg.todo || '') : '');
     if (e._ck !== key) {
-      e._cols = A.buildingColours(areg, pal, { wall, data, seed: e.seed });
-      e._asset = A.getAsset('buildings', e.kind, e.fit.heading, A.buildingExtra(e.params, ov));
+      e._cols = A.buildingColours(areg, pal, { wall, data, seed: e.seed, seg: seg ? style.seg : null });
+      e._asset = A.getAsset('buildings', e.kind, e.fit.heading, A.buildingExtra(e.params, ov, seg));
       e._ck = key;
     }
     e._fast = fastOk; e._th = pal; e._st = e.state; e._inv = e.investor; e._fv = ver;

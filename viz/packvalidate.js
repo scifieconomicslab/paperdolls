@@ -12,8 +12,10 @@
   const RUNTIMES = ['js', 'pyodide', 'remote'];
   const PARAM_TYPES = ['number', 'integer', 'boolean', 'enum'];
   const FIELD_TYPES = ['category', 'number', 'int', 'boolean'];
-  const CHANNELS = ['wall', 'overlay'], PLANNED_CHANNELS = ['segments', 'height', 'outline', 'halo', 'insulation', 'ground'];
-  const OVERLAYS = ['scaffold', 'solar', 'band', 'marker'];
+  const CHANNELS = ['wall', 'overlay', 'segments', 'outline', 'halo', 'groundtint'], PLANNED_CHANNELS = ['height', 'ground'];
+  const AGGREGATES = ['mean', 'sum', 'min', 'max'];
+  const OVERLAYS = ['scaffold', 'solar', 'band', 'marker', 'insulation', 'community'];
+  const SEG_MAX = 12;
   const REGIONS = ['left', 'right', 'bottom'];
   const CONTROLS = ['params', 'presets', 'compare', 'timeline', 'legend', 'display'], PLANNED_ITEMS = ['table'], ITEM_KINDS = ['control', 'chart', 'kpis', 'table'];
   const CHART_TYPES = ['line', 'area', 'bar'], DISPLAY_IDS = ['people', 'vehicles', 'ink', 'pixel', 'fog'], KPI_AT = ['now', 'final', 'max', 'min'];
@@ -163,16 +165,49 @@
     maps.forEach((mp, i) => {
       const at = 'mappings[' + i + ']';
       if (!isObj(mp)) { err(at, 'must be a mapping'); return; }
-      for (const k of Object.keys(mp)) if (!['entity', 'field', 'channel', 'scale'].includes(k)) err(at + '.' + k, 'unknown key');
+      for (const k of Object.keys(mp)) if (!['entity', 'field', 'channel', 'scale', 'total', 'max', 'group', 'aggregate', 'opacity'].includes(k)) err(at + '.' + k, 'unknown key');
       if (PLANNED_CHANNELS.includes(mp.channel)) { warn(at + '.channel', mp.channel + ' is a planned channel and is ignored for now'); return; }
       if (!CHANNELS.includes(mp.channel)) { err(at + '.channel', 'must be one of ' + CHANNELS.join(', ')); return; }
       const f = fieldSpec(mp.entity, mp.field);
       if (!isObj(ents[mp.entity])) { err(at + '.entity', 'unknown entity ' + mp.entity); return; }
       if (!isObj(f)) { err(at + '.field', 'entity ' + mp.entity + ' has no field ' + mp.field); return; }
       const sc = mp.scale;
+      if (mp.channel === 'segments') {                // k of n units: the field holds k, mp.total names the field that holds n
+        if (f.type === 'category') err(at + '.field', 'a segments channel needs a number or int field (units done), ' + mp.field + ' is a category');
+        if (!isStr(mp.total)) err(at + '.total', 'required: the field that holds the number of units');
+        else { const tf = fieldSpec(mp.entity, mp.total); if (!isObj(tf)) err(at + '.total', 'entity ' + mp.entity + ' has no field ' + mp.total); else if (tf.type === 'category') err(at + '.total', 'must be a number or int field, ' + mp.total + ' is a category'); }
+        if (mp.max !== undefined && !(Number.isInteger(mp.max) && mp.max >= 2 && mp.max <= SEG_MAX)) err(at + '.max', 'must be a whole number from 2 to ' + SEG_MAX);
+        if (!isObj(sc) || sc.type !== 'segments') { err(at + '.scale.type', 'must be segments'); return; }
+        if (!(typeof sc.colour === 'string' && HEX.test(sc.colour))) err(at + '.scale.colour', 'needs a #rrggbb colour');
+        if (sc.todo !== undefined && !(typeof sc.todo === 'string' && HEX.test(sc.todo))) err(at + '.scale.todo', 'must be a #rrggbb colour');
+        if (!isStr(sc.label)) warn(at + '.scale.label', 'missing: the legend will show the field name');
+        return;
+      }
+      if (mp.channel === 'groundtint') {              // the ground under the buildings, tinted by an aggregate of the field over a neighbourhood
+        if (f.type === 'category') err(at + '.field', 'the groundtint channel needs a number, int or boolean field to aggregate, ' + mp.field + ' is a category');
+        const gr = mp.group;
+        if (!isObj(gr)) err(at + '.group', 'required: {grid: metres} or {field: name, cell: metres}');
+        else {
+          for (const k of Object.keys(gr)) if (!['grid', 'field', 'cell'].includes(k)) err(at + '.group.' + k, 'unknown key');
+          if ((gr.grid === undefined) === (gr.field === undefined)) err(at + '.group', 'give either grid or field');
+          else if (gr.grid !== undefined) { if (!(isNum(gr.grid) && gr.grid >= 10 && gr.grid <= 2000)) err(at + '.group.grid', 'must be a cell size in metres from 10 to 2000'); if (gr.cell !== undefined) err(at + '.group.cell', 'only with a field group'); }
+          else {
+            const gf = fieldSpec(mp.entity, gr.field);
+            if (!isStr(gr.field) || !isObj(gf)) err(at + '.group.field', 'entity ' + mp.entity + ' has no field ' + gr.field);
+            if (gr.cell !== undefined && !(isNum(gr.cell) && gr.cell >= 10 && gr.cell <= 500)) err(at + '.group.cell', 'must be a cell size in metres from 10 to 500');
+          }
+        }
+        if (mp.aggregate !== undefined && !AGGREGATES.includes(mp.aggregate)) err(at + '.aggregate', 'must be one of ' + AGGREGATES.join(', '));
+        if (mp.opacity !== undefined && !(isNum(mp.opacity) && mp.opacity > 0 && mp.opacity <= 1)) err(at + '.opacity', 'must be above 0 and at most 1');
+        if (!isObj(sc) || sc.type !== 'sequential') { err(at + '.scale.type', 'the groundtint channel needs a sequential scale'); return; }
+        if (!(Array.isArray(sc.domain) && sc.domain.length === 2 && sc.domain.every(isNum) && sc.domain[0] < sc.domain[1])) err(at + '.scale.domain', 'must be [low, high] with low below high');
+        if (!(Array.isArray(sc.colours) && sc.colours.length >= 2 && sc.colours.every(c => typeof c === 'string' && HEX.test(c)))) err(at + '.scale.colours', 'must be at least two #rrggbb colours');
+        if (!isStr(sc.label)) warn(at + '.scale.label', 'missing: the legend will show the field name');
+        return;
+      }
       if (!isObj(sc) || !['categorical', 'sequential'].includes(sc.type)) { err(at + '.scale.type', 'must be categorical or sequential'); return; }
       if (sc.type === 'sequential') {
-        if (mp.channel !== 'wall') err(at, 'a sequential scale colours walls; an overlay needs a categorical scale');
+        if (mp.channel !== 'wall') err(at, 'a sequential scale colours walls; ' + (mp.channel === 'overlay' ? 'an overlay' : 'the ' + mp.channel + ' channel') + ' needs a categorical scale');
         if (f.type === 'category') err(at, 'a sequential scale needs a number field, ' + mp.field + ' is a category');
         if (!(Array.isArray(sc.domain) && sc.domain.length === 2 && sc.domain.every(isNum) && sc.domain[0] < sc.domain[1])) err(at + '.scale.domain', 'must be [low, high] with low below high');
         if (!(Array.isArray(sc.colours) && sc.colours.length >= 2 && sc.colours.every(c => typeof c === 'string' && HEX.test(c)))) err(at + '.scale.colours', 'must be at least two #rrggbb colours');
@@ -185,9 +220,10 @@
           if (legal && Array.isArray(legal) && !legal.includes(k)) err(vat, 'not a value of ' + mp.entity + '.' + mp.field + ' (' + legal.join(', ') + ')');
           if (!isObj(v) || !isStr(v.label)) { err(vat, 'needs a label (the legend names it)'); continue; }
           if (mp.channel === 'wall' && !(typeof v.colour === 'string' && HEX.test(v.colour))) err(vat + '.colour', 'needs a #rrggbb colour');
+          if ((mp.channel === 'outline' || mp.channel === 'halo') && v.colour !== null && v.colour !== undefined && !(typeof v.colour === 'string' && HEX.test(v.colour))) err(vat + '.colour', 'needs a #rrggbb colour, or null for no ' + mp.channel);
           if (mp.channel === 'overlay' && v.overlay !== null && v.overlay !== undefined && !OVERLAYS.includes(v.overlay)) err(vat + '.overlay', 'must be null or one of ' + OVERLAYS.join(', '));
         }
-        if (f.type === 'category' && Array.isArray(f.values)) { const miss = f.values.filter(v => !(v in sc.values)); if (miss.length) warn(at + '.scale.values', 'no entry for ' + miss.join(', ') + ': ' + (mp.channel === 'wall' ? 'drawn as "no data"' : 'drawn with no marking')); }
+        if (f.type === 'category' && Array.isArray(f.values)) { const miss = f.values.filter(v => !(v in sc.values)); if (miss.length) warn(at + '.scale.values', 'no entry for ' + miss.join(', ') + ': ' + (mp.channel === 'wall' ? 'drawn as "no data"' : mp.channel === 'overlay' ? 'drawn with no marking' : 'drawn with no ' + mp.channel)); }
       }
     });
     if (maps.length === 0 && keysOf(ents).length) warn('mappings', 'none: nothing will be drawn on the map');

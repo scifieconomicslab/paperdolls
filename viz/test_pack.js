@@ -199,10 +199,12 @@ else {
     store.setParam('lockdown', 'full'); assert.strictEqual(store.length(), 11, 'frames already made are kept'); ctl.advance(1); assert.strictEqual(store.length(), 21);
   });
   test('shell: the legend is made from the mappings and names every value', () => {
-    const L = PH.legendFor(TOY); assert.deepStrictEqual(Array.from(L.map(s => s.title)), ['Infection state', 'Exposure today', 'Infectious']);
+    const L = PH.legendFor(TOY); assert.deepStrictEqual(Array.from(L.map(s => s.title)), ['Infection state', 'Exposure today', 'Infectious', 'Meeting place',
+      'Dwellings infectious (units of one building)', 'Vulnerable', 'Active case', 'Share exposed or infectious (ground tint)']);       // wall, wall, overlay, overlay, then the P6 channels
     assert.deepStrictEqual(Array.from(L[0].items.map(i => i.label)), ['Susceptible', 'Exposed', 'Infectious', 'Recovered', 'No data']);
-    assert.strictEqual(L[1].kind, 'ramp'); assert.deepStrictEqual(Array.from(L[2].items.map(i => i.overlay)), [null, 'marker']);
-    assert(L[2].items[0].label.includes('Susceptible') && L[2].items[0].label.includes('Recovered'));
+    assert.strictEqual(L[1].kind, 'ramp'); assert.deepStrictEqual(Array.from(L[2].items.map(i => i.overlay)), [null, 'marker', 'insulation']);
+    assert(L[2].items[0].label.includes('Susceptible') && L[2].items[0].label.includes('Exposed'));
+    assert.deepStrictEqual(Array.from(L[3].items.map(i => i.overlay)), ['community', null]); assert.strictEqual(L[7].kind, 'ramp');
   });
   const fam = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'assets', 'palettes.json'), 'utf8')).families.find(f => f.id === 'nw');
   const mkSim = () => V.createSim(V.makePlaceholderScene(7), { seed: 5, theme: A.theme(fam, undefined, 'colorfigures'), region: 'nw' });
@@ -212,7 +214,7 @@ else {
     const COL = { 0: '#a9c5a0', 1: '#e9b44c', 2: '#c8452f', 3: '#5b8db8' };
     for (const t of [0, 30]) {
       store.setTime(t); const st = store.frame().entities.building.state;
-      for (const k of [0, 1, 2, 77, 599]) { const s = style(b.entityOf(k)); assert.strictEqual(s.data, COL[st[k]], 'entity ' + k + ' at t=' + t); assert.deepStrictEqual(s.overlays, st[k] === 2 ? ['marker'] : []); }
+      for (const k of [0, 1, 2, 77, 599]) { const s = style(b.entityOf(k)); assert.strictEqual(s.data, COL[st[k]], 'entity ' + k + ' at t=' + t); const hub = store.frame().entities.building.hub[k], want = [st[k] === 2 ? 'marker' : null, st[k] === 3 ? 'insulation' : null, hub ? 'community' : null].filter(Boolean); assert.deepStrictEqual(s.overlays, want, 'entity ' + k + ' at t=' + t); }
     }
     assert.deepStrictEqual(style(b.entityOf(600)), { data: null, overlays: [] }); assert.strictEqual(sim.buildings.length, 1023);
     ctl.setWall(1); store.setTime(30); const ex = store.frame().entities.building.exposure, s5 = style(b.entityOf(5));

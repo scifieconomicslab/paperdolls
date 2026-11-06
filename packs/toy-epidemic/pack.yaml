@@ -34,8 +34,13 @@ entities:
     count: 600          # used when the runtime has no bindScene or the page has no scene
     from: scene
     fields:
-      state:    {type: category, values: [S, E, I, R]}
-      exposure: number
+      state:      {type: category, values: [S, E, I, R]}
+      exposure:   number
+      units:      {type: int, label: Dwellings}
+      units_hit:  {type: int, label: Dwellings infectious}
+      infected:   {type: boolean, label: Exposed or infectious}
+      hub:        {type: boolean, label: Meeting place}
+      vulnerable: {type: boolean, label: Vulnerable}
 
 mappings:
   - entity: building
@@ -63,7 +68,49 @@ mappings:
         S: {overlay: null,   label: Susceptible}
         E: {overlay: null,   label: Exposed}
         I: {overlay: marker, label: Infectious}
-        R: {overlay: null,   label: Recovered}
+        R: {overlay: insulation, label: Recovered}
+  - entity: building
+    field: hub
+    channel: overlay
+    scale:
+      type: categorical
+      label: Meeting place
+      values:
+        true:  {overlay: community, label: "Meeting place (the largest 5% of buildings by footprint)"}
+        false: {overlay: null,      label: Other}
+  # the visual channels (P6), all of them on fields the toy sends
+  - entity: building
+    field: units_hit
+    channel: segments
+    total: units
+    scale: {type: segments, label: Dwellings infectious (units of one building), colour: "#0f5c63", todo: "#efe9d8"}
+  - entity: building
+    field: vulnerable
+    channel: outline
+    scale:
+      type: categorical
+      label: Vulnerable
+      values:
+        true:  {colour: "#6a3d9a", label: Vulnerable (the smallest quarter of buildings by footprint)}
+        false: {colour: null,      label: Not vulnerable}
+  - entity: building
+    field: state
+    channel: halo
+    scale:
+      type: categorical
+      label: Active case
+      values:
+        S: {colour: null,      label: Susceptible}
+        E: {colour: null,      label: Exposed}
+        I: {colour: "#e8590c", label: Infectious}
+        R: {colour: null,      label: Recovered}
+  - entity: building
+    field: infected
+    channel: groundtint
+    group: {grid: 120}
+    aggregate: mean
+    opacity: 0.55
+    scale: {type: sequential, label: Share exposed or infectious, domain: [0, 0.4], colours: ["#fff3d6", "#f2a65a", "#c8452f"]}
 
 series:
   counts: {label: Buildings by state, unit: buildings, y: [S, E, I, R]}

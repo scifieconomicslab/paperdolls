@@ -15,9 +15,11 @@ NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 RUNTIMES = ["js", "pyodide", "remote"]
 PARAM_TYPES = ["number", "integer", "boolean", "enum"]
 FIELD_TYPES = ["category", "number", "int", "boolean"]
-CHANNELS = ["wall", "overlay"]
-PLANNED_CHANNELS = ["segments", "height", "outline", "halo", "insulation", "ground"]
-OVERLAYS = ["scaffold", "solar", "band", "marker"]
+CHANNELS = ["wall", "overlay", "segments", "outline", "halo", "groundtint"]
+PLANNED_CHANNELS = ["height", "ground"]
+AGGREGATES = ["mean", "sum", "min", "max"]
+OVERLAYS = ["scaffold", "solar", "band", "marker", "insulation", "community"]
+SEG_MAX = 12
 REGIONS = ["left", "right", "bottom"]
 CONTROLS = ["params", "presets", "compare", "timeline", "legend", "display"]
 PLANNED_ITEMS = ["table"]
@@ -288,7 +290,7 @@ def validate(m):
             err(at, "must be a mapping")
             continue
         for k in mp:
-            if k not in ("entity", "field", "channel", "scale"):
+            if k not in ("entity", "field", "channel", "scale", "total", "max", "group", "aggregate", "opacity"):
                 err(f"{at}.{k}", "unknown key")
         if mp.get("channel") in PLANNED_CHANNELS:
             warn(f"{at}.channel", f"{mp['channel']} is a planned channel and is ignored for now")
@@ -304,12 +306,75 @@ def validate(m):
             err(f"{at}.field", f"entity {mp['entity']} has no field {mp.get('field')}")
             continue
         sc = mp.get("scale")
+        if mp["channel"] == "segments":  # k of n units: the field holds k, mp["total"] names the field that holds n
+            if f.get("type") == "category":
+                err(f"{at}.field", f"a segments channel needs a number or int field (units done), {mp['field']} is a category")
+            if not _is_str(mp.get("total")):
+                err(f"{at}.total", "required: the field that holds the number of units")
+            else:
+                tf = field_spec(mp["entity"], mp["total"])
+                if not _obj(tf):
+                    err(f"{at}.total", f"entity {mp['entity']} has no field {mp['total']}")
+                elif tf.get("type") == "category":
+                    err(f"{at}.total", f"must be a number or int field, {mp['total']} is a category")
+            mx = mp.get("max")
+            if "max" in mp and not (isinstance(mx, int) and not isinstance(mx, bool) and 2 <= mx <= SEG_MAX):
+                err(f"{at}.max", f"must be a whole number from 2 to {SEG_MAX}")
+            if not _obj(sc) or sc.get("type") != "segments":
+                err(f"{at}.scale.type", "must be segments")
+                continue
+            if not (isinstance(sc.get("colour"), str) and HEX.match(sc["colour"])):
+                err(f"{at}.scale.colour", "needs a #rrggbb colour")
+            if "todo" in sc and not (isinstance(sc["todo"], str) and HEX.match(sc["todo"])):
+                err(f"{at}.scale.todo", "must be a #rrggbb colour")
+            if not _is_str(sc.get("label")):
+                warn(f"{at}.scale.label", "missing: the legend will show the field name")
+            continue
+        if mp["channel"] == "groundtint":  # the ground under the buildings, tinted by an aggregate of the field over a neighbourhood
+            if f.get("type") == "category":
+                err(f"{at}.field", f"the groundtint channel needs a number, int or boolean field to aggregate, {mp['field']} is a category")
+            gr = mp.get("group")
+            if not _obj(gr):
+                err(f"{at}.group", "required: {grid: metres} or {field: name, cell: metres}")
+            else:
+                for k in gr:
+                    if k not in ("grid", "field", "cell"):
+                        err(f"{at}.group.{k}", "unknown key")
+                if ("grid" in gr) == ("field" in gr):
+                    err(f"{at}.group", "give either grid or field")
+                elif "grid" in gr:
+                    if not (_is_num(gr["grid"]) and 10 <= gr["grid"] <= 2000):
+                        err(f"{at}.group.grid", "must be a cell size in metres from 10 to 2000")
+                    if "cell" in gr:
+                        err(f"{at}.group.cell", "only with a field group")
+                else:
+                    gf = field_spec(mp["entity"], gr["field"]) if isinstance(gr.get("field"), str) else None
+                    if not isinstance(gr.get("field"), str) or not _obj(gf):
+                        err(f"{at}.group.field", f"entity {mp['entity']} has no field {gr.get('field')}")
+                    if "cell" in gr and not (_is_num(gr["cell"]) and 10 <= gr["cell"] <= 500):
+                        err(f"{at}.group.cell", "must be a cell size in metres from 10 to 500")
+            if "aggregate" in mp and mp["aggregate"] not in AGGREGATES:
+                err(f"{at}.aggregate", "must be one of " + ", ".join(AGGREGATES))
+            if "opacity" in mp and not (_is_num(mp["opacity"]) and 0 < mp["opacity"] <= 1):
+                err(f"{at}.opacity", "must be above 0 and at most 1")
+            if not _obj(sc) or sc.get("type") != "sequential":
+                err(f"{at}.scale.type", "the groundtint channel needs a sequential scale")
+                continue
+            dom = sc.get("domain")
+            if not (isinstance(dom, list) and len(dom) == 2 and all(_is_num(d) for d in dom) and dom[0] < dom[1]):
+                err(f"{at}.scale.domain", "must be [low, high] with low below high")
+            cols = sc.get("colours")
+            if not (isinstance(cols, list) and len(cols) >= 2 and all(isinstance(c, str) and HEX.match(c) for c in cols)):
+                err(f"{at}.scale.colours", "must be at least two #rrggbb colours")
+            if not _is_str(sc.get("label")):
+                warn(f"{at}.scale.label", "missing: the legend will show the field name")
+            continue
         if not _obj(sc) or sc.get("type") not in ("categorical", "sequential"):
             err(f"{at}.scale.type", "must be categorical or sequential")
             continue
         if sc["type"] == "sequential":
             if mp["channel"] != "wall":
-                err(at, "a sequential scale colours walls; an overlay needs a categorical scale")
+                err(at, "a sequential scale colours walls; " + ("an overlay" if mp["channel"] == "overlay" else "the " + mp["channel"] + " channel") + " needs a categorical scale")
             if f.get("type") == "category":
                 err(at, f"a sequential scale needs a number field, {mp['field']} is a category")
             dom = sc.get("domain")
@@ -327,6 +392,7 @@ def validate(m):
                 continue
             legal = f.get("values") if f.get("type") == "category" else (["true", "false", "0", "1"] if f.get("type") == "boolean" else None)
             for k, v in vals.items():
+                k = "true" if k is True else "false" if k is False else k  # YAML 1.1 reads an unquoted true: or false: key as a boolean; the JSON the page gets already has "true" and "false"
                 vat = f"{at}.scale.values.{k}"
                 if isinstance(legal, list) and str(k) not in legal:
                     err(vat, f"not a value of {mp['entity']}.{mp['field']} ({', '.join(legal)})")
@@ -335,12 +401,14 @@ def validate(m):
                     continue
                 if mp["channel"] == "wall" and not (isinstance(v.get("colour"), str) and HEX.match(v["colour"])):
                     err(f"{vat}.colour", "needs a #rrggbb colour")
+                if mp["channel"] in ("outline", "halo") and v.get("colour") is not None and not (isinstance(v["colour"], str) and HEX.match(v["colour"])):
+                    err(f"{vat}.colour", f"needs a #rrggbb colour, or null for no {mp['channel']}")
                 if mp["channel"] == "overlay" and v.get("overlay") is not None and v["overlay"] not in OVERLAYS:
                     err(f"{vat}.overlay", "must be null or one of " + ", ".join(OVERLAYS))
             if f.get("type") == "category" and isinstance(f.get("values"), list):
                 miss = [v for v in f["values"] if v not in {str(k) for k in vals}]
                 if miss:
-                    warn(f"{at}.scale.values", "no entry for " + ", ".join(miss) + ": " + ('drawn as "no data"' if mp["channel"] == "wall" else "drawn with no marking"))
+                    warn(f"{at}.scale.values", "no entry for " + ", ".join(miss) + ": " + ('drawn as "no data"' if mp["channel"] == "wall" else "drawn with no marking" if mp["channel"] == "overlay" else f"drawn with no {mp['channel']}"))
     if not maps and ents:
         warn("mappings", "none: nothing will be drawn on the map")
 
