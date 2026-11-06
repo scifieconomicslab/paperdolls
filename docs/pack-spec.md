@@ -141,7 +141,7 @@ mappings:
 - `channel: overlay` marks the building: `overlay` is `null` or one of `scaffold`, `solar`, `band`, `marker`, `insulation`, `community`. A sequential scale cannot be an overlay.
 - A value with no entry is drawn as "no data" (walls) or unmarked (overlays), and the validator warns. A missing value (NaN, -1) is drawn as "no data", never as zero.
 - `channel: overlay` also takes `insulation` and `community` (see [Visual channels](#visual-channels-p6)).
-- `segments` is described under [Visual channels](#visual-channels-p6). `height`, `outline`, `halo` and `ground` are reserved (P6): they validate with a warning and are ignored until their section lands.
+- `segments` is described under [Visual channels](#visual-channels-p6). `outline` and `halo` likewise. `height` and `ground` are reserved (P6): they validate with a warning and are ignored until their section lands.
 - The legend is made from these mappings, so it can describe only what is drawn. Every entry needs a label.
 
 Only the first entity that has a wall, overlay or segments mapping is drawn.
@@ -169,6 +169,27 @@ mappings:
 - Near (`view.scale` at least 1.4, `sim.opts.segMinScale`) the walls carry the sections: a coloured panel on every wall, under the windows and doors, so the facade stays readable and the colour of the wall that carries the wall mapping still frames it. Far, there is nothing to divide, so the wall colour is mixed toward `colour` by `0.85 * k / n`. A building drawn as a generic extrusion (a footprint that does not fit an asset) always gets the mixed colour.
 - Cache: `n` and `k` are part of the asset id and `colour` and `todo` of the colour set, so a sprite is shared by every building with the same shape, `n`, `k` and colours: at most 78 sections-states per shape and heading (n = 2..12, k = 0..n), not one per building. It works with patch frames: a patch that changes `units_done` moves the version, and only the buildings whose pair changed fetch a different sprite.
 - Only the first `segments` mapping of the drawn entity is used. It combines with `wall`, `overlay`, and the insulation overlay (the sections are drawn over the cladding).
+
+#### `outline` and `halo`: highlighting a building
+
+```yaml
+mappings:
+  - entity: building
+    field: cannot_retrofit       # a boolean, or a category
+    channel: outline             # or halo
+    scale:
+      type: categorical
+      label: Cannot retrofit
+      values:
+        true:  {colour: "#c0392b", label: "Cannot: no credit access"}
+        false: {colour: null,      label: Can}
+```
+
+- `outline` strokes the building's footprint, and (zoomed in) its top and edges, in the colour of its value. `halo` strokes a soft ring a little outside the footprint (two translucent strokes). A value whose `colour` is `null` (or has no entry) is not highlighted. A boolean field uses the keys `true` and `false` (or `1` and `0`); a category uses its value names. A sequential scale is an error.
+- **No sprite is built or changed.** Both are drawn on the canvas above the map (the one the selection uses), so a highlight cannot multiply the sprite cache, and the far-zoom layer is not repainted for it. Per frame version the shell gathers the buildings to highlight, grouped by colour (`binding.highlights()`); a draw strokes one path per colour and kind and skips buildings off screen.
+- **Selection is the same layer.** `store.selection()` is drawn as a halo and a solid outline in blue (`#1d4ed8`) under the hover outline, after the pack's own highlights, so a selected building that also "cannot retrofit" shows both.
+- The legend lists each highlighted value with a bordered (outline) or glowing (halo) swatch; plain values are not listed. Several outline mappings may be given: for a building the first that has a colour wins.
+- Drawn by `PackHost.bindInteraction(...).drawHighlight`, which the page already calls every frame; a page that does not create the interaction layer shows no highlights.
 
 ### `series`
 

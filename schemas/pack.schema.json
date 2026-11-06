@@ -120,7 +120,7 @@
             "type": { "enum": ["categorical", "sequential", "segments"] }, "label": { "type": "string" }, "colour": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }, "todo": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
             "domain": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } },
             "colours": { "type": "array", "minItems": 2, "items": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" } },
-            "values": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "object", "required": ["label"], "properties": { "label": { "type": "string", "minLength": 1 }, "colour": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }, "overlay": { "enum": ["scaffold", "solar", "band", "marker", "insulation", "community", null] } }, "additionalProperties": false } }
+            "values": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "object", "required": ["label"], "properties": { "label": { "type": "string", "minLength": 1 }, "colour": { "type": ["string", "null"], "pattern": "^#[0-9a-fA-F]{6}$" }, "overlay": { "enum": ["scaffold", "solar", "band", "marker", "insulation", "community", null] } }, "additionalProperties": false } }
           },
           "allOf": [
             { "if": { "properties": { "type": { "const": "sequential" } } }, "then": { "required": ["domain", "colours"] } },

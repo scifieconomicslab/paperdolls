@@ -4,7 +4,7 @@
 const fs = require('fs'), path = require('path'), vm = require('vm'), assert = require('assert');
 const root = path.resolve(__dirname, '..');
 const g = { console, Math, Object, Map, Array, Infinity, JSON, Set, Int8Array, Int32Array, Float32Array, Float64Array, Uint8Array }; g.globalThis = g; vm.createContext(g);
-for (const f of ['assetlib.js', 'buildinglib.js', 'treelib.js', 'vizlib.js', 'packruntime.js', 'packstore.js', 'replay.js', 'packhost.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, f), 'utf8'), g, { filename: f });
+for (const f of ['assetlib.js', 'buildinglib.js', 'treelib.js', 'vizlib.js', 'packruntime.js', 'packstore.js', 'replay.js', 'packhost.js', 'packpick.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, f), 'utf8'), g, { filename: f });
 const A = g.AssetLib, V = g.VizLib, PackHost = g.PackHost;
 const pal = JSON.parse(fs.readFileSync(path.join(root, 'assets', 'palettes.json'), 'utf8'));
 const fam = pal.families[0], reg = A.REG.colorfigures;
@@ -125,12 +125,14 @@ const BLOCKS = {
     { entity: 'block', field: 'state', channel: 'wall', scale: { type: 'categorical', label: 'State', values: { plain: { colour: '#c9c2b0', label: 'Plain' }, clad: { colour: '#9fc3a8', label: 'Clad' } } } },
     { entity: 'block', field: 'done', channel: 'segments', total: 'units', scale: { type: 'segments', label: 'Units retrofitted', colour: '#00aa55', todo: '#e6e0d0' } },
     { entity: 'block', field: 'state', channel: 'overlay', scale: { type: 'categorical', label: 'Insulation', values: { plain: { overlay: null, label: 'Not insulated' }, clad: { overlay: 'insulation', label: 'Insulated' } } } },
+    { entity: 'block', field: 'cannot', channel: 'outline', scale: { type: 'categorical', label: 'Cannot retrofit', values: { true: { colour: '#c0392b', label: 'Cannot: no credit' }, false: { colour: null, label: 'Can' } } } },
+    { entity: 'block', field: 'state', channel: 'halo', scale: { type: 'categorical', label: 'Done', values: { plain: { colour: null, label: 'Not yet' }, clad: { colour: '#f1c40f', label: 'Insulated' } } } },
   ],
 };
 const mkFrames = () => {
   const units = Int32Array.from({ length: 30 }, (_, i) => 1 + (i % 9) * 5), done = new Int32Array(30), state = new Int8Array(30);        // units 1, 6, 11, ... 41 (more than 12 for some)
   const f0 = { t: 0, entities: { block: { state, units, done, cannot: new Float32Array(30), adopt: new Float32Array(30), district: new Int32Array(30) } }, series: {} };
-  const f1 = { t: 1, patch: { block: { done: { idx: Int32Array.from([1, 2, 10]), val: Int32Array.from([3, 6, 5]) }, state: { idx: Int32Array.from([2]), val: Int8Array.from([1]) } } }, series: {} };
+  const f1 = { t: 1, patch: { block: { done: { idx: Int32Array.from([1, 2, 10]), val: Int32Array.from([3, 6, 5]) }, state: { idx: Int32Array.from([2]), val: Int8Array.from([1]) }, cannot: { idx: Int32Array.from([3, 4]), val: Int8Array.from([1, 1]) } } }, series: {} };
   return [f0, f1];
 };
 function bindBlocks(manifest) {
@@ -162,5 +164,55 @@ if (createCanvas) test('segments in a pack: rendered through the real path (vers
   assert(sim._far, 'the far layer is kept'); assert(!e1._asset.prims.some(p => p.role === 'segdone'), 'no sections far'); assert.strictEqual(e1._cols.data, A.mix('#c9c2b0', '#00aa55', 0.85 * 3 / 6), 'the wall colour of the state, mixed toward done by 3 of 6');
   b.dispose();
 });
+
+// ================= outline and halo =================
+if (!createCanvas) skip('outline and halo', 'canvas is not installed');
+else {
+  const countPx = (ctx, W, H, f) => { const d = ctx.getImageData(0, 0, W, H).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 40 && f(d[i], d[i + 1], d[i + 2])) n++; return n; };
+  const isRed = (r, g, b) => r > 150 && g < 90 && b < 90, isYellow = (r, g, b) => r > 200 && g > 170 && b < 90, isBlue = (r, g, b) => b > 150 && r < 80 && g < 120;
+  const farView = sim => V.fitView(sim.scene, 900, 600, 0.06);
+
+  test('outline and halo: the buildings to highlight follow the frame, grouped by colour, and cost the sprites nothing', () => {
+    const { store, sim, b, st } = bindBlocks(BLOCKS);
+    const idx = h => [].concat(...h.map(g => Array.from(g.idx))), ents = ks => ks.map(k => b.index[k]).sort((x, y) => x - y);
+    let h = b.highlights(); assert.strictEqual(h.outline.length, 0, 'time 0: nothing is flagged'); assert.strictEqual(h.halo.length, 0);
+    const before3 = st(3), before4 = st(4), v = sim.frameVersion, builds = h.builds; store.setTime(1);
+    h = b.highlights(); assert.strictEqual(h.builds, builds + 1, 'gathered once for the new version');
+    assert.strictEqual(J(idx(h.outline).sort((x, y) => x - y)), J(ents([3, 4])), 'blocks 3 and 4 cannot retrofit'); assert.strictEqual(h.outline[0].colour, '#c0392b');
+    assert.strictEqual(J(idx(h.halo)), J(ents([2])), 'the halo is on the one that is clad'); assert.strictEqual(h.halo[0].colour, '#f1c40f');
+    b.highlights(); assert.strictEqual(b.highlights().builds, builds + 1, 'asked again at the same version: not gathered again');
+    assert.strictEqual(st(4), before4, 'an outline changes no style: the sprite of block 4 is untouched');
+    assert(sim.frameVersion > v); b.dispose();
+  });
+
+  test('outline and halo: drawn as strokes in their colours where flagged, and gone when the flag goes', () => {
+    const { store, sim, b } = bindBlocks(BLOCKS), W = 900, H = 600, view = farView(sim), ctx = createCanvas(W, H).getContext('2d');
+    b.drawChannels(ctx, view); assert.strictEqual(countPx(ctx, W, H, isRed) + countPx(ctx, W, H, isYellow), 0, 'time 0: nothing drawn');
+    store.setTime(1); ctx.clearRect(0, 0, W, H); const n = b.drawChannels(ctx, view);
+    assert(n > 0 && countPx(ctx, W, H, isRed) > 20, 'red outlines: ' + countPx(ctx, W, H, isRed)); assert(countPx(ctx, W, H, isYellow) > 5, 'a yellow halo: ' + countPx(ctx, W, H, isYellow));
+    // near: the lifted outline and its edges, only on the flagged buildings in view
+    const e3 = b.entityOf(3), near = { w: W, h: H, scale: 9, ox: W / 2 - (e3.fit.cx - e3.fit.cy) * 9 * 0.866, oy: H / 2 - (e3.fit.cx + e3.fit.cy) * 4.5 };
+    ctx.clearRect(0, 0, W, H); b.drawChannels(ctx, near); const redNear = countPx(ctx, W, H, isRed); assert(redNear > 200, 'a near outline is longer: ' + redNear);
+    store.setTime(0); ctx.clearRect(0, 0, W, H); b.drawChannels(ctx, view); assert.strictEqual(countPx(ctx, W, H, isRed), 0, 'the flag goes with the frame');
+    // a building off screen is not drawn
+    store.setTime(1); ctx.clearRect(0, 0, W, H); assert.strictEqual(b.drawChannels(ctx, { w: W, h: H, scale: 9, ox: 1e5, oy: 1e5 }), 0);
+    b.dispose();
+  });
+
+  test('outline and halo: the store selection is drawn by the same layer (a halo and an outline in the selection colour)', () => {
+    const { store, sim, b } = bindBlocks(BLOCKS), W = 900, H = 600, view = farView(sim), ctx = createCanvas(W, H).getContext('2d'), listeners = {};
+    const fake = { addEventListener: (t, f) => { listeners[t] = f; }, removeEventListener() {}, getBoundingClientRect: () => ({ left: 0, top: 0 }) };
+    const inter = PackHost.bindInteraction({ manifest: BLOCKS, store, sim, binding: b, pick: g.Pick.create(sim), box: fake, camera: { view: () => view }, doc: fake, tip: null });
+    inter.drawHighlight(ctx, view); assert.strictEqual(countPx(ctx, W, H, isBlue), 0, 'nothing selected');
+    store.select({ entity: 'block', id: 7 }); inter.drawHighlight(ctx, view); const sel = countPx(ctx, W, H, isBlue); assert(sel > 20, 'the selection is drawn: ' + sel);
+    store.setTime(1); inter.drawHighlight(ctx, view); assert(countPx(ctx, W, H, isRed) > 20 && countPx(ctx, W, H, isBlue) > 20, 'data-driven outlines and the selection together');
+    store.select(null); inter.drawHighlight(ctx, view); assert.strictEqual(countPx(ctx, W, H, isBlue), 0, 'cleared'); inter.dispose(); b.dispose();
+  });
+
+  test('outline and halo: the legend lists the highlighted values with their colours, and not the plain ones', () => {
+    const L = PackHost.legendFor(BLOCKS), o = L.find(x => x.title === 'Cannot retrofit'), h = L.find(x => x.title === 'Done');
+    assert.strictEqual(J(o.items), J([{ label: 'Cannot: no credit', colour: '#c0392b', mode: 'outline' }])); assert.strictEqual(J(h.items), J([{ label: 'Insulated', colour: '#f1c40f', mode: 'halo' }]));
+  });
+}
 
 console.log(passed + ' passed' + (process.exitCode ? ', with failures' : ''));

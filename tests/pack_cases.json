@@ -145,6 +145,43 @@
      "colour": "#2e9d6a",
      "todo": "#e6e0d0"
     }
+   },
+   {
+    "entity": "thing",
+    "field": "kind",
+    "channel": "outline",
+    "scale": {
+     "type": "categorical",
+     "label": "Cannot retrofit",
+     "values": {
+      "a": {
+       "colour": null,
+       "label": "Can"
+      },
+      "b": {
+       "colour": "#c0392b",
+       "label": "Cannot: no credit"
+      }
+     }
+    }
+   },
+   {
+    "entity": "thing",
+    "field": "kind",
+    "channel": "halo",
+    "scale": {
+     "type": "categorical",
+     "label": "Priority",
+     "values": {
+      "a": {
+       "label": "Normal"
+      },
+      "b": {
+       "colour": "#f1c40f",
+       "label": "Priority"
+      }
+     }
+    }
    }
   ],
   "series": {
@@ -953,6 +990,59 @@
    },
    "errors": [],
    "warnings": []
+  },
+  {
+   "name": "an outline colour must be hex or null",
+   "patch": {
+    "mappings.4.scale.values.b.colour": "red"
+   },
+   "errors": [
+    "mappings[4].scale.values.b.colour: needs a #rrggbb colour, or null for no outline"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a halo cannot be sequential",
+   "patch": {
+    "mappings.5.scale": {
+     "type": "sequential",
+     "domain": [
+      0,
+      1
+     ],
+     "colours": [
+      "#000000",
+      "#ffffff"
+     ]
+    }
+   },
+   "errors": [
+    "mappings[5]: a sequential scale colours walls; the halo channel needs"
+   ],
+   "warnings": [
+    "mappings[5].scale.label: missing"
+   ]
+  },
+  {
+   "name": "an outline needs a label on every value",
+   "patch": {
+    "mappings.4.scale.values.a.label": "$delete"
+   },
+   "errors": [
+    "mappings[4].scale.values.a: needs a label"
+   ],
+   "warnings": []
+  },
+  {
+   "name": "an outline warns about a value with no entry",
+   "patch": {
+    "mappings.4.scale.values.a": "$delete"
+   },
+   "errors": [],
+   "warnings": [
+    "mappings[4].scale.values: no entry for a: drawn with no outline"
+   ]
   }
  ]
 }

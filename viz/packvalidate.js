@@ -12,7 +12,7 @@
   const RUNTIMES = ['js', 'pyodide', 'remote'];
   const PARAM_TYPES = ['number', 'integer', 'boolean', 'enum'];
   const FIELD_TYPES = ['category', 'number', 'int', 'boolean'];
-  const CHANNELS = ['wall', 'overlay', 'segments'], PLANNED_CHANNELS = ['height', 'outline', 'halo', 'ground'];
+  const CHANNELS = ['wall', 'overlay', 'segments', 'outline', 'halo'], PLANNED_CHANNELS = ['height', 'ground'];
   const OVERLAYS = ['scaffold', 'solar', 'band', 'marker', 'insulation', 'community'];
   const SEG_MAX = 12;
   const REGIONS = ['left', 'right', 'bottom'];
@@ -182,7 +182,7 @@
       }
       if (!isObj(sc) || !['categorical', 'sequential'].includes(sc.type)) { err(at + '.scale.type', 'must be categorical or sequential'); return; }
       if (sc.type === 'sequential') {
-        if (mp.channel !== 'wall') err(at, 'a sequential scale colours walls; an overlay needs a categorical scale');
+        if (mp.channel !== 'wall') err(at, 'a sequential scale colours walls; ' + (mp.channel === 'overlay' ? 'an overlay' : 'the ' + mp.channel + ' channel') + ' needs a categorical scale');
         if (f.type === 'category') err(at, 'a sequential scale needs a number field, ' + mp.field + ' is a category');
         if (!(Array.isArray(sc.domain) && sc.domain.length === 2 && sc.domain.every(isNum) && sc.domain[0] < sc.domain[1])) err(at + '.scale.domain', 'must be [low, high] with low below high');
         if (!(Array.isArray(sc.colours) && sc.colours.length >= 2 && sc.colours.every(c => typeof c === 'string' && HEX.test(c)))) err(at + '.scale.colours', 'must be at least two #rrggbb colours');
@@ -195,9 +195,10 @@
           if (legal && Array.isArray(legal) && !legal.includes(k)) err(vat, 'not a value of ' + mp.entity + '.' + mp.field + ' (' + legal.join(', ') + ')');
           if (!isObj(v) || !isStr(v.label)) { err(vat, 'needs a label (the legend names it)'); continue; }
           if (mp.channel === 'wall' && !(typeof v.colour === 'string' && HEX.test(v.colour))) err(vat + '.colour', 'needs a #rrggbb colour');
+          if ((mp.channel === 'outline' || mp.channel === 'halo') && v.colour !== null && v.colour !== undefined && !(typeof v.colour === 'string' && HEX.test(v.colour))) err(vat + '.colour', 'needs a #rrggbb colour, or null for no ' + mp.channel);
           if (mp.channel === 'overlay' && v.overlay !== null && v.overlay !== undefined && !OVERLAYS.includes(v.overlay)) err(vat + '.overlay', 'must be null or one of ' + OVERLAYS.join(', '));
         }
-        if (f.type === 'category' && Array.isArray(f.values)) { const miss = f.values.filter(v => !(v in sc.values)); if (miss.length) warn(at + '.scale.values', 'no entry for ' + miss.join(', ') + ': ' + (mp.channel === 'wall' ? 'drawn as "no data"' : 'drawn with no marking')); }
+        if (f.type === 'category' && Array.isArray(f.values)) { const miss = f.values.filter(v => !(v in sc.values)); if (miss.length) warn(at + '.scale.values', 'no entry for ' + miss.join(', ') + ': ' + (mp.channel === 'wall' ? 'drawn as "no data"' : mp.channel === 'overlay' ? 'drawn with no marking' : 'drawn with no ' + mp.channel)); }
       }
     });
     if (maps.length === 0 && keysOf(ents).length) warn('mappings', 'none: nothing will be drawn on the map');

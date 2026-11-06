@@ -15,8 +15,8 @@ NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 RUNTIMES = ["js", "pyodide", "remote"]
 PARAM_TYPES = ["number", "integer", "boolean", "enum"]
 FIELD_TYPES = ["category", "number", "int", "boolean"]
-CHANNELS = ["wall", "overlay", "segments"]
-PLANNED_CHANNELS = ["height", "outline", "halo", "ground"]
+CHANNELS = ["wall", "overlay", "segments", "outline", "halo"]
+PLANNED_CHANNELS = ["height", "ground"]
 OVERLAYS = ["scaffold", "solar", "band", "marker", "insulation", "community"]
 SEG_MAX = 12
 REGIONS = ["left", "right", "bottom"]
@@ -329,7 +329,7 @@ def validate(m):
             continue
         if sc["type"] == "sequential":
             if mp["channel"] != "wall":
-                err(at, "a sequential scale colours walls; an overlay needs a categorical scale")
+                err(at, "a sequential scale colours walls; " + ("an overlay" if mp["channel"] == "overlay" else "the " + mp["channel"] + " channel") + " needs a categorical scale")
             if f.get("type") == "category":
                 err(at, f"a sequential scale needs a number field, {mp['field']} is a category")
             dom = sc.get("domain")
@@ -355,12 +355,14 @@ def validate(m):
                     continue
                 if mp["channel"] == "wall" and not (isinstance(v.get("colour"), str) and HEX.match(v["colour"])):
                     err(f"{vat}.colour", "needs a #rrggbb colour")
+                if mp["channel"] in ("outline", "halo") and v.get("colour") is not None and not (isinstance(v["colour"], str) and HEX.match(v["colour"])):
+                    err(f"{vat}.colour", f"needs a #rrggbb colour, or null for no {mp['channel']}")
                 if mp["channel"] == "overlay" and v.get("overlay") is not None and v["overlay"] not in OVERLAYS:
                     err(f"{vat}.overlay", "must be null or one of " + ", ".join(OVERLAYS))
             if f.get("type") == "category" and isinstance(f.get("values"), list):
                 miss = [v for v in f["values"] if v not in {str(k) for k in vals}]
                 if miss:
-                    warn(f"{at}.scale.values", "no entry for " + ", ".join(miss) + ": " + ('drawn as "no data"' if mp["channel"] == "wall" else "drawn with no marking"))
+                    warn(f"{at}.scale.values", "no entry for " + ", ".join(miss) + ": " + ('drawn as "no data"' if mp["channel"] == "wall" else "drawn with no marking" if mp["channel"] == "overlay" else f"drawn with no {mp['channel']}"))
     if not maps and ents:
         warn("mappings", "none: nothing will be drawn on the map")
 
