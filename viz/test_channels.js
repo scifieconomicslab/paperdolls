@@ -355,4 +355,72 @@ else {
   });
 }
 
+// ================= roof colour (a wall mapping with colour: roof | wall+roof), through the pack host =================
+const withColour = c => { const M = JSON.parse(J(BLOCKS)); M.mappings[0].colour = c; return M; };
+test('roof colour: the style carries the data colour for the roof, per the mapping; unmodelled buildings get a light neutral roof only when roofs are painted', () => {
+  for (const [c, wallOn, roofOn] of [[undefined, true, false], ['wall', true, false], ['roof', false, true], ['wall+roof', true, true]]) {
+    const { sim, b, st } = bindBlocks(c === undefined ? BLOCKS : withColour(c)), s = st(1);
+    assert.strictEqual(!!s.data, wallOn, String(c) + ' wall'); assert.strictEqual(!!s.roof, roofOn, String(c) + ' roof');
+    if (wallOn && roofOn) assert.strictEqual(s.roof, s.data, 'the same colour on both');
+    const other = sim.buildings.find(e => b.modelOf[e._si] < 0), os = other ? sim.buildingStyle(other) : null;
+    if (other) { assert.strictEqual(!!os.roof, roofOn, String(c) + ' neutral roof for the rest'); assert.strictEqual(os.data, null); }
+    b.dispose();
+  }
+});
+test('roof colour: a shared style object per state (no allocation per building), and it follows the wall chooser', () => {
+  const M = withColour('wall+roof'); M.mappings.push({ entity: 'block', field: 'state', channel: 'wall', colour: 'roof', scale: { type: 'categorical', label: 'Roofs only', values: { plain: { colour: '#111111', label: 'Plain' }, clad: { colour: '#222222', label: 'Clad' } } } });
+  const ctl = { wall: 0 }, store = PStore.create(M), sim = mkSim(); store.pushFrames(mkFrames(), { replace: true });
+  const b = PackHost.bindRenderer({ manifest: M, store, controller: ctl, sim }); assert(b.ok, b.error);
+  const a = sim.buildingStyle(b.entityOf(3)), a2 = sim.buildingStyle(b.entityOf(4)); assert.strictEqual(a, a2, 'same state, same object'); assert.strictEqual(a.roof, '#c9c2b0');
+  ctl.wall = 1; store.invalidate(); const r = sim.buildingStyle(b.entityOf(3)); assert.strictEqual(r.data, null); assert.strictEqual(r.roof, '#111111');
+  b.dispose();
+});
+if (createCanvas) test('roof colour render: the sprite takes the roof colour (flat and pitched), keys on it, and the far layer and a repaint follow a change', () => {
+  A.sprites.factory = (w, h) => createCanvas(w, h);
+  const { store, sim, b } = bindBlocks(withColour('roof')), ctx = createCanvas(900, 600).getContext('2d'); store.setTime(1);
+  const e1 = b.entityOf(1), e2 = b.entityOf(2), settle = (view, n) => { for (let i = 0; i < (n || 60); i++) V.renderFrame(ctx, sim, view, ONLY_B); };
+  const near = Object.assign({}, nearView, { w: 900, h: 600, ox: 450 - (e1.fit.cx - e1.fit.cy) * 9 * 0.866, oy: 300 - (e1.fit.cx + e1.fit.cy) * 4.5 });
+  settle(near); assert(e1._cols && e1._cols.roof === '#c9c2b0' && e1._cols.roofflat === '#c9c2b0', 'plain state: its colour on both roof roles');
+  assert(e2._cols.roof === '#9fc3a8', 'clad state'); assert.notStrictEqual(e1._cols.roof, e2._cols.roof);
+  assert.notStrictEqual(e1._cols.data, '#c9c2b0', 'the walls keep the look when only the roof is painted');
+  assert.notStrictEqual(e1._ck, e2._ck, 'the sprite key follows the roof colour');
+  const far = V.fitView(sim.scene, 900, 600, 0.06); settle(far, 120); assert(sim._far, 'the far layer is kept');
+  assert.strictEqual(e1._cols.roof, A.mix('#c9c2b0', '#00aa55', 0.85 * 3 / 6), 'far: the roof is mixed toward the segment colour like the wall (3 of 6 done)');
+  store.setTime(0); settle(far, 120); assert.strictEqual(e1._cols.roof, '#c9c2b0', 'the layer repaints for a change of frame: nothing done yet'); store.setTime(1); settle(far, 120); assert.notStrictEqual(e2._cols.roof, '#9fc3a8', 'the clad building is mixed toward done too');
+  b.dispose();
+});
+if (createCanvas) test('roof colour render: a building drawn as a generic extrusion gets the roof colour too, and segments mix into it far away', () => {
+  A.sprites.factory = (w, h) => createCanvas(w, h);
+  const s = mkSim(), ctx = createCanvas(1000, 700).getContext('2d'); s.frameVersion = 1;
+  s.buildingStyle = () => ({ data: null, roof: '#ff8800', overlays: [], seg: null });
+  V.renderFrame(ctx, s, nearView, ONLY_B); const e = s.buildings.find(x => x.params && x._cols); assert.strictEqual(e._cols.roof, '#ff8800');
+  const x = s.buildings.find(q => !q.params); V.renderFrame(ctx, s, V.fitView(s.scene, 1000, 700, 0.06), ONLY_B); if (x) assert.strictEqual(x._froof, '#ff8800', 'extruded: the roof is passed to the drawing');
+  s.buildingStyle = () => ({ data: '#336699', roof: '#336699', overlays: [], seg: { n: 4, k: 2, done: '#00aa55', todo: null } }); s.frameVersion = 2;
+  V.renderFrame(ctx, s, V.fitView(s.scene, 1000, 700, 0.06), ONLY_B);
+  const f = s.buildings.find(q => q.params && q._cols); assert.strictEqual(f._cols.roof, A.mix('#336699', '#00aa55', 0.85 * 2 / 4), 'far: the roof is mixed toward done like the wall');
+});
+// a roof colour is an option of the wall mapping only (validators: tests/pack_cases.json)
+test('roof colour: validated like the spec says', () => {
+  const PV = g.PackSpec, bad = JSON.parse(J(BLOCKS)); bad.mappings[0].colour = 'sideways';
+  assert(PV.validate(bad).errors.some(e => /colour: must be one of wall, roof, wall\+roof/.test(e))); assert.deepStrictEqual(Array.from(PV.validate(withColour('roof')).errors), []);
+});
+
+// ================= the real building: tooltip and inspector rows =================
+test('scene info: the OSM id, footprint, storeys (assumed or not), residential class and the pack\'s own scalar attrs name the building', () => {
+  const store = PStore.create(BLOCKS), sim = mkSim(); store.pushFrames(mkFrames(), { replace: true });
+  const n = sim.buildings.length; sim.buildings[3].src.id = 'w30129320'; sim.buildings[3].src.area = 78.1; sim.buildings[3].src.levels = 2; sim.buildings[3].src.levels_assumed = true; sim.buildings[3].src.residential = 'probable';
+  sim.buildings[4].src.id = 'w7'; sim.buildings[4].src.area = 410.4; sim.buildings[4].src.levels = 5; sim.buildings[4].src.levels_assumed = false; sim.buildings[4].src.residential = 'residential';
+  const pos = new Int32Array(30).fill(-1); for (let k = 0; k < 30; k++) pos[k] = k < 2 ? k + 3 : k + 5 < n ? k + 5 : -1;
+  const bound = { ok: true, bound: true, warnings: [], counts: { block: 30 }, pos: { block: pos }, attrs: { block: { area: new Array(30).fill(1), owner: Array.from({ length: 30 }, (_, i) => 'owner ' + i), tenure_share: Array.from({ length: 30 }, (_, i) => i / 8), neighbours: Array.from({ length: 30 }, () => [1, 2]), flag: Array.from({ length: 30 }, () => true) } } };
+  const b = PackHost.bindRenderer({ manifest: BLOCKS, store, controller: { wall: 0 }, sim, bound }); assert(b.ok, b.error);
+  assert.strictEqual(store.sceneInfo, b.sceneInfo, 'the store carries it for the inspector');
+  const rows = id => PackHost.sceneRows(b.sceneInfo, { entity: 'block', id }).map(r => r.label + '=' + r.value + (r.unit ? ' ' + r.unit : ''));
+  const r0 = rows(0); assert.strictEqual(r0[0], 'OSM id=w30129320'); assert.strictEqual(r0[1], 'Footprint=78 m²'); assert(/^Storeys=2 \(assumed/.test(r0[2]), r0[2]); assert(/^Residential class=probable/.test(r0[3]));
+  assert(r0.includes('owner=owner 0') && r0.includes('tenure share=0') && r0.includes('flag=yes'), r0.join('|')); assert(!r0.some(x => /neighbours|^area/.test(x)), 'arrays of arrays and the fields already shown are left out');
+  const r1 = rows(1); assert.strictEqual(r1[2], 'Storeys=5', 'tagged storeys are not marked'); assert(/^Residential class=residential/.test(r1[3]));
+  assert.strictEqual(PackHost.entityTitle({ entity: 'block', id: 0 }, b.sceneInfo), 'Block w30129320'); assert.strictEqual(PackHost.entityTitle({ entity: 'block', id: 0 }), 'Block 1', 'without a scene building: the model number');
+  assert.strictEqual(PackHost.sceneRows(null, { entity: "block", id: 0 }).length, 0);
+  b.dispose();
+});
+
 console.log(passed + ' passed' + (process.exitCode ? ', with failures' : ''));

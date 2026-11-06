@@ -89,7 +89,7 @@
   }
   // Buildings: footprint extruded; windows drawn per visible wall, bay by bay.
   // Generic extrusion of an arbitrary footprint. The fallback for footprints the asset slots cannot take (see fitFootprint).
-  function drawBuilding(ctx, view, reg, pal, b, shadowRgb, state, wallOverride) {
+  function drawBuilding(ctx, view, reg, pal, b, shadowRgb, state, wallOverride, roofOverride) {
     reg = Object.assign({}, reg, { lw: reg.lw * Math.max(0.3, Math.min(1, view.scale / 10)) });   // thinner ink when zoomed out
     const arch = LIB.buildings[b.archetype] || LIB.buildings.terrace;
     const H = b.levels * arch.storeyH;
@@ -151,7 +151,7 @@
     }
     // roof: flat top polygon, drawn last among the faces
     const top = fp.map(p => proj(view, p[0], p[1], H));
-    poly(ctx, top, shade(pal.roof || wallFill, reg.tones[0]), reg.ink, reg.lw);
+    poly(ctx, top, shade(roofOverride || pal.roof || wallFill, reg.tones[0]), reg.ink, reg.lw);
     if (state === 'finished') {
       // solar panels on the roof: a small inset polygon near the centroid
       let cx = 0, cy = 0; fp.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= n; cy /= n;
@@ -1092,20 +1092,20 @@
     // A style with a frame version (sim.frameVersion, a number) is asked again only when the number has changed: no style call, no key string, no allocation.
     const ver = sim.buildingStyle && typeof sim.frameVersion === 'number' ? sim.frameVersion : null;
     const segOn = view.scale >= (sim.opts.segMinScale === undefined ? SEG_MIN_SCALE : sim.opts.segMinScale);
-    if (ver !== null && !bound && e._fv === ver && e._th === pal && (!e._seg || e._sm === segOn)) { if (e._asset) drawBuildingSprite(ctx, view, A, areg, e); else drawExtruded(ctx, view, reg, pal, e, shadowCol, e._fdata); return; }
+    if (ver !== null && !bound && e._fv === ver && e._th === pal && (!e._seg || e._sm === segOn)) { if (e._asset) drawBuildingSprite(ctx, view, A, areg, e); else drawExtruded(ctx, view, reg, pal, e, shadowCol, e._fdata, e._froof); return; }
     const wall = A.wallFor(pal, e.seed);
     const style = (sim.buildingStyle || retrofitStyle)(e, areg, pal, wall) || {};
-    let data = style.data || null, seg = null;
+    let data = style.data || null, seg = null, roof = style.roof || null;   // style.roof: a colour for the roof (the data colour on the roof, or a neutral one), null for the look's own
     for (const b of sim.bindings) if (b.match(e)) { data = b.scale.colour(b.value(e)); break; }   // a data binding wins over the style
     if (style.seg) {
       seg = A.segmentsFor(style.seg.n, style.seg.k);
-      if (seg && !(segOn && e.params)) { data = A.mix(data || wall, style.seg.done, 0.85 * style.seg.k / style.seg.n); seg = null; }
+      if (seg && !(segOn && e.params)) { const mixk = 0.85 * style.seg.k / style.seg.n; data = A.mix(data || wall, style.seg.done, mixk); if (roof) roof = A.mix(roof, style.seg.done, mixk); seg = null; }
     }
     e._seg = !!style.seg; e._sm = segOn;
-    if (!e.params) { e._fv = ver; e._th = pal; e._asset = null; e._fdata = data || wall; drawExtruded(ctx, view, reg, pal, e, shadowCol, data || wall); return; }
-    const ov = style.overlays || [], key = pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + wall + '|' + data + '|' + ov.join(',') + (seg ? '|' + seg[0] + ':' + seg[1] + ':' + style.seg.done + ':' + (style.seg.todo || '') : '');
+    if (!e.params) { e._fv = ver; e._th = pal; e._asset = null; e._fdata = data || wall; e._froof = roof; drawExtruded(ctx, view, reg, pal, e, shadowCol, data || wall, roof); return; }
+    const ov = style.overlays || [], key = pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + wall + '|' + data + '|' + roof + '|' + ov.join(',') + (seg ? '|' + seg[0] + ':' + seg[1] + ':' + style.seg.done + ':' + (style.seg.todo || '') : '');
     if (e._ck !== key) {
-      e._cols = A.buildingColours(areg, pal, { wall, data, seed: e.seed, seg: seg ? style.seg : null });
+      e._cols = A.buildingColours(areg, pal, { wall, data, roof, seed: e.seed, seg: seg ? style.seg : null });
       e._asset = A.getAsset('buildings', e.kind, e.fit.heading, A.buildingExtra(e.params, ov, seg));
       e._ck = key;
     }
@@ -1113,9 +1113,9 @@
     drawBuildingSprite(ctx, view, A, areg, e);
   }
   // The generic extrusion, standing at the building's ground height (the whole drawing is lifted: no per-point z).
-  function drawExtruded(ctx, view, reg, pal, e, shadowCol, wall) {
-    if (!e.z) { drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, wall); return; }
-    ctx.save(); ctx.translate(0, -e.z * view.scale); drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, wall); ctx.restore();
+  function drawExtruded(ctx, view, reg, pal, e, shadowCol, wall, roof) {
+    if (!e.z) { drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, wall, roof); return; }
+    ctx.save(); ctx.translate(0, -e.z * view.scale); drawBuilding(ctx, view, reg, pal, e.src, shadowCol, e.state, wall, roof); ctx.restore();
   }
   function drawBuildingSprite(ctx, view, A, areg, e) {
     const p = proj(view, e.fit.cx, e.fit.cy, e.z);

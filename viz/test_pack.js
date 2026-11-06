@@ -198,13 +198,22 @@ else {
     assert.strictEqual(store.length(), 1); store.setSpeed(10); store.setPlaying(true); ctl.advance(1); assert.strictEqual(store.time().t, 10); assert.strictEqual(store.length(), 11);
     store.setParam('lockdown', 'full'); assert.strictEqual(store.length(), 11, 'frames already made are kept'); ctl.advance(1); assert.strictEqual(store.length(), 21);
   });
-  test('shell: the legend is made from the mappings and names every value', () => {
-    const L = PH.legendFor(TOY); assert.deepStrictEqual(Array.from(L.map(s => s.title)), ['Infection state', 'Exposure today', 'Infectious', 'Meeting place',
-      'Dwellings infectious (units of one building)', 'Vulnerable', 'Active case', 'Share exposed or infectious (ground tint)']);       // wall, wall, overlay, overlay, then the P6 channels
+  test('shell: the legend is made from the mappings and names every value (of the colouring in use)', () => {
+    const L = PH.legendFor(TOY); assert.deepStrictEqual(Array.from(L.map(s => s.title)), ['Infection state', 'Infectious', 'Meeting place',
+      'Dwellings infectious (units of one building)', 'Vulnerable', 'Active case', 'Share exposed or infectious (ground tint)']);       // the wall mapping in use, the overlays, then the P6 channels
     assert.deepStrictEqual(Array.from(L[0].items.map(i => i.label)), ['Susceptible', 'Exposed', 'Infectious', 'Recovered', 'No data']);
-    assert.strictEqual(L[1].kind, 'ramp'); assert.deepStrictEqual(Array.from(L[2].items.map(i => i.overlay)), [null, 'marker', 'insulation']);
-    assert(L[2].items[0].label.includes('Susceptible') && L[2].items[0].label.includes('Exposed'));
-    assert.deepStrictEqual(Array.from(L[3].items.map(i => i.overlay)), ['community', null]); assert.strictEqual(L[7].kind, 'ramp');
+    assert.deepStrictEqual(Array.from(L[1].items.map(i => i.overlay)), [null, 'marker', 'insulation']);
+    assert(L[1].items[0].label.includes('Susceptible') && L[1].items[0].label.includes('Exposed'));
+    assert.deepStrictEqual(Array.from(L[2].items.map(i => i.overlay)), ['community', null]); assert.strictEqual(L[6].kind, 'ramp');
+  });
+  test('shell: the legend lists only the wall colouring on screen, says what it paints, and the other channels that are drawn', () => {
+    const L0 = PH.legendFor(TOY, 0), L1 = PH.legendFor(TOY, 1), walls = L => L.filter(s => s.channel === 'wall');
+    assert.strictEqual(walls(L0).length, 1); assert.strictEqual(walls(L1).length, 1); assert.strictEqual(walls(L1)[0].title, 'Exposure today'); assert.strictEqual(walls(L1)[0].kind, 'ramp');
+    assert(!L1.some(s => s.title === 'Infection state'), 'the other wall scale is not listed'); assert.strictEqual(L1.length, L0.length, 'every overlay and channel is drawn at once, so each is listed');
+    assert(L0.every(s => s.active === true && s.heading && s.role), 'each section is marked active and says what it is');
+    assert.strictEqual(walls(L0)[0].heading, 'Walls and roofs: Infection state', 'the toy paints roofs too'); assert(L0.some(s => s.heading === 'Marking: Infectious'));
+    const m = clone(TOY); delete m.mappings[0].colour; assert.strictEqual(PH.legendFor(m, 0)[0].heading, 'Walls: Infection state'); m.mappings[0].colour = 'roof'; assert.strictEqual(PH.legendFor(m, 0)[0].heading, 'Roofs: Infection state');
+    assert.strictEqual(PH.legendFor(TOY, 99).filter(s => s.channel === 'wall')[0].title, 'Exposure today', 'out of range is the last, like the chooser');
   });
   const fam = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'assets', 'palettes.json'), 'utf8')).families.find(f => f.id === 'nw');
   const mkSim = () => V.createSim(V.makePlaceholderScene(7), { seed: 5, theme: A.theme(fam, undefined, 'colorfigures'), region: 'nw' });

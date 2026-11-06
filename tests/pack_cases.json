@@ -1498,6 +1498,35 @@
    ],
    "warnings": [],
    "schema": "fail"
+  },
+  {
+   "name": "a wall mapping may paint the roof, or walls and roof",
+   "patch": {
+    "mappings.0.colour": "wall+roof"
+   },
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "a wall mapping's colour must be wall, roof or wall+roof",
+   "patch": {
+    "mappings.0.colour": "floor"
+   },
+   "errors": [
+    "mappings[0].colour: must be one of wall, roof, wall+roof"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "only a wall mapping has a colour option",
+   "patch": {
+    "mappings.2.colour": "roof"
+   },
+   "errors": [
+    "mappings[2].colour: only a wall mapping chooses its surfaces (wall, roof or wall+roof)"
+   ],
+   "warnings": []
   }
  ]
 }

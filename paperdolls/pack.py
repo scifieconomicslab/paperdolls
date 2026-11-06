@@ -18,6 +18,7 @@ FIELD_TYPES = ["category", "number", "int", "boolean"]
 CHANNELS = ["wall", "overlay", "segments", "outline", "halo", "groundtint"]
 PLANNED_CHANNELS = ["height", "ground"]
 AGGREGATES = ["mean", "sum", "min", "max"]
+COLOUR_ON = ["wall", "roof", "wall+roof"]
 OVERLAYS = ["scaffold", "solar", "band", "marker", "insulation", "community"]
 SEG_MAX = 12
 REGIONS = ["left", "right", "bottom"]
@@ -290,8 +291,13 @@ def validate(m):
             err(at, "must be a mapping")
             continue
         for k in mp:
-            if k not in ("entity", "field", "channel", "scale", "total", "max", "group", "aggregate", "opacity"):
+            if k not in ("entity", "field", "channel", "scale", "total", "max", "group", "aggregate", "opacity", "colour"):
                 err(f"{at}.{k}", "unknown key")
+        if "colour" in mp:  # which surfaces of the building a wall mapping paints
+            if mp.get("channel") != "wall":
+                err(f"{at}.colour", "only a wall mapping chooses its surfaces (wall, roof or wall+roof)")
+            elif mp["colour"] not in COLOUR_ON:
+                err(f"{at}.colour", "must be one of " + ", ".join(COLOUR_ON))
         if mp.get("channel") in PLANNED_CHANNELS:
             warn(f"{at}.channel", f"{mp['channel']} is a planned channel and is ignored for now")
             continue

@@ -445,12 +445,12 @@
     return shade(w[i], [0.95, 0.975, 1.0, 1.025, 1.05][Math.floor(hash(seed + 2) * 5) % 5]);
   }
   // o: { wall, data (override for the data surface), awning, shutter }
-  // o: { wall, data, seed }: seed picks the roof and the accent (awnings, shutters) from the look
+  // o.roof (a colour) replaces both roof colours: the data colour on the roof, or a neutral one. o: { wall, data, seed }: seed picks the roof and the accent (awnings, shutters) from the look
   function buildingColours(reg, pal, o) {
     const wall = o.wall || pal.wall, c = A.baseColours(reg), sd = o.seed || 0;
-    const roof = pal.roofs ? pal.roofs[hash(sd + 3) < 0.7 ? 0 : 1] : pal.roof, acc = pal.accents ? pal.accents[Math.floor(hash(sd + 4) * pal.accents.length) % pal.accents.length] : pal.accent;
+    const roof = o.roof || (pal.roofs ? pal.roofs[hash(sd + 3) < 0.7 ? 0 : 1] : pal.roof), acc = pal.accents ? pal.accents[Math.floor(hash(sd + 4) * pal.accents.length) % pal.accents.length] : pal.accent;
     return Object.assign(c, {
-      data: o.data || wall, roof, roofflat: pal.roofflat || mix(pal.ground, '#6e6e6e', 0.55), trim: mix(wall, '#ffffff', 0.5), door: reg.id === 'formal' ? shade(wall, 0.55) : shade(wall, 0.42),
+      data: o.data || wall, roof, roofflat: o.roof || pal.roofflat || mix(pal.ground, '#6e6e6e', 0.55), trim: mix(wall, '#ffffff', 0.5), door: reg.id === 'formal' ? shade(wall, 0.55) : shade(wall, 0.42),
       shutter: o.shutter || acc, awning: o.awning || acc, chimney: shade(wall, 0.8), solar: reg.id === 'formal' ? A.CARBON.blue[80] : '#2e3c5c', scaffold: reg.id === 'formal' ? A.CARBON.gray[60] : '#9a8a64',
       glassdark: shade(c.glass || reg.glass, 0.68), band: reg.states.queued, marker: reg.states.investor, frame: reg.id === 'formal' ? A.CARBON.gray[70] : '#4b4b50',
       // cladding: the wall pushed toward the look's "finished" green; a roof slab or band a darker step of it; community: the cooperative colour; segments: o.seg or defaults

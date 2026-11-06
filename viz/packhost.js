@@ -22,8 +22,21 @@
   const num = v => (Math.round(v * 1000) / 1000);
 
   // ---- legend: made from the mappings, so it can describe only what is drawn ----
-  function legendFor(manifest) {
-    return (manifest.mappings || []).filter(m => DRAWN.includes(m.channel)).map(m => {
+  // Only what is on the map: of the wall mappings, the one in use (wallIdx, as the "Colour walls by" chooser numbers them); every overlay and other channel is drawn at
+  // once, so each is listed. A section says which kind it is (`role`: what it paints) and `active: true`; `heading` is the title with its role in front.
+  const WHERE = { both: 'Walls and roofs', roof: 'Roofs', wall: 'Walls' };
+  function legendFor(manifest, wallIdx) {
+    const walls = wallMaps(manifest), wi = Math.max(0, Math.min(walls.length - 1, wallIdx | 0)), live = walls[wi];
+    return (manifest.mappings || []).filter(m => DRAWN.includes(m.channel) && (m.channel !== 'wall' || m === live)).map(m => {
+      const sec = legendSection(manifest, m);
+      sec.active = true; sec.channel = m.channel;
+      if (m.channel === 'wall') { sec.role = WHERE[m.colour === 'roof' ? 'roof' : m.colour === 'wall+roof' ? 'both' : 'wall']; sec.heading = sec.role + ': ' + sec.title; }
+      else { sec.role = { overlay: 'Marking', segments: 'Sections', outline: 'Outline', halo: 'Halo', groundtint: 'Ground tint' }[m.channel]; sec.heading = m.channel === 'groundtint' ? sec.title : sec.role + ': ' + sec.title; }
+      return sec;
+    });
+  }
+  function legendSection(manifest, m) {
+    {
       const f = fieldOf(manifest, m.entity, m.field), title = m.scale.label || (f && f.label) || m.field;
       if (m.channel === 'groundtint') {
         const g = m.group || {}, how = (m.aggregate || 'mean') + ' over ' + (g.grid ? 'a ' + g.grid + ' m grid' : 'each ' + g.field + ' (cells of ' + (g.cell || 40) + ' m)');
@@ -44,7 +57,7 @@
         items = [...by].map(([ov, labels]) => ({ label: labels.join(', '), overlay: ov || null }));
       }
       return { title, kind: 'swatches', items };
-    });
+    }
   }
 
   // value -> colour, or overlay, for one mapping; the lookup for a category is built once (index into the field's values)
@@ -158,6 +171,7 @@
   }
 
   const OVERLAYS = ['scaffold', 'solar', 'band', 'marker', 'insulation', 'community'];       // the bit of an overlay in a style's mask is its position here: only ever append
+  const NEUTRAL_ROOF = '#d4d9dd';                           // the roof of a building outside the model while a mapping paints roofs
   const LEVELS = 128;                                       // a sequential scale is read in this many steps: a table of colours, not a string per building
   function bindRenderer(o) {
     const { manifest, store, controller: ctl, sim } = o, R = o.Replay || root.Replay, en = drawnEntity(manifest);
@@ -187,7 +201,8 @@
         code = f.type === 'category' ? (v => (v >= 0 && v < n ? v + 1 : 0)) : (v => (v === v ? (v ? 2 : 1) : 0));
         bits[0] = 0;
       }
-      return { field: m.field, code, cols, bits };
+      const on = m.colour || 'wall';                                     // which surfaces the data colour paints: the walls, the roof, or both
+      return { field: m.field, code, cols, bits, wall: on !== 'roof', roof: on !== 'wall' };
     };
     const walls = wallMaps(manifest).filter(m => m.entity === en).map(reader), overlays = overlayMaps(manifest).filter(m => m.entity === en).map(reader);
     // segments: k of n units. Both come from the frame; n is capped for drawing (AssetLib.segmentsFor) and the style carries the capped pair, so there are at most
@@ -197,12 +212,16 @@
       const n = F[sm.total][i], k = F[sm.field][i]; if (!(n >= 2) || !(k >= 0)) return 0;
       const sg = root.AssetLib.segmentsFor(Math.min(n, 1e6), k, segCap); return sg ? sg[0] * 13 + sg[1] + 1 : 0;
     }) : null;
-    const NONE = { data: null, overlays: [], seg: null }, table = new Map();
+    // A mapping that paints the roof makes the roofs of the buildings it does not cover (not part of the model) a light neutral, so the data colour is what stands out;
+    // otherwise they keep the look's roof.
+    const NONE = { data: null, overlays: [], seg: null }, NONE_ROOF = { data: null, overlays: [], seg: null, roof: NEUTRAL_ROOF }, table = new Map();
+    const noneFor = w => (walls[w] && walls[w].roof ? NONE_ROOF : NONE);
     const styleOf = (w, code, mask, sg) => {                // one shared object per (wall mapping, wall code, overlay set, segment pair)
       const key = ((w * 1024 + code) * 64 + mask) * 256 + sg; let st = table.get(key);
       if (!st) {
         const ov = []; for (let b = 0; b < OVERLAYS.length; b++) if (mask & (1 << b)) ov.push(OVERLAYS[b]);
-        st = { data: walls[w] ? walls[w].cols[code] : null, overlays: ov, seg: sg ? { n: Math.floor((sg - 1) / 13), k: (sg - 1) % 13, done: sm.scale.colour, todo: sm.scale.todo || null } : null }; table.set(key, st);
+        const wm = walls[w], col = wm ? wm.cols[code] : null;
+        st = { data: wm && wm.wall ? col : null, roof: wm && wm.roof ? col : null, overlays: ov, seg: sg ? { n: Math.floor((sg - 1) / 13), k: (sg - 1) % 13, done: sm.scale.colour, todo: sm.scale.todo || null } : null }; table.set(key, st);
       }
       return st;
     };
@@ -210,8 +229,8 @@
     const sync = () => { F = store.bound(en).fields; live = !!store.frame(); sim.frameVersion = store.shownVersion(); };
     sim.buildingStyle = e => {
       const i = e._si;
-      if (!live || modelOf[i] < 0) return NONE;
       const w = Math.min(ctl ? ctl.wall : 0, walls.length - 1);
+      if (!live || modelOf[i] < 0) return noneFor(w);
       let mask = 0; for (let j = 0; j < overlays.length; j++) { const ov = overlays[j]; mask |= ov.bits[ov.code(F[ov.field][i])]; }
       const sg = segOf ? segOf(i) : 0;
       if (w < 0) return mask || sg ? styleOf(0, 0, mask, sg) : NONE;
@@ -292,7 +311,16 @@
     }
     const offs = ['time', 'frames', 'view'].map(t => store.subscribe(t, sync));
     const entityOf = bound ? (k => (index[k] >= 0 ? sim.buildings[index[k]] : null)) : (k => sim.buildings[placement.order[k]]);
-    return { ok: true, bound: !!bound, placement, entityOf, count, placed, warnings: bound ? bound.warnings : [], entity: en, index, modelOf, nScene, sync, drawChannels, highlights: () => { refreshHL(); return { halo: HL.halo, outline: HL.outline, builds: HL.builds }; }, tint: tm ? () => { GT.refresh(); return { cells: GT.cells, builds: GT.builds, info: GT.info }; } : null,
+    // What the real building under model entity k is: the scene's own fields, and whatever the pack passed as the entity's attrs (bindScene). Published on the binding
+    // and on the store (store.sceneInfo), so the tooltip and the inspector can name the building without the page wiring it in.
+    const ATTR_SEEN = ['id', 'area', 'levels', 'levels_assumed', 'residential'], battrs = bound && bound.attrs && bound.attrs[en] && typeof bound.attrs[en] === 'object' ? bound.attrs[en] : null;
+    const sceneInfo = { bound: !!bound, of(k) {
+      const si = k >= 0 && k < count ? index[k] : -1, b = si >= 0 && sim.buildings[si] ? sim.buildings[si].src : null; if (!b) return null;
+      const attrs = []; if (battrs) for (const [name, arr] of Object.entries(battrs)) { if (ATTR_SEEN.includes(name) || !arr || typeof arr.length !== 'number') continue; const v = arr[k]; if (v === null || v === undefined || typeof v === 'object' || (typeof v === 'number' && !(v === v))) continue; attrs.push({ label: name.replace(/_/g, ' '), value: typeof v === 'number' ? num(v) : typeof v === 'boolean' ? (v ? 'yes' : 'no') : String(v) }); }
+      return { id: b.id, area: b.area, levels: b.levels, assumed: !!b.levels_assumed, residential: b.residential, attrs };
+    } };
+    store.sceneInfo = sceneInfo;
+    return { ok: true, bound: !!bound, placement, sceneInfo, entityOf, count, placed, warnings: bound ? bound.warnings : [], entity: en, index, modelOf, nScene, sync, drawChannels, highlights: () => { refreshHL(); return { halo: HL.halo, outline: HL.outline, builds: HL.builds }; }, tint: tm ? () => { GT.refresh(); return { cells: GT.cells, builds: GT.builds, info: GT.info }; } : null,
              styleCount: () => table.size, dispose() { offs.forEach(f => f()); sim.buildingStyle = null; sim.frameVersion = undefined; sim.groundTint = null; } };
   }
 
@@ -311,7 +339,20 @@
     if (!data) return [];
     return Object.entries(decl).map(([fn, f0]) => { const f = typeof f0 === 'string' ? { type: f0 } : f0; return { label: f.label || fn, value: labelOf(manifest, sel.entity, fn, f, data[fn][sel.id]) }; });
   }
-  const entityTitle = sel => sel.entity.charAt(0).toUpperCase() + sel.entity.slice(1) + ' ' + (sel.id + 1);
+  const entityTitle = (sel, info) => {
+    const s = info && info.of ? info.of(sel.id) : null, name = sel.entity.charAt(0).toUpperCase() + sel.entity.slice(1);
+    return s && s.id ? name + ' ' + s.id : name + ' ' + (sel.id + 1);                // the OSM id when the entity stands on a real building, else its number in the model
+  };
+  const RES = { residential: 'residential (tagged as a dwelling)', probable: 'probable (a guess: plain building, 30 m\u00b2 or more)', other: 'other (not counted as housing)' };
+  // The real building under an entity: id, footprint, storeys (and whether they were assumed), residential class, then the pack's own attrs. [] without a scene building.
+  function sceneRows(info, sel) {
+    const s = info && info.of ? info.of(sel.id) : null; if (!s) return [];
+    const rows = [{ label: 'OSM id', value: s.id }];
+    if (s.area === s.area && typeof s.area === 'number') rows.push({ label: 'Footprint', value: Math.round(s.area), unit: 'm\u00b2' });
+    if (typeof s.levels === 'number') rows.push({ label: 'Storeys', value: s.levels + (s.assumed ? ' (assumed: not in the map data)' : '') });
+    if (s.residential) rows.push({ label: 'Residential class', value: RES[s.residential] || String(s.residential) });
+    return rows.concat(s.attrs);
+  }
 
   // ---- UI ----
   // o.display: the viewer's own switches [{id, label, checked, onchange}] for the Display control, which a layout item may reduce and reorder (items: [ink, fog]).
@@ -367,20 +408,27 @@
         return el('div', { class: 'pk-presets', role: 'group', 'aria-label': 'Presets' }, el('b', { text: 'Presets' }), el('div', { class: 'pk-btns' }, ...btns, reset));
       },
       legend() {
-        const box = el('div', { class: 'pk-legend' });
-        for (const sec of legendFor(manifest)) {
-          const row = el('div', { class: 'pk-legrow' }, el('b', { text: sec.title }));
-          const sw = (colour, text, mode) => el('span', { class: 'pk-sw' }, el('i', { style: mode === 'outline' ? 'background:transparent;border:2px solid ' + colour : mode === 'halo' ? 'background:transparent;box-shadow:0 0 5px 2px ' + colour : 'background:' + (colour || 'repeating-linear-gradient(45deg,#fff 0 3px,#ddd 3px 6px)') }), text);
-          if (sec.kind === 'ramp') { row.appendChild(el('span', { class: 'pk-ramp' }, String(sec.domain[0]), el('i', { style: 'background:linear-gradient(90deg,' + sec.colours.join(',') + ')' }), String(sec.domain[1]))); row.appendChild(sw(sec.noData, sec.noDataLabel || 'No data')); if (sec.note) row.appendChild(el('small', { text: sec.note })); }
-          else for (const it of sec.items) row.appendChild(it.overlay !== undefined ? el('span', { text: (it.overlay ? it.overlay + ' on the building' : 'no marking') + ' = ' + it.label }) : sw(it.colour, it.label, it.mode));
-          box.appendChild(row);
-        }
+        const box = el('div', { class: 'pk-legend', 'aria-live': 'polite' }), body = el('div', { class: 'pk-legbody' });
+        const sw = (colour, text, mode) => el('span', { class: 'pk-sw' }, el('i', { style: mode === 'outline' ? 'background:transparent;border:2px solid ' + colour : mode === 'halo' ? 'background:transparent;box-shadow:0 0 5px 2px ' + colour : 'background:' + (colour || 'repeating-linear-gradient(45deg,#fff 0 3px,#ddd 3px 6px)') }), text);
+        const draw = () => {                                                // only the colouring on screen and the overlays and channels that are drawn
+          body.textContent = '';
+          for (const sec of legendFor(manifest, ctl ? ctl.wall : 0)) {
+            const row = el('div', { class: 'pk-legrow', 'data-channel': sec.channel }, el('b', { text: sec.heading }));
+            if (sec.kind === 'ramp') { row.appendChild(el('span', { class: 'pk-ramp' }, String(sec.domain[0]), el('i', { style: 'background:linear-gradient(90deg,' + sec.colours.join(',') + ')' }), String(sec.domain[1]))); row.appendChild(sw(sec.noData, sec.noDataLabel || 'No data')); if (sec.note) row.appendChild(el('small', { text: sec.note })); }
+            else for (const it of sec.items) row.appendChild(it.overlay !== undefined ? el('span', { text: (it.overlay ? it.overlay + ' on the building' : 'no marking') + ' = ' + it.label }) : sw(it.colour, it.label, it.mode));
+            body.appendChild(row);
+          }
+        };
+        box.appendChild(body); draw();
         const walls = wallMaps(manifest);
+        let sel = null;
         if (walls.length > 1) {
-          const sel = el('select', { id: id('wall'), 'data-wall': '' }, ...walls.map((m, i) => el('option', { value: i, text: m.scale.label || m.field })));
+          sel = el('select', { id: id('wall'), 'data-wall': '' }, ...walls.map((m, i) => el('option', { value: i, text: m.scale.label || m.field })));
           sel.onchange = () => ctl.setWall(+sel.value);
           box.insertBefore(el('div', { class: 'pk-legrow' }, el('label', { for: sel.id, text: 'Colour walls by ' }), sel), box.firstChild);
         }
+        const redraw = () => { if (sel && ctl && String(ctl.wall) !== sel.value) sel.value = String(ctl.wall); draw(); };
+        const off = store.subscribe('view', redraw); box.destroy = () => { if (off) off(); };       // the legend follows the chosen colouring, wherever the choice was made
         return box;
       },
       display(item) {
@@ -415,7 +463,7 @@
       clear.onclick = () => store.select(null);
       root0.appendChild(el('header', {}, title, clear)); root0.appendChild(fieldsEl); root0.appendChild(extraEl); root0.appendChild(note);
       const put = (dl, rows) => { dl.textContent = ''; for (const r of rows) { dl.appendChild(el('dt', { text: r.label })); dl.appendChild(el('dd', { text: String(r.value) + (r.unit ? ' ' + r.unit : '') })); } };
-      let busy = false, again = false, shown = null;
+      let busy = false, again = false, shown = null; const info = () => o.scene || store.sceneInfo;
       const ask = () => {
         const sel = store.selection(); if (!sel || !ctl || !ctl.inspect) return;
         if (busy) { again = true; return; }
@@ -424,8 +472,9 @@
           const now = store.selection();
           if (now && now.entity === sel.entity && now.id === sel.id && key === now.entity + ':' + now.id + '@' + store.time().t) {
             shown = detail || null;
-            if (detail && detail.title) title.textContent = detail.title;
-            put(extraEl, (detail && detail.fields) || []); note.textContent = (detail && detail.note) || '';
+            const own = detail && detail.title && !(info() && info().of(sel.id) && info().of(sel.id).id);        // the OSM id names a building on a scene; the model's own title is then a row
+            if (own) title.textContent = detail.title;
+            put(extraEl, ((detail && detail.fields) || []).concat(detail && detail.title && !own ? [{ label: 'Model', value: detail.title }] : [])); note.textContent = (detail && detail.note) || '';
           }
         }, e => { note.textContent = 'The model could not say: ' + ((e && e.message) || e); }).then(() => { busy = false; if (again) { again = false; ask(); } });
       };
@@ -434,7 +483,7 @@
         root0.hidden = !sel;
         if (!sel) { shown = null; return; }
         if (ev && ev.topic === 'selection') { put(extraEl, []); note.textContent = ''; shown = null; }
-        title.textContent = entityTitle(sel); put(fieldsEl, entityRows(manifest, store, sel));
+        const info = o.scene || store.sceneInfo; title.textContent = entityTitle(sel, info); put(fieldsEl, sceneRows(info, sel).concat(entityRows(manifest, store, sel)));
         if (!ev || ev.topic !== 'frames' || ev.replace) ask();
       };
       const offs2 = ['selection', 'time', 'frames'].map(t => store.subscribe(t, draw));
@@ -473,7 +522,9 @@
     const modelAt = (px, py) => { const si = pick.hit(camera.view(), px, py); return si >= 0 && binding.modelOf[si] >= 0 ? { si, k: binding.modelOf[si] } : null; };
     function tipText(k) {
       const sel = { entity: en, id: k }, rows = entityRows(manifest, store, sel), w = wall(), lead = w ? rows.find(r => r.label === (fieldOf(manifest, en, w.field).label || w.field)) : rows[0];
-      return entityTitle(sel) + (lead ? ': ' + lead.label + ' ' + lead.value : '');
+      const s = binding.sceneInfo ? binding.sceneInfo.of(k) : null;           // the real building: footprint and storeys, with an assumed storey count marked
+      const real = s ? [typeof s.area === 'number' && s.area === s.area ? Math.round(s.area) + ' m\u00b2' : '', typeof s.levels === 'number' ? s.levels + ' storeys' + (s.assumed ? ' (assumed)' : '') : ''].filter(Boolean).map(x => ' \u00b7 ' + x).join('') : '';
+      return entityTitle(sel, binding.sceneInfo) + real + (lead ? ': ' + lead.label + ' ' + lead.value : '');
     }
     function showTip(h, px, py) {
       if (!tip) return;
@@ -532,6 +583,6 @@
     } };
   }
 
-  root.PackHost = { legendFor, scaleFor, createController, bindRenderer, bindInteraction, mountUI, entityRows, entityTitle, NO_DATA };
+  root.PackHost = { legendFor, scaleFor, createController, bindRenderer, bindInteraction, mountUI, entityRows, entityTitle, sceneRows, NO_DATA };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.PackHost;
 })(typeof window !== 'undefined' ? window : globalThis);

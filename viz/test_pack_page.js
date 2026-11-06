@@ -72,7 +72,11 @@ async function test(name, fn) { try { await fn(); console.log('PASS ' + name); }
   await test('page: the legend is made from the mappings, with a colour chooser for the two wall mappings', () => {
     const text = d.getElementById('right').textContent;
     for (const t of ['Infection state', 'Susceptible', 'Exposed', 'Infectious', 'Recovered', 'No data', 'Exposure today', 'marker on the building']) assert(text.includes(t), 'legend has ' + t);
-    const sel = d.querySelector('[data-wall]'); assert(sel && sel.options.length === 2); sel.value = '1'; fire(sel, 'change'); assert.strictEqual(ctl.wall, 1);
+    const sel = d.querySelector('[data-wall]'); assert(sel && sel.options.length === 2); const legend = () => d.querySelector('.pk-legend'), walls = () => [...legend().querySelectorAll('[data-channel=wall]')].map(r => r.textContent).join('|');       // the chooser's options name every scale; the rows list the one in use
+    assert(walls().includes('Infection state') && !walls().includes('Exposure today'), 'only the colouring in use is listed: ' + walls());
+    sel.value = '1'; fire(sel, 'change'); assert.strictEqual(ctl.wall, 1);
+    assert(walls().includes('Walls and roofs: Exposure today') && !walls().includes('Infection state'), 'the legend follows the chooser: ' + walls());
+    ctl.setWall(0); assert(walls().includes('Walls and roofs: Infection state') && sel.value === '0', 'and a choice made in code');
   });
   await test('page: the display switches are there and the banner says the model buildings stand on their scene buildings', () => {
     for (const l of ['people', 'vehicles', 'ink outline', 'pixel', 'fog']) assert(d.getElementById('right').textContent.includes(l), l);
@@ -92,15 +96,15 @@ async function test(name, fn) { try { await fn(); console.log('PASS ' + name); }
   };
   await test('pick: hovering names the building under the pointer, and leaving hides the name', async () => {
     assert(await settled()); const s0 = spot(), tip = P.tip; assert(tip.hidden, 'hidden at first');
-    ptr('pointermove', s0.x, s0.y); assert(!tip.hidden, 'shown over a building'); assert(tip.textContent.startsWith('Building ' + (s0.k + 1) + ': '), tip.textContent);
-    assert(/^Building \d+: \w+ \S+/.test(tip.textContent), tip.textContent); assert.strictEqual(P.interaction.hovered(), s0.k);
+    ptr('pointermove', s0.x, s0.y); assert(!tip.hidden, 'shown over a building'); const sid = P.sim.buildings[P.binding.index[s0.k]].src.id; assert(tip.textContent.startsWith('Building ' + sid + ' '), 'named by the scene building id: ' + tip.textContent + ' / ' + sid);
+    assert(/^Building \S+( · [^:]+)?: \w+ \S+/.test(tip.textContent), tip.textContent); assert.strictEqual(P.interaction.hovered(), s0.k);
     ptr('pointermove', 2, 2); assert(tip.hidden, 'hidden over the sky'); ptr('pointermove', s0.x, s0.y); ptr('pointerleave', s0.x, s0.y); assert(tip.hidden);
     ptr('pointermove', s0.x, s0.y); store.setTime(store.time().t === 12 ? 13 : 12); assert(!tip.hidden && tip.textContent.startsWith('Building'), 'the tooltip follows the time');
   });
   await test('pick: a click selects the building, the inspector shows it and asks the model for more, the time moves it on', async () => {
     const s0 = spot(), box = d.querySelector('.pk-inspector'); assert(box.hidden, 'no inspector without a selection');
     ptr('pointerdown', s0.x, s0.y); ptr('pointerup', s0.x, s0.y);
-    assert.deepStrictEqual({ ...store.selection() }, { entity: 'building', id: s0.k }); assert(!box.hidden); assert.strictEqual(box.querySelector('.pk-ititle').textContent.split(' · ')[0], 'Building ' + (s0.k + 1));
+    assert.deepStrictEqual({ ...store.selection() }, { entity: 'building', id: s0.k }); assert(!box.hidden); assert.strictEqual(box.querySelector('.pk-ititle').textContent.split(' · ')[0], 'Building ' + P.sim.buildings[P.binding.index[s0.k]].src.id, 'titled by the OSM id'); assert(/^OSM id/.test(box.querySelector('.pk-fields').textContent), 'the real building comes first');
     assert(box.querySelector('.pk-fields').textContent.includes('state'), 'the frame values show at once');
     assert(await until(() => /Exposed/.test(box.querySelector('.pk-extra').textContent)), 'the runtime was asked and answered: ' + box.querySelector('.pk-extra').textContent);
     const t = store.time().t === 30 ? 31 : 30; store.setTime(t);

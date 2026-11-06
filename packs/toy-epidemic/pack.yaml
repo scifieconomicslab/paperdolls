@@ -46,6 +46,7 @@ mappings:
   - entity: building
     field: state
     channel: wall
+    colour: wall+roof        # the data colour on the roof as well: from the default isometric view roofs are most of what is seen
     scale:
       type: categorical
       label: Infection state
@@ -57,6 +58,7 @@ mappings:
   - entity: building
     field: exposure
     channel: wall
+    colour: wall+roof
     scale: {type: sequential, label: Exposure today, domain: [0, 1], colours: ["#f4e9c8", "#e9b44c", "#c8452f"]}
   - entity: building
     field: state

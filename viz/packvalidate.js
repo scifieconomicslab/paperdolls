@@ -14,6 +14,7 @@
   const FIELD_TYPES = ['category', 'number', 'int', 'boolean'];
   const CHANNELS = ['wall', 'overlay', 'segments', 'outline', 'halo', 'groundtint'], PLANNED_CHANNELS = ['height', 'ground'];
   const AGGREGATES = ['mean', 'sum', 'min', 'max'];
+  const COLOUR_ON = ['wall', 'roof', 'wall+roof'];
   const OVERLAYS = ['scaffold', 'solar', 'band', 'marker', 'insulation', 'community'];
   const SEG_MAX = 12;
   const REGIONS = ['left', 'right', 'bottom'];
@@ -165,7 +166,11 @@
     maps.forEach((mp, i) => {
       const at = 'mappings[' + i + ']';
       if (!isObj(mp)) { err(at, 'must be a mapping'); return; }
-      for (const k of Object.keys(mp)) if (!['entity', 'field', 'channel', 'scale', 'total', 'max', 'group', 'aggregate', 'opacity'].includes(k)) err(at + '.' + k, 'unknown key');
+      for (const k of Object.keys(mp)) if (!['entity', 'field', 'channel', 'scale', 'total', 'max', 'group', 'aggregate', 'opacity', 'colour'].includes(k)) err(at + '.' + k, 'unknown key');
+      if (mp.colour !== undefined) {                       // which surfaces of the building a wall mapping paints
+        if (mp.channel !== 'wall') err(at + '.colour', 'only a wall mapping chooses its surfaces (wall, roof or wall+roof)');
+        else if (!COLOUR_ON.includes(mp.colour)) err(at + '.colour', 'must be one of ' + COLOUR_ON.join(', '));
+      }
       if (PLANNED_CHANNELS.includes(mp.channel)) { warn(at + '.channel', mp.channel + ' is a planned channel and is ignored for now'); return; }
       if (!CHANNELS.includes(mp.channel)) { err(at + '.channel', 'must be one of ' + CHANNELS.join(', ')); return; }
       const f = fieldSpec(mp.entity, mp.field);
