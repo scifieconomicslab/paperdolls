@@ -15,13 +15,16 @@
   function create(opts) {
     opts = Object.assign({ bounds: [0, 0, 100, 100], width: 1200, height: 700, maxScale: 32, margin: 0.2, fitMargin: 0.06, minFactor: 0.85, zmax: 0 }, opts || {});
     const cam = { cx: 0, cy: 0, scale: 1, w: opts.width, h: opts.height, fit: 1, minScale: 1, maxScale: opts.maxScale, bounds: opts.bounds.slice() };
+    // cam.maxScale is derived, not stored: the largest scale is the option (px per metre), or twice the smallest scale when the scene is so large that the
+    // option would leave less than a factor 2 of zoom. It is recomputed from the option on every fit (setBounds, setRelief, resize), so it follows the scene
+    // down as well as up (it used to be raised once and never lowered again).
 
     // The scale that shows the whole scene. An isometric box of ground (dx by dy metres) is (dx + dy) * cos30 wide and (dx + dy) / 2 tall.
     function computeFit() {
       const B = cam.bounds, S = (B[2] - B[0]) + (B[3] - B[1]);
       cam.fit = Math.max(1e-4, Math.min((cam.w * (1 - opts.fitMargin)) / (S * C30 + 1), (cam.h * (1 - opts.fitMargin)) / (S * 0.5 + opts.zmax + 1)));
       cam.minScale = cam.fit * opts.minFactor;
-      if (cam.maxScale < cam.minScale * 2) cam.maxScale = cam.minScale * 2;
+      cam.maxScale = Math.max(opts.maxScale, cam.minScale * 2);
     }
     function clampCentre() {
       const B = cam.bounds, mx = (B[2] - B[0]) * opts.margin, my = (B[3] - B[1]) * opts.margin;
@@ -48,8 +51,9 @@
 
     // Zoom by a factor, keeping the ground point under pixel (px, py) where it is. Defaults to the middle of the canvas.
     cam.zoomAt = function (factor, px, py) {
-      if (px === undefined) px = cam.w / 2;
-      if (py === undefined) py = cam.h / 2;
+      if (!(typeof factor === 'number' && isFinite(factor) && factor > 0)) return cam;   // NaN, 0, negative, infinite or not a number: nothing to do (clamp(NaN) is NaN, and a NaN scale never recovers)
+      if (px === undefined || !isFinite(px)) px = cam.w / 2;
+      if (py === undefined || !isFinite(py)) py = cam.h / 2;
       const [wx, wy] = cam.screenToWorld(px, py), k2 = clamp(cam.scale * factor, cam.minScale, cam.maxScale);
       const ox2 = px - (wx - wy) * k2 * C30, oy2 = py - (wx + wy) * k2 * 0.5;
       const A = (cam.w / 2 - ox2) / (k2 * C30), B = (cam.h / 2 - oy2) * 2 / k2;

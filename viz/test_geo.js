@@ -31,6 +31,35 @@ test('#20 levels above 60 are counted and drawn with 60 (the ingest cap); an old
   const ok = V.validateScene(V.makePlaceholderScene(7)); assert.ok(ok.ok && !ok.warnings.some(w => /levels|no area/.test(w)), JSON.stringify(ok.warnings));
 });
 
+// ---------- #21: small engine items ----------
+test('#21 createSim does not share or mutate the scene\'s building objects across sims (r35d)', () => {
+  const sc = V.makePlaceholderScene(7), s1 = mkSim(sc), before = JSON.stringify(sc.buildings.map(b => [b.state, b.investor]));
+  assert.notStrictEqual(s1.buildings[0].src, sc.buildings[0]);
+  for (const e of s1.buildings) { e.src.state = 'finished'; e.src.investor = true; }
+  assert.strictEqual(JSON.stringify(sc.buildings.map(b => [b.state, b.investor])), before, 'the scene is untouched');
+  const s2 = mkSim(sc); assert.strictEqual(s2.buildings.filter(e => e.state === 'finished').length, sc.buildings.filter(b => b.state === 'finished').length);
+  assert.strictEqual(s2.buildings[0].src.footprint, sc.buildings[0].footprint, 'immutable geometry is still shared (no copy cost)');
+});
+test('#21 AssetLib.theme: two different families without an id are two themes (r35e); the same object and id-ed families still share one', () => {
+  const mk = (n, c) => ({ name: n, wall: c, wall2: c, roof: '#111111', accent: '#ff0000', ground: c, shadow: '#000000' });
+  const a = mk('a', '#aaaaaa'), b = mk('b', '#00aa00');
+  const t1 = A.theme(a, undefined, 'colorfigures'), t2 = A.theme(b, undefined, 'colorfigures');
+  assert.notStrictEqual(t1, t2); assert.notStrictEqual(t1.ground, t2.ground);
+  assert.strictEqual(A.theme(a, undefined, 'colorfigures'), t1, 'cached per family object');
+  assert.strictEqual(A.theme(fam, undefined, 'colorfigures'), A.theme(fam, undefined, 'colorfigures'));
+});
+test('#21 camera.maxScale follows the scene both ways, and zoomAt ignores NaN, zero, negative and infinite factors (r33, r35g)', () => {
+  const cam = Cam.create({ bounds: [0, 0, 10, 10], width: 1200, height: 700 });
+  assert.ok(cam.maxScale > 32, 'a 10 m scene needs room: ' + cam.maxScale);
+  cam.setBounds([0, 0, 5000, 5000]); const fresh = Cam.create({ bounds: [0, 0, 5000, 5000], width: 1200, height: 700 });
+  assert.strictEqual(cam.maxScale, fresh.maxScale, 'back to the fresh camera\'s limit, not the old high-water mark');
+  cam.zoomAt(2, 300, 200); const s = cam.scale, cx = cam.cx, cy = cam.cy;
+  for (const f of [NaN, 0, -1, Infinity, -Infinity, undefined, null, '2']) { cam.zoomAt(f); cam.zoomAt(f, 100, 100); cam.zoomAt(2, NaN, NaN); cam.zoomAt(0.5, NaN, NaN); }
+  assert.ok(isFinite(cam.scale) && isFinite(cam.cx) && isFinite(cam.cy));
+  cam.zoomAt(NaN); assert.strictEqual(cam.scale, cam.scale); cam.zoomTo(NaN); cam.setZoomFraction(NaN);
+  assert.ok(isFinite(cam.scale) && cam.scale >= cam.minScale && cam.scale <= cam.maxScale, String(cam.scale));
+});
+
 (async () => {
   for (const [name, fn] of queue) { try { await fn(); console.log('PASS ' + name); } catch (e) { failed++; console.log('FAIL ' + name + ': ' + (e && e.stack || e)); } }
   console.log(failed ? failed + ' FAILED' : 'all ' + queue.length + ' passed'); process.exit(failed ? 1 : 0);

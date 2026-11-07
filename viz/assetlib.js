@@ -124,8 +124,15 @@
   }
 
   const themeCache = new Map();
+  // A family without an id is cached under its own object (a WeakMap), never under a shared name: two hand-made families are two themes.
+  const anonFamilyIds = new WeakMap(); let anonFamilyCount = 0;
+  function familyKey(fam) {
+    if (fam.id !== undefined && fam.id !== null && fam.id !== '') return 'id:' + fam.id;
+    if (!anonFamilyIds.has(fam)) anonFamilyIds.set(fam, ++anonFamilyCount);
+    return 'anon:' + anonFamilyIds.get(fam);
+  }
   function theme(fam, lookRef, regId) {
-    const reg = REG[regId] ? regId : 'colorfigures', look = resolveLook(fam, lookRef), key = (fam.id || 'x') + '|' + look.id + '|' + reg;
+    const reg = REG[regId] ? regId : 'colorfigures', look = resolveLook(fam, lookRef), key = familyKey(fam) + '|' + look.id + '|' + reg;
     let t = themeCache.get(key);
     if (!t) { t = reg === 'formal' ? formalTheme(fam, look) : colorTheme(fam, look); themeCache.set(key, t); }
     return t;

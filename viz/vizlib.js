@@ -474,7 +474,8 @@
     for (const r of scene.roads) if (r.z) for (const z of r.z) zmax = Math.max(zmax, z * relief);
     if (T) zmax = Math.max(zmax, T.hi * relief);
     const rIdx = A.roadIndex(scene.roads);                       // a spatial index, so a city of tens of thousands of buildings stays fast
-    const buildings = scene.buildings.map(b => {
+    const buildings = scene.buildings.map(b0 => {
+      const b = Object.assign({}, b0);                       // each sim owns its buildings' mutable state (state, investor, levels...): a replay on one sim must not leave its states in the scene the next sim starts from. The footprint array is shared and never written.
       const fit = A.fitFootprint(b.footprint, rIdx), seed = A.hashStr(String(b.id)) ^ opts.seed;
       const kind = (b.archetype && b.archetype !== 'auto' && A.ARCH[b.archetype]) ? b.archetype : A.pickArchetype(opts.region, Math.min(b.levels, MAX_LEVELS), A.hash(seed + 5));
       const bz = (b.z !== undefined ? b.z : (T ? T.at(fit.cx, fit.cy) : 0)) * relief; if (bz > zmax) zmax = bz;
