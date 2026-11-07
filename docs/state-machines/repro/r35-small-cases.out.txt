@@ -1,8 +1,8 @@
 a  validateScene ok=true; fit={"ok":false,"reason":"degenerate","cx":0,"cy":0}; e.z=4 but the terrain at its footprint (305,300) is 16.2 m; renderer sort key d = fit.cx+fit.cy+z = 4 instead of ~626
-b  replay with a mapping, 1023 buildings, far view (0.35 px/m), 5 settled frames: style calls 5115 (1023 per frame), layerRepaints=1, far layer present=false (typeof frameVersion=undefined)
+b  replay with a mapping, 1023 buildings, far view (0.35 px/m), 5 settled frames: style calls 0 (0 per frame), layerRepaints=2, far layer present=true (typeof frameVersion=number)
 c  far layer canvas: sprites.dpr=2 (matches the canvas) 3240x2160; sprites.dpr=1 left from page load, canvas now 2x 1620x1080; the two pictures differ in 540988 of 8640000 bytes (the second is the up-scaled low-resolution layer)
    grep: A.sprites.dpr is assigned at viz/viewer.html:120 and viz/packhost.html:180 only (page load); resize() at viewer.html:172 / packhost.html:223 uses a local dpr for the canvases
 d  after a replay on sim 1, a new sim from the same scene starts with 1023 of 1023 buildings already "finished" (scene object shared: e.src === scene.buildings[i] = true)
 e  two different id-less families give the same theme object: true (ground #cccccc and #cccccc; every palettes.json family has an id, so this needs a hand-made record)
-f  levels -> validateScene ok / drawn as extrusion / first-frame ms: 4 -> true / true / 60; 20000 -> true / true / 119; 200000 -> true / true / 1028
+f  levels -> validateScene ok / drawn as extrusion / first-frame ms: 4 -> true / true / 70; 20000 -> true / true / 127; 200000 -> true / true / 1036
 g  scale NaN: no error, 0 sprites built; scale 0: no error, 0 sprites built; scale -1: no error, 375 sprites built; scale Infinity: no error, 0 sprites built; view 0x0: no error; view 0x300: no error; view 300x0: no error. camera.zoomAt(NaN) leaves scale = NaN (clamp does not catch NaN, camera.js:zoomAt); every later view is NaN.

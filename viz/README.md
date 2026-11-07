@@ -262,14 +262,14 @@ On a real GPU (Chromium with accelerated Canvas2D) the whole-commune view of Jet
 
 | far zoom, whole commune | page | DPR | before (`6b74ff7`) idle | `main` `8cf239e` idle / playing | now idle / playing |
 |---|---|---|---|---|---|
-| GPU canvas (`egl`) | plain | 1 | 0.8 (p50 1.7 s) | 21.5 (67) / 20.0 (67) | **60.5 (17) / 44.9 (33)** |
-| GPU canvas (`egl`) | plain | 2 | 0.8 | 22.3 (67) / 19.0 (83) | **60.9 (17) / 42.9 (50)** |
-| GPU canvas (`egl`) | enriched | 1 | 0.8 | 22.4 (50) / 20.4 (67) | **56.1 (33) / 38.9 (50)** |
-| GPU canvas (`egl`) | enriched | 2 | 0.9 | 20.7 (67) / 28.2 (67) | **57.8 (33) / 41.9 (50)** |
-| software (`none`) | plain | 1 / 2 | | 51.8 / 38.2 idle, 32.2 / 17.6 playing | 57.0 / 40.3 idle, 36.7 / 23.7 playing |
-| software (`none`) | enriched | 1 / 2 | | 51.8 / 35.5 idle, 30.9 / 23.8 playing | 49.7 / 34.4 idle, 35.5 / 23.7 playing |
+| GPU canvas (`egl`) | plain | 1 | 0.8 (p50 1.7 s) | 21.5 (67) / 20.0 (67) | **60.5 (17) / 45.4 (33)** |
+| GPU canvas (`egl`) | plain | 2 | 0.8 | 22.3 (67) / 19.0 (83) | **60.5 (17) / 45.4 (50)** |
+| GPU canvas (`egl`) | enriched | 1 | 0.8 | 22.4 (50) / 20.4 (67) | **54.9 (33) / 45.2 (33)** |
+| GPU canvas (`egl`) | enriched | 2 | 0.9 | 20.7 (67) / 28.2 (67) | **51.7 (33) / 45.7 (50)** |
+| software (`none`) | plain | 1 / 2 | | 51.8 / 38.2 idle, 32.2 / 17.6 playing | 59.6 / 53.9 idle, 33.2 / 21.0 playing |
+| software (`none`) | enriched | 1 / 2 | | 51.8 / 35.5 idle, 30.9 / 23.8 playing | 57.8 / 54.4 idle, 34.4 / 24.6 playing |
 
-Near zoom on the GPU canvas, `main` -> now (idle / playing / slider drag): plain DPR 2 59.8 / 19.4 / 44.0 -> 60.1 / 57.9 / 60.1; enriched DPR 1 32.5 / 44.1 / 44.4 -> 59.8 / 56.5 / 54.3. Wheel zoom is 55 to 60 fps in every cell, before and now. The "before" column was re-measured on this machine (`GPU=egl IDLE_ONLY=1`, built from `6b74ff7`); the 8c67787 commit (rough first paint, incremental colour patching) took the collapse from 0.8 to about 21 fps by painting the layers in slices; the remaining ~3 s of 20 fps after load and the 16 to 28 fps while playing came from drawing into GPU-backed layer and sprite canvases, which this change removes (a bisect with every non-stage canvas forced to `willReadFrequently` gave the same numbers; doing it for the stage canvases too changed nothing). A settled far frame costs 3.5 ms (DPR 1) to 5 ms (DPR 2) of `renderFrame`, two layer blits, so skipping the redraw of an unchanged frame was not needed: vehicles and people move every frame anyway. Not measured: the RTX 3080 (Chromium picked the 4080 SUPER), a headful X11 window, a physical monitor, an integrated or non-NVIDIA GPU, macOS or Windows.
+Near zoom on the GPU canvas, `main` -> now (idle / playing / slider drag): plain DPR 2 59.8 / 19.4 / 44.0 -> 60.1 / 60.0 / 60.1; enriched DPR 1 32.5 / 44.1 / 44.4 -> 59.6 / 55.2 / 53.7; enriched DPR 2 60.3 / 35.2 / 60.1 -> 60.2 / 57.9 / 60.3 (the one matrix cell that read 20.7 playing was a transient: two repeats gave 56.8 and 57.9). Software DPR 2 playing is 21 to 25 fps in both `main` and now (a software canvas at 2x is the limit there, and it is not worse). Wheel zoom is 55 to 60 fps in every cell, before and now. The "before" column was re-measured on this machine (`GPU=egl IDLE_ONLY=1`, built from `6b74ff7`); the 8c67787 commit (rough first paint, incremental colour patching) took the collapse from 0.8 to about 21 fps by painting the layers in slices; the remaining ~3 s of 20 fps after load and the 16 to 28 fps while playing came from drawing into GPU-backed layer and sprite canvases, which this change removes (machine noise between runs is a few fps, with occasional dips of half that; a bisect with every non-stage canvas forced to `willReadFrequently` gave the same numbers; doing it for the stage canvases too changed nothing). A settled far frame costs 3.5 ms (DPR 1) to 5 ms (DPR 2) of `renderFrame`, two layer blits, so skipping the redraw of an unchanged frame was not needed: vehicles and people move every frame anyway. Not measured: the RTX 3080 (Chromium picked the 4080 SUPER), a headful X11 window, a physical monitor, an integrated or non-NVIDIA GPU, macOS or Windows.
 
 #### Ground marks, the tint and highlights at the ground height (paperdolls#17, #14)
 

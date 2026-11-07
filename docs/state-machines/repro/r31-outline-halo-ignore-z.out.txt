@@ -1,7 +1,7 @@
 building 1011: terrain height e.z = 36.20 m, view scale 2.5 px/m  =>  expected offset between ground-0 and true position: 90.5 px
-outline: footprint corner drawn at y=435.8 (z=0) FOUND; where the building stands (z=e.z) it would be y=345.3 NOT FOUND in the outline -> outline is 90.5 px below its building
+outline: footprint corner drawn at y=435.8 (z=0) not found; where the building stands (z=e.z) it would be y=345.3 FOUND -> outline is 90.5 px below its building
 vis(): the centre of building 1011 projects to y=440.5 at z=0 but y=350.0 where it is drawn; vis() tests the first (packhost.js:drawChannels vis)
-view shifted so the building is drawn 115 px ABOVE the top edge (truly off screen): outline vertices issued = 24  (drawn although invisible: vis() used z=0)
-view shifted so the building is drawn at y=690 of 700 (visible, on screen): z=0 projection says y=780.5; outline vertices issued = 0  (CULLED although the building is on screen)
-selection: first path starts at y=434.8 ... a footprint corner is at y=435.8 (z=0) / 345.3 (z=e.z). The channel halo (ringPath(..., 1.6, 0)) and the selection halo are both at z=0; the selection outline uses z0 = 36.20
+view shifted so the building is drawn 115 px ABOVE the top edge (truly off screen): outline vertices issued = 0  (culled)
+view shifted so the building is drawn at y=690 of 700 (visible, on screen): z=0 projection says y=780.5; outline vertices issued = 24
+selection: first path starts at y=344.3 ... a footprint corner is at y=435.8 (z=0) / 345.3 (z=e.z). The channel halo (ringPath(..., 1.6, 0)) and the selection halo are both at z=0; the selection outline uses z0 = 36.20
 ground cell at (320,220): terrain there is 15.3 m high, so the ground under it is drawn 38.2 px higher on screen than the tint/hatch cell (VizLib.tintCell and drawGroundMarks call proj(view, x, y, 0))
