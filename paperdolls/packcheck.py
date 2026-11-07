@@ -299,12 +299,13 @@ def check_parity(res, manifest, js_parity, mod, cases, golden_dir, update_golden
 
 def run(path, scene_path=None, include=(), steps=48, strict=False, skip_runtime=False, parity=None, cases=None, golden=None, update_golden=False):
     res = Result(strict)
-    errors, warnings = packmod.check(path)
     manifest = None
     try:
-        manifest = packmod.load(path)
+        manifest = packmod.load(path)                       # read once: what is checked, bound to the scene and run is this parse and these file contents
     except packmod.PackError:
         pass
+    src_set = packmod._Sources(path, include, manifest) if manifest is not None else None
+    errors, warnings = packmod.check(path, include, manifest=manifest, sources=src_set) if manifest is not None else packmod.check(path, include)
     sE, sW = static_checks(manifest) if isinstance(manifest, dict) and not errors else ([], [])
     res.add("manifest", errors + sE, warnings + sW)
     if errors or sE:
@@ -322,8 +323,8 @@ def run(path, scene_path=None, include=(), steps=48, strict=False, skip_runtime=
             res.setup_failed = True
         return res
     try:
-        sources = [f.read_text(encoding="utf-8") for f in packmod.runtime_files(path, include)]
-    except OSError as e:
+        sources = [src_set.text(f) for f in src_set.files]
+    except packmod.PackError as e:
         res.add("runtime", [f"cannot read a runtime file: {e}"])
         return res
     mod = pcases = None

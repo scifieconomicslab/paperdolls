@@ -137,6 +137,8 @@ def validate(m):
             warn("runtime.type", rt["type"] + " runtimes are planned; only js runs today")
         if rt.get("type") == "js" and not _is_str(rt.get("entry")):
             err("runtime.entry", "required for a js runtime: the file that registers it")
+        elif _is_str(rt.get("entry")) and norm_file(rt["entry"]) is None:
+            err("runtime.entry", "must be a relative path inside the pack folder (no leading / and no ..)")
         if "files" in rt:
             files = rt["files"]
             if not isinstance(files, list) or not files or not all(_is_str(f) for f in files):
@@ -662,24 +664,66 @@ def norm_file(f):
     return "/".join(parts)
 
 
-def check(path):
-    """Validate a pack on disk. Returns (errors, warnings): the manifest, and that the runtime file it names exists."""
+class _Sources:
+    """The runtime files of one pack, each read from disk once, so that what is checked and what is inlined are the same bytes."""
+
+    def __init__(self, path, include, manifest):
+        self.files = runtime_files(path, include, manifest=manifest)
+        self._text = {}
+
+    def text(self, f):
+        key = Path(f)
+        if key not in self._text:
+            try:
+                self._text[key] = key.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                raise PackError(f"runtime file {key} does not exist")
+            except (OSError, UnicodeDecodeError) as e:
+                raise PackError(f"cannot read the runtime file {key}: {e}")
+        return self._text[key]
+
+
+def _confined(base, rel):
+    """True when base/rel, with symbolic links resolved, is inside the pack folder."""
     try:
-        m = load(path)
-    except PackError as e:
-        return [str(e)], []
+        return base.resolve() in (base / rel).resolve().parents
+    except (OSError, RuntimeError):
+        return False
+
+
+def check(path, include=(), manifest=None, sources=None):
+    """Validate a pack on disk. Returns (errors, warnings): the manifest, that the runtime files it names exist and sit inside the pack folder, and that no
+    inlined file refers to a sibling script that is not inlined. `include`: the --include files, which count as declared.
+
+    manifest / sources: what build() already read, so one build validates and inlines the same manifest and the same file contents."""
+    if manifest is None:
+        try:
+            manifest = load(path)
+        except PackError as e:
+            return [str(e)], []
+    m = manifest
     errors, warnings = validate(m)
     rt = m.get("runtime") if _obj(m) else None
+    base = manifest_path(path).parent
     if _obj(rt) and rt.get("type") == "js" and _is_str(rt.get("entry")):
-        entry = manifest_path(path).parent / rt["entry"]
-        if not entry.is_file():
-            errors.append(f"runtime.entry: {rt['entry']} does not exist next to pack.yaml")
+        entry = norm_file(rt["entry"])
+        if entry is not None:                                    # a path that leaves the folder was already reported by validate()
+            if not _confined(base, entry):
+                errors.append(f"runtime.entry: {rt['entry']} resolves outside the pack folder (a symbolic link?)")
+            elif not (base / entry).is_file():
+                errors.append(f"runtime.entry: {rt['entry']} does not exist next to pack.yaml")
         if isinstance(rt.get("files"), list):
             for f in rt["files"]:
-                if _is_str(f) and norm_file(f) and not (manifest_path(path).parent / norm_file(f)).is_file():
-                    errors.append(f"runtime.files: {f} does not exist next to pack.yaml")
+                if _is_str(f) and norm_file(f):
+                    if not _confined(base, norm_file(f)):
+                        errors.append(f"runtime.files: {f} resolves outside the pack folder (a symbolic link?)")
+                    elif not (base / norm_file(f)).is_file():
+                        errors.append(f"runtime.files: {f} does not exist next to pack.yaml")
         if not errors:
-            e2, w2 = undeclared_scripts(path)
+            try:
+                e2, w2 = undeclared_scripts(path, include, manifest=m, sources=sources)
+            except PackError as e:
+                e2, w2 = [str(e)], []
             errors += e2
             warnings += w2
     return errors, warnings
@@ -691,7 +735,7 @@ def _json_for_script(obj):
 
 # ---- the sources a page is built from ----
 
-def runtime_files(path, include=()):
+def runtime_files(path, include=(), manifest=None):
     """The files inlined as the pack's runtime, in load order.
 
     With `runtime.files` in the manifest: --include files, then exactly the files listed, in the order listed (the entry is one of them).
@@ -699,12 +743,12 @@ def runtime_files(path, include=()):
     a convention kept for older packs, not a manifest key. Returns a list of Paths (not checked for existence here)."""
     base = manifest_path(path).parent
     files = [Path(f) for f in include]
-    m = load(path)
+    m = manifest if manifest is not None else load(path)
     rt = m.get("runtime") if _obj(m) else None
     if _obj(rt) and isinstance(rt.get("files"), list):
         files += [base / norm_file(f) for f in rt["files"] if _is_str(f) and norm_file(f)]
-    elif _obj(rt) and _is_str(rt.get("entry")):
-        entry = base / rt["entry"]
+    elif _obj(rt) and _is_str(rt.get("entry")) and norm_file(rt["entry"]):            # an entry outside the pack folder is an error in check(), never a file to inline
+        entry = base / norm_file(rt["entry"])
         files.append(entry)
         bind = base / "bind.js"
         if bind.is_file() and bind.resolve() != entry.resolve():
@@ -716,13 +760,13 @@ def runtime_files(path, include=()):
 _REF = re.compile(r"""(?:\brequire|\bimportScripts)\s*\(\s*(['"])([^'"]+)\1""")
 
 
-def undeclared_scripts(path, include=()):
+def undeclared_scripts(path, include=(), manifest=None, sources=None):
     """(errors, warnings) about runtime files the page would not contain. Error: an inlined file names a sibling script (require('./prng.js'),
     importScripts('prng.js')) that sits in the pack folder and is not among the inlined files, so the built page would fail at run time. Warning: other .js files
     sit beside pack.yaml and are not inlined (a helper a runtime uses as a global would be missing the same way)."""
     base = manifest_path(path).parent
     try:
-        files = runtime_files(path, include)
+        files = sources.files if sources is not None else runtime_files(path, include, manifest=manifest)
     except PackError:
         return [], []
     have = {f.resolve() for f in files}
@@ -730,7 +774,7 @@ def undeclared_scripts(path, include=()):
     for f in files:
         if not f.is_file():
             continue
-        src = f.read_text(encoding="utf-8", errors="replace")
+        src = sources.text(f) if sources is not None else f.read_text(encoding="utf-8", errors="replace")
         for m_ in _REF.finditer(src):
             name = m_.group(2)
             if not (name.startswith(".") or name.endswith(".js")):
@@ -757,12 +801,11 @@ def watched_files(path, include=(), scene_path=None):
     return files
 
 
-def runtime_source(path, include=()):
+def runtime_source(path, include=(), manifest=None, sources=None):
     parts = []
-    for f in runtime_files(path, include):
-        if not f.is_file():
-            raise PackError(f"runtime file {f} does not exist")
-        src = f.read_text(encoding="utf-8")
+    sources = sources or _Sources(path, include, manifest)
+    for f in sources.files:
+        src = sources.text(f)
         if "</script" in src.lower() or "<!--" in src:
             raise PackError(f"{f.name} contains </script> or <!--, which cannot be inlined in a page")
         parts.append(src)
@@ -828,24 +871,28 @@ def load_scene(path):
 def build(path, scene=None, include=(), max_bytes=DEFAULT_MAX_BYTES, trim=()):
     """The pack page, and what went into it. Returns (html, info) where info has bytes, scene_bytes, buildings, trimmed (list of the stages applied
     and what each lost) and over_budget. `trim` names stages to apply regardless of size; otherwise stages are applied in order while the page is over max_bytes.
-    Raises PackError when the page is still over budget after every stage."""
+    Raises PackError when the page is still over budget after every stage.
+
+    The manifest and every runtime file are read once; the page is made from exactly what was validated. The manifest, the scene and the title are put
+    into the page as data, in one pass over the template, so no text inside them can be taken for a placeholder."""
     from .viewer_build import _fill, _read
-    errors, _ = check(path)
+    m = load(path)
+    sources = _Sources(path, include, m)
+    errors, _ = check(path, include, manifest=m, sources=sources)
     if errors:
         raise PackError("the pack does not validate: " + errors[0] + (f" (and {len(errors) - 1} more)" if len(errors) > 1 else ""))
     for t in trim:
         if t not in TRIM_NAMES:
             raise PackError(f"unknown trim stage {t} (known: {', '.join(TRIM_NAMES)})")
-    m = load(path)
-    src = runtime_source(path, include)
+    src = runtime_source(path, include, manifest=m, sources=sources)
     title = m["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    page = _read("packhost.html").replace("/*__PACKRUNTIMESRC__*/", src)
+    template = _read("packhost.html")
     manifest_js = _json_for_script(m)
     trimmed, cur = [], scene
 
     def render(sc):
         sj = _json_for_script(sc) if sc is not None else "null"
-        return _fill(page, TITLE=title, PACK=manifest_js, SCENE=sj), len(sj.encode("utf-8"))
+        return _fill(template, TITLE=title, PACK=manifest_js, SCENE=sj, PACKRUNTIMESRC=src), len(sj.encode("utf-8"))
 
     for t in trim:
         cur = trim_scene(cur, t); trimmed.append({"stage": t, "lost": dict(TRIM_STAGES)[t]})
@@ -862,7 +909,7 @@ def build(path, scene=None, include=(), max_bytes=DEFAULT_MAX_BYTES, trim=()):
     if size > max_bytes:
         raise PackError(f"the page is {size / 1048576:.1f} MB, over the {max_bytes / 1048576:.0f} MB limit" + (" even after trimming the scene" if trimmed else "") + ". Use a smaller scene (ingest --max-buildings or --bbox)")
     info = {"bytes": size, "scene_bytes": sbytes if cur is not None else 0, "buildings": len(cur["buildings"]) if cur is not None else 0,
-            "trimmed": trimmed, "sources": [str(f) for f in runtime_files(path, include)]}
+            "trimmed": trimmed, "sources": [str(f) for f in sources.files]}
     return html, info
 
 

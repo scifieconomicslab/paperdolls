@@ -387,21 +387,24 @@ def t16_build_validates_one_read_of_the_manifest_and_builds_from_another():
     import yaml
     from paperdolls import pack
     d = toy_copy()
-    real = pack.check
+    real, reads = pack.load, []
 
-    def check_then_edit(path):
-        r = real(path)
-        m = yaml.safe_load((d / "pack.yaml").read_text())
-        m["id"] = "BAD ID"                                                   # invalid: check() would refuse this
-        (d / "pack.yaml").write_text(yaml.safe_dump(m, sort_keys=False))
-        return r
-    pack.check = check_then_edit
+    def load_then_edit(path):
+        m = real(path)
+        reads.append(1)
+        if len(reads) == 1:                                                  # the first read is the one that gets validated; an editor saves right after it
+            bad = yaml.safe_load((d / "pack.yaml").read_text())
+            bad["id"] = "BAD ID"                                             # invalid: check() would refuse this
+            (d / "pack.yaml").write_text(yaml.safe_dump(bad, sort_keys=False))
+        return m
+    pack.load = load_then_edit
     try:
         html, info = pack.build(d)
     finally:
-        pack.check = real
-    errors_now, _ = real(d)
-    return (bool(errors_now) and '"id":"BAD ID"' in html), f"build returned a page ({info['bytes']} bytes) embedding id 'BAD ID'; check() on the same folder now says {errors_now[:1]}"
+        pack.load = real
+    real_check = pack.check
+    errors_now, _ = real_check(d)
+    return (bool(errors_now) and '"id":"BAD ID"' in html), f"build read the manifest {len(reads)} time(s) and returned a page ({info['bytes']} bytes) {'embedding' if '\"id\":\"BAD ID\"' in html else 'not embedding'} id 'BAD ID'; check() on the folder now says {errors_now[:1]}"
 
 
 @repro("T17")
@@ -416,8 +419,12 @@ def t17_runtime_entry_outside_the_pack_is_accepted():
     m["runtime"] = {"type": "js", "entry": str(outside), "seed": 7, "on_params": "rerun"}
     (d / "pack.yaml").write_text(yaml.safe_dump(m, sort_keys=False))
     errors, _ = pack.check(d)
-    html, _ = pack.build(d)
-    return (not errors and "window.OUTSIDE" in html), f"check errors={errors}; outside file inlined={'window.OUTSIDE' in html}"
+    try:
+        html, _ = pack.build(d)
+    except pack.PackError as e:
+        html = ""
+        errors = errors + ["build: " + str(e)[:80]]
+    return (not errors and "window.OUTSIDE" in html), f"check/build errors={errors}; outside file inlined={'window.OUTSIDE' in html}"
 
 
 @repro("T18")

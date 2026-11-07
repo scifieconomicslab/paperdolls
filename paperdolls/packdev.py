@@ -111,7 +111,7 @@ class DevState:
                 if self._scene is None or scene_sig != self._scene_sig:
                     self._scene, self._scene_sig = packmod.load_scene(self.scene_path), scene_sig
                 scene = self._scene
-            errors, warnings = packmod.check(self.path)
+            errors, warnings = packmod.check(self.path, self.include)
             if not errors:
                 html, info = packmod.build(self.path, scene, self.include, self.max_bytes, self.trim)
                 if info["trimmed"]:

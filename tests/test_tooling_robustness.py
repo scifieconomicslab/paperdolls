@@ -651,3 +651,180 @@ def test_the_jette_style_ingest_output_is_unchanged_for_valid_data():           
     for sc in (old, new):
         sc["area"].pop("generated", None)
     assert new == old
+
+
+# ================================================================ #13 pack build: T15, T16, T17, T30
+
+def toy_copy(tmp_path):
+    import shutil
+    d = tmp_path / "toy"
+    shutil.copytree(ROOT / "packs" / "toy-epidemic", d)
+    return d
+
+
+SCENE = {"buildings": [{"id": "w1", "footprint": [[0, 0], [5, 0], [5, 5]], "levels": 2, "archetype": "villa", "state": "none", "investor": False, "area": 12.5, "residential": "residential"}],
+         "roads": [], "landuse": [], "trees": []}
+
+
+def manifest_literal(html):
+    line = next(l for l in html.splitlines() if l.strip().startswith("const MANIFEST ="))
+    return json.loads(line.split("=", 1)[1].strip().rstrip(";"))
+
+
+def test_t15_a_placeholder_inside_the_manifest_is_data_not_a_marker(tmp_path):                          # T15
+    from paperdolls import pack
+    d = toy_copy(tmp_path)
+    m = yaml.safe_load((d / "pack.yaml").read_text())
+    m["banner"] = "Data: see /*__SCENE__*/ and /*__PACK__*/ and /*__VIZLIB__*/ in the report"
+    m["title"] = "Toy /*__SCENE__*/"
+    (d / "pack.yaml").write_text(yaml.safe_dump(m, sort_keys=False))
+    html, _ = pack.build(d, SCENE)
+    assert manifest_literal(html)["banner"] == m["banner"], "the MANIFEST literal parses and holds the banner as written"
+    assert html.count('"id":"w1"') == 1, "the scene appears once, in the SCENE literal"
+    assert "<title>Toy /*__SCENE__*/</title>" in html
+
+
+def test_t15_a_placeholder_in_a_runtime_source_stays_text(tmp_path):                                    # T15
+    from paperdolls import pack
+    d = toy_copy(tmp_path)
+    (d / "runtime.js").write_text((d / "runtime.js").read_text() + "\n// build notes: /*__VIZLIB__*/ /*__PALETTES__*/ /*__SCENE__*/ /*__PACKRUNTIMESRC__*/\n")
+    plain, _ = pack.build(ROOT / "packs" / "toy-epidemic", SCENE)
+    html, _ = pack.build(d, SCENE)
+    assert html.count("// build notes: /*__VIZLIB__*/ /*__PALETTES__*/ /*__SCENE__*/ /*__PACKRUNTIMESRC__*/") == 2, "once per place the runtime source is put"
+    assert len(html) - len(plain) < 400, "no library or scene was pasted in"
+
+
+def test_t15_fill_substitutes_in_one_pass():                                                           # T15
+    from paperdolls.viewer_build import _fill
+    out = _fill("a /*__X__*/ b /*__Y__*/ c /*__UNKNOWN__*/", X="/*__Y__*/", Y="y")
+    assert out == "a /*__Y__*/ b y c /*__UNKNOWN__*/"
+
+
+def test_viewer_pages_are_unchanged_by_the_one_pass_fill():                                             # the viewer and catalogue still build, with the libraries in
+    from paperdolls.viewer_build import build_catalogue, build_viewer
+    page = build_viewer(SCENE, {"region": "ce"}, "T & <t>")
+    assert "/*__" not in page and "T &amp; &lt;t&gt;" in page and "VizLib" in page
+    assert "/*__" not in build_catalogue()
+
+
+def test_t16_build_reads_the_manifest_once_and_builds_what_it_validated(tmp_path):                       # T16
+    from paperdolls import pack
+    d = toy_copy(tmp_path)
+    real, reads = pack.load, []
+
+    def load_then_edit(path):
+        m = real(path)
+        reads.append(path)
+        if len(reads) == 1:                                                                             # an editor saves right after the validated read
+            bad = yaml.safe_load((d / "pack.yaml").read_text())
+            bad["id"] = "BAD ID"
+            (d / "pack.yaml").write_text(yaml.safe_dump(bad, sort_keys=False))
+        return m
+    pack.load = load_then_edit
+    try:
+        html, info = pack.build(d)
+    finally:
+        pack.load = real
+    assert len(reads) == 1 and manifest_literal(html)["id"] == "toy-epidemic"
+
+
+def test_t16_build_inlines_the_runtime_bytes_it_checked(tmp_path, monkeypatch):                          # T16, the runtime files
+    from paperdolls import pack
+    d = toy_copy(tmp_path)
+    original = (d / "runtime.js").read_text()
+    real_text = pack._Sources.text
+    state = {"n": 0}
+
+    def text_then_edit(self, f):
+        t = real_text(self, f)
+        state["n"] += 1
+        if state["n"] == 1:
+            Path(f).write_text(t + "\nwindow.EDITED_AFTER_THE_CHECK = 1;\n")
+        return t
+    monkeypatch.setattr(pack._Sources, "text", text_then_edit)
+    html, _ = pack.build(d)
+    assert "EDITED_AFTER_THE_CHECK" not in html and original.strip().splitlines()[0] in html
+
+
+def test_t17_a_runtime_entry_outside_the_pack_is_refused(tmp_path):                                      # T17
+    from paperdolls import pack
+    d = toy_copy(tmp_path)
+    outside = tmp_path / "outside.js"
+    outside.write_text("window.OUTSIDE = 1;")
+    for entry in (str(outside), "../outside.js", "sub/../../outside.js", "C:/x.js", "a\\b.js"):
+        m = yaml.safe_load((d / "pack.yaml").read_text())
+        m["runtime"] = {"type": "js", "entry": entry, "seed": 7, "on_params": "rerun"}
+        (d / "pack.yaml").write_text(yaml.safe_dump(m, sort_keys=False))
+        errors, _ = pack.check(d)
+        assert any("runtime.entry: must be a relative path inside the pack folder" in e for e in errors), (entry, errors)
+        with pytest.raises(pack.PackError, match="inside the pack folder"):
+            pack.build(d)
+        assert pack.runtime_files(d) == [], "nothing outside the pack is ever a file to inline"
+
+
+def test_t17_a_symbolic_link_out_of_the_pack_is_refused(tmp_path):                                       # T17
+    from paperdolls import pack
+    d = toy_copy(tmp_path)
+    outside = tmp_path / "outside.js"
+    outside.write_text("window.OUTSIDE = 1;")
+    (d / "linked.js").symlink_to(outside)
+    m = yaml.safe_load((d / "pack.yaml").read_text())
+    m["runtime"]["entry"] = "linked.js"
+    m["runtime"].pop("files", None)
+    (d / "pack.yaml").write_text(yaml.safe_dump(m, sort_keys=False))
+    errors, _ = pack.check(d)
+    assert any("resolves outside the pack folder" in e for e in errors)
+    with pytest.raises(pack.PackError):
+        pack.build(d)
+
+
+def test_the_js_validator_refuses_such_an_entry_too():                                                    # T17: the two validators agree
+    import shutil
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    from paperdolls import pack
+    m = _base_manifest()
+    m["runtime"]["entry"] = "../x.js"
+    py_errors, _ = pack.validate(m)
+    out = subprocess.run(["node", "-e", "const V=require(process.argv[1]); const r=V.validate(JSON.parse(process.argv[2])); console.log(JSON.stringify(r.errors))", str(ROOT / "viz" / "packvalidate.js"), json.dumps(m)],
+                         capture_output=True, text=True, timeout=30)
+    assert "runtime.entry: must be a relative path" in " ".join(py_errors) and "runtime.entry: must be a relative path" in out.stdout
+
+
+def _pack_with_included_helper(tmp_path):
+    d = toy_copy(tmp_path)
+    m = yaml.safe_load((d / "pack.yaml").read_text())
+    m["runtime"].pop("files", None)
+    (d / "pack.yaml").write_text(yaml.safe_dump(m, sort_keys=False))
+    (d / "prng.js").write_text("window.PRNG_LOADED = 1;")
+    (d / "runtime.js").write_text((d / "runtime.js").read_text() + "\nif (typeof require === 'function') require('./prng.js');\n")
+    return d
+
+
+def test_t30_include_reaches_check_and_build(tmp_path):                                                    # T30
+    from paperdolls import pack
+    d = _pack_with_included_helper(tmp_path)
+    inc = [d / "prng.js"]
+    assert any("not inlined into the page" in e for e in pack.check(d)[0]), "without --include the require is refused"
+    assert pack.check(d, inc)[0] == []
+    html, info = pack.build(d, None, inc)
+    assert "PRNG_LOADED" in html and html.index("PRNG_LOADED") < html.index("require('./prng.js')") and str(d / "prng.js") in info["sources"]
+
+
+def test_t30_include_through_the_commands(tmp_path):                                                       # T30: build, check (manifest and runtime) and dev
+    import shutil
+    d = _pack_with_included_helper(tmp_path)
+    inc = ["--include", str(d / "prng.js")]
+    rc, out, err = cli("pack", "build", d, "--out", tmp_path / "p.html", *inc)
+    assert rc == 0, err
+    assert "PRNG_LOADED" in (tmp_path / "p.html").read_text()
+    assert cli("pack", "build", d, "--out", tmp_path / "q.html")[0] == 1, "without it the build is refused, as documented"
+    rc, out, err = cli("pack", "check", d, "--manifest-only", *inc)
+    assert rc == 0 and "not inlined" not in out, out
+    assert cli("pack", "check", d, "--manifest-only")[0] == 1
+    if shutil.which("node"):
+        rc, out, err = cli("pack", "check", d, *inc)
+        assert rc in (0, 1) and "not inlined" not in out, out
+    from paperdolls import packdev
+    assert packdev.DevState(d, None, include=[d / "prng.js"]).ok
+    assert not packdev.DevState(d).ok
