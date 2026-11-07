@@ -360,7 +360,11 @@
   function fitFootprint(fp, roads, opts) {
     const T = Object.assign({}, FIT, opts || {});
     const hull = convexHull(fp); const out = { ok: false, reason: '', cx: 0, cy: 0, W: 0, D: 0, heading: 0, dev: 0, rectangularity: 0 };
-    if (hull.length < 3) { out.reason = 'degenerate'; return out; }
+    if (hull.length < 3) {                                // repeated or collinear points: no area. Sort, pick and terrain height use the middle of the bounding box, not the origin
+      out.reason = 'degenerate';
+      if (fp.length) { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const p of fp) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); } out.cx = (x0 + x1) / 2; out.cy = (y0 + y1) / 2; }
+      return out;
+    }
     const r = minRect(hull), area = polyArea(fp);
     out.cx = r.x; out.cy = r.y; out.rectangularity = area / (r.a * r.b);
     const thd = r.th * 180 / Math.PI, m = ((thd % 90) + 90) % 90; out.dev = Math.min(m, 90 - m);

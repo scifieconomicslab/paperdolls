@@ -100,7 +100,7 @@
   function drawBuilding(ctx, view, reg, pal, b, shadowRgb, state, wallOverride, roofOverride) {
     reg = Object.assign({}, reg, { lw: reg.lw * Math.max(0.3, Math.min(1, view.scale / 10)) });   // thinner ink when zoomed out
     const arch = LIB.buildings[b.archetype] || LIB.buildings.terrace;
-    const H = b.levels * arch.storeyH;
+    const H = Math.min(b.levels, MAX_LEVELS) * arch.storeyH;
     const fp = b.footprint;
     const n = fp.length;
     // orientation: make the polygon counter-clockwise in world (x right, y down means screen-ccw; use signed area)
@@ -129,7 +129,7 @@
       // windows, bay by bay
       const bays = Math.max(1, Math.floor(len / arch.bayW));
       const bayLen = len / bays;
-      const storeys = b.levels;
+      const storeys = Math.min(b.levels, MAX_LEVELS);
       // Level of detail: a window module narrower than WINDOW_LOD_PX on the screen cannot be seen (it is a smudge of ink on the wall), and drawing
       // the windows of a district is most of the time a far-zoom frame costs (11.7 s of 12 s for the 9,214 buildings of Jette at Fit). The wall is then drawn plain.
       // sim.opts.windowLodPx = 0 draws every window as before (renderFrame sets windowLodPx for the frame).
@@ -283,6 +283,17 @@
   }
 
   // ---------- scene validation ----------
+  // The most storeys the renderer draws or sorts (the ingest caps at 60 too): a scene with 200,000 levels cost a second per frame. validateScene counts
+  // the buildings over it and createSim draws them at the cap; the scene itself is not changed.
+  const MAX_LEVELS = 60;
+  // A footprint with fewer than three distinct non-collinear points has no area. createSim places it at the centre of its bounding box (fitFootprint).
+  function degenerateFootprint(fp) {
+    const a = fp[0]; let b = null;
+    for (const p of fp) if (p[0] !== a[0] || p[1] !== a[1]) { b = p; break; }
+    if (!b) return true;
+    for (const p of fp) if (Math.abs((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) > 1e-9 * (1 + Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1])) ** 2) return false;
+    return true;
+  }
   // Checks a scene before it is built, so a bad file fails with a clear message and not deep inside the renderer.
   function validateScene(scene) {
     const A = A_(), errors = [], warnings = [], num = x => typeof x === 'number' && isFinite(x), pt = p => Array.isArray(p) && p.length >= 2 && num(p[0]) && num(p[1]);
@@ -313,6 +324,10 @@
       if (b.residential !== undefined && !['residential', 'probable', 'other'].includes(b.residential)) bad('building ' + i + ' (' + b.id + '): residential must be residential, probable or other');
       if (b.neighbours !== undefined && !(Array.isArray(b.neighbours) && b.neighbours.every(n => typeof n === 'string' || num(n)))) bad('building ' + i + ' (' + b.id + '): neighbours must be a list of building ids');
     });
+    let degenerate = 0, tall = 0;
+    scene.buildings.forEach(b => { if (b && Array.isArray(b.footprint) && b.footprint.length >= 3 && b.footprint.every(pt)) { if (degenerateFootprint(b.footprint)) degenerate++; if (num(b.levels) && b.levels > MAX_LEVELS) tall++; } });
+    if (degenerate) warnings.push(degenerate + ' building footprint(s) have no area (repeated or collinear points): drawn at the centre of their bounding box');
+    if (tall) warnings.push(tall + ' building(s) have more than ' + MAX_LEVELS + ' levels: drawn with ' + MAX_LEVELS);
     let dangling = 0;
     scene.buildings.forEach(b => { if (b && Array.isArray(b.neighbours)) for (const n of b.neighbours) if (!ids.has(n)) dangling++; });
     if (dangling) warnings.push(dangling + ' neighbour id(s) name no building in the scene');
@@ -461,10 +476,10 @@
     const rIdx = A.roadIndex(scene.roads);                       // a spatial index, so a city of tens of thousands of buildings stays fast
     const buildings = scene.buildings.map(b => {
       const fit = A.fitFootprint(b.footprint, rIdx), seed = A.hashStr(String(b.id)) ^ opts.seed;
-      const kind = (b.archetype && b.archetype !== 'auto' && A.ARCH[b.archetype]) ? b.archetype : A.pickArchetype(opts.region, b.levels, A.hash(seed + 5));
+      const kind = (b.archetype && b.archetype !== 'auto' && A.ARCH[b.archetype]) ? b.archetype : A.pickArchetype(opts.region, Math.min(b.levels, MAX_LEVELS), A.hash(seed + 5));
       const bz = (b.z !== undefined ? b.z : (T ? T.at(fit.cx, fit.cy) : 0)) * relief; if (bz > zmax) zmax = bz;
-      const e = { src: b, id: b.id, group: 'buildings', kind, seed, fit, z: bz, params: fit.ok ? A.buildingParams(opts.region, kind, b.levels, fit, seed) : null,
-                  get state() { return b.state; }, get investor() { return b.investor; }, get levels() { return b.levels; } };
+      const e = { src: b, id: b.id, group: 'buildings', kind, seed, fit, z: bz, params: fit.ok ? A.buildingParams(opts.region, kind, Math.min(b.levels, MAX_LEVELS), fit, seed) : null,
+                  get state() { return b.state; }, get investor() { return b.investor; }, get levels() { return Math.min(b.levels, MAX_LEVELS); } };
       if (e.params && opts.detail) e.params.fs = Object.assign({}, e.params.fs, { rich: true });   // opt-in detail: roof clutter and varied glazing
       if (e.params) stats.assets++; else { stats.extruded++; stats.reasons[fit.reason] = (stats.reasons[fit.reason] || 0) + 1; }
       return e;
