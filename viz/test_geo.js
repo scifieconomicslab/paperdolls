@@ -60,7 +60,51 @@ test('#21 camera.maxScale follows the scene both ways, and zoomAt ignores NaN, z
   assert.ok(isFinite(cam.scale) && cam.scale >= cam.minScale && cam.scale <= cam.maxScale, String(cam.scale));
 });
 
+// ---------- #15: terrain shading ----------
+// A ground-only picture of a gentle synthetic hill (a bump 6 m high and about 250 m across: slopes of at most 2-3%, like Jette's), as RGB at a view where one cell is a few to many pixels.
+const GROUND_ONLY = { buildings: false, trees: false, vehicles: false, people: false };
+function hillScene(cell, edgeFill) {
+  const nx = Math.ceil(600 / cell) + 1, ny = nx, z = [];
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const x = i * cell - 300, y = j * cell - 300, v = 6 * Math.exp(-(x * x + y * y) / (2 * 110 * 110)) + 0.004 * x; z.push(Math.round(v * 10) / 10); }
+  if (edgeFill) for (let j = 0; j < ny; j++) for (let i = nx - 8; i < nx; i++) z[j * nx + i] = z[j * nx + nx - 9];     // the nearest-height fill the ingest writes past the elevation data
+  const corner = (id, x, y) => ({ id, footprint: [[x, y], [x + 6, y], [x + 6, y + 6], [x, y + 6]], levels: 1, archetype: 'shed', state: 'none', investor: false });     // they only fix the scene's bounds: the ground is drawn over the bounds
+  return { area: { name: 'hill' }, roads: [], buildings: [corner('c1', -300, -300), corner('c2', 292, 292)], landuse: [], trees: [], terrain: { x0: -300, y0: -300, dx: cell, dy: cell, nx, ny, z } };
+}
+function groundPixels(scene, k, W, H) {
+  A.sprites.cache.clear(); A.sprites.pixels = 0;
+  const sim = mkSim(scene), cv = createCanvas(W, H), c = cv.getContext('2d'); sim.opts.sliceLayers = false; sim.opts.buildMs = 1e9; sim.opts.prewarm = false;
+  const view = { w: W, h: H, scale: k, ox: W / 2, oy: H / 2 + 5 * k };                       // the scene's centre (0, 0) in the middle
+  for (let i = 0; i < 6; i++) V.renderFrame(c, sim, view, GROUND_ONLY);
+  return c.getImageData(0, 0, W, H).data;
+}
+// the share of pixels, in the interior of the hill's picture, whose second difference of grey along a row exceeds `lim`: a smooth shade has almost none (a step at a cell edge has one pair)
+function kinks(d, W, H, lim) {
+  let n = 0, tot = 0; const L = i => d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11;
+  for (let y = Math.floor(H * 0.4); y < H * 0.6; y++) for (let x = Math.floor(W * 0.35); x < W * 0.65; x++) { const i = y * W + x, d2 = Math.abs(L(i - 1) - 2 * L(i) + L(i + 1)); tot++; if (d2 > lim) n++; }
+  return n / tot;
+}
+for (const [k, name] of [[0.6, 'far (cell 15 px)'], [2, 'mid (cell 50 px)'], [5, 'near (cell 125 px)']]) test('#15 smooth relief shading: no visible cell edges at ' + name, () => {
+  if (!createCanvas) return;
+  const W = 900, H = 600, d = groundPixels(hillScene(25), k, W, H), f = kinks(d, W, H, 2);
+  if (process.env.SHOW) console.log(name, 'kinks>2', (f * 100).toFixed(3) + '%', 'kinks>1.5', (kinks(d, W, H, 1.5) * 100).toFixed(3) + '%');
+  assert.ok(f < 0.002, 'cell edges show as kinks in the shade: ' + (f * 100).toFixed(3) + '% of pixels have a second difference above 2 grey levels');
+});
+test('#15 the shade fades out over made-up land at the elevation data\'s edge (the streaks), and is the same inside the data', () => {
+  if (!createCanvas) return;
+  const W = 900, H = 600, k = 0.8, shot = sc => { A.sprites.cache.clear(); A.sprites.pixels = 0; const sim = mkSim(sc), cv = createCanvas(W, H), c = cv.getContext('2d'); sim.opts.sliceLayers = false; sim.opts.buildMs = 1e9; sim.opts.prewarm = false;
+    const view = { w: W, h: H, scale: k, ox: W / 2, oy: H / 2 + 5 * k }; for (let i = 0; i < 6; i++) V.renderFrame(c, sim, view, GROUND_ONLY);
+    const px = (x, y) => { const p = V.proj(view, x, y, sim.terrain.at(x, y)), d = c.getImageData(Math.round(p[0]), Math.round(p[1]), 1, 1).data; return d[0] * 0.3 + d[1] * 0.59 + d[2] * 0.11; };
+    return { px, ground: sim.opts.theme.ground }; };
+  const filled = shot(hillScene(25, true)), plain = shot(hillScene(25, false));
+  // x = 270 m is inside the fill (the last 200 m): each row repeats, so the "slope" across rows is an artefact; y = 120 m is where the hill's own slope is steepest
+  const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)), gr = hex(filled.ground), gl = gr[0] * 0.3 + gr[1] * 0.59 + gr[2] * 0.11;
+  assert.ok(Math.abs(filled.px(270, 120) - gl) < 2.5, 'over the fill the shade is neutral: ' + filled.px(270, 120).toFixed(1) + ' vs ground ' + gl.toFixed(1));
+  assert.ok(Math.abs(filled.px(-120, 120) - plain.px(-120, 120)) < 1.5, 'inside the data nothing changed');
+});
+
+
 (async () => {
   for (const [name, fn] of queue) { try { await fn(); console.log('PASS ' + name); } catch (e) { failed++; console.log('FAIL ' + name + ': ' + (e && e.stack || e)); } }
   console.log(failed ? failed + ' FAILED' : 'all ' + queue.length + ' passed'); process.exit(failed ? 1 : 0);
 })();
+
