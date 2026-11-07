@@ -138,14 +138,17 @@
     }
     store.pushFrames = (frames, opts) => {
       const replace = !!(opts && opts.replace);
-      if (replace) { st.frames = []; st.series = {}; st.gen++; }
-      const before = st.frames.length;
+      // all or nothing: the new frames are checked and resolved on the side, and the store changes only when every one of them is good (a refused chunk leaves the run it found)
+      const base = replace ? [] : st.frames, nf = [], ns = {};
       for (const f0 of frames) {
-        if (f0.t !== st.frames.length) throw new Error('frame t=' + f0.t + ' out of order: expected ' + st.frames.length);
-        const f = resolve(f0, st.frames[st.frames.length - 1]);
-        st.frames.push(f);
-        for (const [name, pt] of Object.entries(f.series || {})) (st.series[name] || (st.series[name] = [])).push(pt);
+        if (f0.t !== base.length + nf.length) throw new Error('frame t=' + f0.t + ' out of order: expected ' + (base.length + nf.length));
+        const f = resolve(f0, nf.length ? nf[nf.length - 1] : base[base.length - 1]);
+        nf.push(f);
+        for (const [name, pt] of Object.entries(f.series || {})) (ns[name] || (ns[name] = [])).push(pt);
       }
+      if (replace) { st.frames = nf; st.series = ns; st.gen++; }
+      else { for (const f of nf) st.frames.push(f); for (const [name, pts] of Object.entries(ns)) { const a = st.series[name] || (st.series[name] = []); for (const pt of pts) a.push(pt); } }
+      const before = replace ? 0 : st.frames.length - nf.length;
       if (st.time.t > st.frames.length - 1) st.time.t = Math.max(0, st.frames.length - 1);
       if (replace || before <= st.time.t || st.frames.length <= st.time.t) { st.data++; st.shown++; }         // frames added beyond the current time change nothing on the map
       emit('frames', { replace, length: st.frames.length });

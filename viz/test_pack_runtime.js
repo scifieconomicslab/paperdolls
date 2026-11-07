@@ -10,7 +10,7 @@ const H = require(path.join(__dirname, '..', 'docs', 'state-machines', 'repro', 
 let failed = 0, skipped = 0; const queue = [];
 const test = (name, fn) => queue.push([name, fn]);
 const testDom = (name, fn) => queue.push([name, JSDOM ? fn : () => { throw Object.assign(new Error('jsdom'), { skip: true }); }]);
-const quiet = () => { console.error = () => {}; };
+const quiet = () => { console.error = () => {}; console.warn = () => {}; };
 const state = p => { let s = 'pending'; p.then(() => { s = 'resolved'; }, e => { s = 'rejected(' + e.message + ')'; }); return () => s; };
 const settleStart = async (env, ctl) => { const p = ctl.start(); await env.drain(); await env.yieldAll(); await p; };
 
@@ -131,10 +131,140 @@ test('#4 r02: a B failure in its first start is also cleared once B recovers', a
 });
 
 // =====================================================================================================================================================
+// Issue #5: failures are seen: a silent or dead worker, a failing callback, a short run, a setParams that throws
+// =====================================================================================================================================================
+function fakeTimers() {
+  let now = 0, id = 0; const t = new Map();
+  return { set(fn, ms) { const i = ++id; t.set(i, { fn, at: now + ms }); return i; }, clear(i) { t.delete(i); }, pending: () => t.size,
+    advance(ms) { now += ms; for (const [i, x] of [...t]) if (x.at <= now) { t.delete(i); x.fn(); } } };
+}
+const inlineOf = env => ({ chunk: 8, yieldFn: () => new Promise(r => env.yields.push(r)) });
+const pageWith = (env, extra) => { const store = G.PackStore.create(env.manifest), tm = fakeTimers(), runtime = env.worker(Object.assign({ mode: 'auto', timers: tm, timeoutMs: 1000, server: inlineOf(env) }, extra || {})); return { store, tm, runtime, ctl: G.PackHost.createController({ manifest: env.manifest, runtime, store }) }; };
+
+// r05 a / T-1: nothing answers init
+test('#5 r05a: a worker that never answers init is replaced by the main thread after the timeout and the run completes', async () => {
+  quiet(); const env = H.makeEnv({ chunk: 8 }); env.silentInit = true; const { store, tm, runtime, ctl } = pageWith(env);
+  const p = ctl.start(); await env.drain(); assert.strictEqual(ctl.running, true);
+  tm.advance(1000); await env.drain(); await env.yieldAll(); await p;
+  assert.strictEqual(ctl.error, null); assert.strictEqual(store.length(), 41); assert.strictEqual(runtime.mode, 'inline'); assert(/did not answer/.test(runtime.fellBack), String(runtime.fellBack));
+  assert.strictEqual(ctl.running, false); assert.deepStrictEqual(env.URL.revoked, ['blob:fake/1']); assert.strictEqual(tm.pending(), 0, 'no timer outlives the work');
+});
+test('#5 r05a: with mode "worker" (no fallback) a silent worker ends the run with a visible error, and later requests fail at once instead of hanging', async () => {
+  quiet(); const env = H.makeEnv({ chunk: 8 }); env.silentInit = true; const { store, tm, ctl } = pageWith(env, { mode: 'worker' });
+  const p = ctl.start(); await env.drain(); tm.advance(1000); await env.drain(); await p;
+  assert(/did not answer/.test(ctl.error), String(ctl.error)); assert.strictEqual(ctl.running, false);
+  store.setParam('rate', 0.7); ctl.flush(); await env.drain();
+  assert.strictEqual(ctl.running, false, 'the next slider move does not hang'); assert(/did not answer/.test(ctl.error));
+});
+// r05 c: the worker dies after it was ready
+test('#5 r05c: a worker that dies silently in a run is replaced by the main thread; the run is repeated and the page says so', async () => {
+  quiet(); const env = H.makeEnv({ chunk: 8 }); const { store, tm, runtime, ctl } = pageWith(env);
+  const p = ctl.start(); await env.drain(); env.workers[0].crash();
+  tm.advance(1000); await env.drain(); await env.yieldAll(); await env.drain(); await env.yieldAll(); await p;
+  assert.strictEqual(ctl.error, null); assert.strictEqual(store.length(), 41); assert.strictEqual(runtime.mode, 'inline'); assert.strictEqual(ctl.mode, 'inline', 'ctl.mode follows the adapter');
+  assert(/main thread/.test(ctl.notice), String(ctl.notice)); assert.strictEqual(ctl.running, false); assert.strictEqual(tm.pending(), 0);
+});
+test('#5 r05c: a worker that reports an error and dies: the run falls back to the main thread, the next slider move works', async () => {
+  quiet(); const env = H.makeEnv({ chunk: 8 }); const { store, tm, ctl } = pageWith(env);
+  let p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  const w = env.workers[0]; store.setParam('rate', 0.6); ctl.flush(); await env.drain();
+  w.fail('worker out of memory'); w.crash(); await env.drain(); await env.yieldAll(); await env.drain(); await env.yieldAll();
+  assert.strictEqual(ctl.error, null); assert.strictEqual(ctl.running, false); assert.strictEqual(H.frameLoad(store, 3), 603);
+  store.setParam('rate', 0.7); ctl.flush(); await env.drain(); await env.yieldAll();
+  assert.strictEqual(ctl.running, false); assert.strictEqual(store.length(), 41); assert.strictEqual(H.frameLoad(store, 3), 703);
+});
+test('#5 r05c: with mode "worker" the error is shown and a later request is refused with it, not posted to the dead worker', async () => {
+  quiet(); const env = H.makeEnv({ chunk: 8 }); const { store, ctl } = pageWith(env, { mode: 'worker' });
+  let p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  const w = env.workers[0]; store.setParam('rate', 0.6); ctl.flush(); await env.drain(); w.fail('worker out of memory'); w.crash(); await env.drain();
+  assert(/out of memory/.test(ctl.error)); assert.strictEqual(ctl.running, false);
+  const posted = env.toServer.length; store.setParam('rate', 0.7); ctl.flush(); await env.drain();
+  assert.strictEqual(env.toServer.length, posted, 'nothing is sent to the dead worker'); assert.strictEqual(ctl.running, false); assert(/out of memory/.test(ctl.error));
+});
+// r05 b / T-2
+test('#5 r05b: after dispose() every request is rejected, the Blob URL is revoked once and no timer is left', async () => {
+  const env = H.makeEnv(), tm = fakeTimers(), rt = env.worker({ timers: tm, timeoutMs: 1000 });
+  await env.drain(); rt.dispose(); rt.dispose();
+  const s = state(rt.start({ rate: 0.5 })); await env.drain(); await env.yieldAll();
+  assert.strictEqual(s(), 'rejected(disposed)'); assert.deepStrictEqual(env.URL.revoked, ['blob:fake/1']); assert.strictEqual(tm.pending(), 0);
+});
+// r07 / R-1
+test('#5 r07: a lost chunk ends the run with an error (not a quiet truncated timeline), no exception leaves the message handler, and the server stops', async () => {
+  quiet(); const { env, store, ctl } = H.makePage({ chunk: 8 });
+  let n = 0; env.dropClient = m => m.partial && ++n === 3;
+  const p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  assert(/out of order/.test(ctl.error), String(ctl.error)); assert.strictEqual(ctl.running, false); assert.deepStrictEqual(env.uncaught, []);
+  assert(env.impl.steps < 40, 'the cancelled run stops computing: steps ' + env.impl.steps);
+  assert.strictEqual(store.length(), 17, 'the frames that did arrive in order stay');
+});
+test('#5 r07: a run whose last chunk is lost delivered too few frames and is reported', async () => {
+  quiet(); const { env, store, ctl } = H.makePage({ chunk: 8 });
+  let n = 0; env.dropClient = m => m.partial && ++n === 5;
+  const p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  assert(/33 of 41/.test(ctl.error), String(ctl.error)); assert.strictEqual(ctl.running, false); assert.strictEqual(store.length(), 33);
+});
+test('#5 r07: a complete run is not reported (the frame count check has no false alarm)', async () => {
+  const { env, store, ctl } = H.makePage({ chunk: 8 });
+  const p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  assert.strictEqual(ctl.error, null); assert.strictEqual(store.length(), 41);
+});
+// r13 a2
+test('#5 r13a2: a runtime that throws the empty string is a failure, with a message', async () => {
+  quiet(); const impl = H.makeImpl(), orig = impl.step; impl.step = (h, n) => { if (n > 0) throw ''; return orig(h, n); };
+  const { env, ctl } = H.makePage({ impl, chunk: 8 }); const p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  assert(ctl.error && /repro/.test(ctl.error), 'ctl.error: ' + JSON.stringify(ctl.error));
+});
+// r13 b / F-1
+test('#5 r13b: a pushFrames that throws leaves the store as it was (no half replaced timeline)', () => {
+  const s = G.PackStore.create(H.MANIFEST()), fr = t => ({ t, entities: { thing: { kind: Int8Array.from([0, 0, 0, 0, 0]), load: Float32Array.from([t, 0, 0, 0, 0]) } }, series: { totals: [t, 0] } });
+  s.bindScene('thing', { count: 5, index: [0, 1, 2, 3, 4] }); s.pushFrames([fr(0), fr(1), fr(2)], { replace: true }); s.setTime(2);
+  const ev = []; s.subscribe('*', e => ev.push(e.topic)); const gen = s.runId();
+  assert.throws(() => s.pushFrames([fr(0), fr(1), fr(5)], { replace: true }), /out of order/);
+  assert.strictEqual(s.length(), 3); assert.deepStrictEqual(ev, []); assert.strictEqual(s.time().t, 2); assert.strictEqual(s.frame().t, 2);
+  assert.strictEqual(s.series('totals').length, 3); assert.strictEqual(s.runId(), gen); assert.strictEqual(s.bound('thing').fields.load[0], 2);
+  assert.throws(() => s.pushFrames([fr(3), fr(9)]), /out of order/); assert.strictEqual(s.length(), 3, 'an extending push is atomic as well');
+});
+// r04 / P-2
+test('#5 r04: Play stops at the end of a run that failed part way', async () => {
+  quiet(); const { env, store, ctl } = H.makePage({ chunk: 8, impl: H.makeImpl({ throwAtStep: 20 }) });
+  const p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  assert(ctl.error); assert.strictEqual(store.length(), 17);
+  ctl.togglePlay(); for (let i = 0; i < 400; i++) ctl.advance(0.05);
+  assert.strictEqual(store.time().playing, false, 'the button must not stay on Pause'); assert.strictEqual(store.time().t, 16);
+});
+test('#5 r04: Play stops at the end of a truncated timeline after a lost chunk, and keeps waiting while the run is still coming', async () => {
+  quiet(); const { env, store, ctl } = H.makePage({ chunk: 8 });
+  const p = ctl.start(); await env.drain();                                      // 9 frames so far, the run goes on
+  store.setPlaying(true); for (let i = 0; i < 100; i++) ctl.advance(0.05);
+  assert.strictEqual(store.time().playing, true, 'waiting for frames that are on their way is not an end'); assert.strictEqual(store.time().t, 8);
+  await env.yieldAll(); await p; for (let i = 0; i < 100; i++) ctl.advance(0.05);
+  assert(store.time().t > 8, 'the clock goes on when the frames arrived');
+  let n = 0; env.dropClient = m => m.partial && ++n === 2; store.setParam('rate', 0.8); ctl.flush(); await env.drain(); await env.yieldAll();
+  store.setTime(0); store.setPlaying(true); for (let i = 0; i < 400; i++) ctl.advance(0.05);
+  assert(ctl.error); assert.strictEqual(store.time().playing, false);
+});
+// r08 / S-1
+test('#5 r08: a setParams that throws cancels the run in flight (no more chunks computed for nobody)', async () => {
+  quiet(); const { env, store, ctl } = H.makePage({ chunk: 8, impl: H.makeImpl({ failAbove: 0.9 }) });
+  const p = ctl.start(); await env.drain(); const before = env.impl.steps;
+  store.setParam('rate', 0.95); ctl.flush(); await env.drain();
+  assert(/refuses rate 0\.95/.test(ctl.error)); const d0 = env.delivered.filter(m => m.partial).length;
+  await env.yieldAll(); await p;
+  assert.strictEqual(env.delivered.filter(m => m.partial).length - d0, 0, 'the old run sends nothing more'); assert.strictEqual(env.impl.steps, before);
+});
+test('#5 r08: a start that throws leaves the adapter\'s parameters with its handle', () => {
+  const impl = H.makeImpl({ failAbove: 0.9 }); impl.snapshot = h => ({ p: h.p, t: h.t, log: h.log.slice() }); impl.restore = (h, st) => ({ p: st.p, t: st.t, log: st.log.slice() });
+  const env = H.makeEnv({ impl }), rt = G.PackRuntime.create(env.manifest, impl);
+  rt.start({ rate: 0.5 }); assert.throws(() => rt.start({ rate: 0.95 }), /refuses/);
+  assert.strictEqual(rt.snapshot().params.rate, 0.5); assert.strictEqual(rt.t, 0);
+});
+
+// =====================================================================================================================================================
 (async () => {
   for (const [name, fn] of queue) {
-    try { await fn(); console.log('PASS ' + name); }
-    catch (e) { if (e && e.skip) { skipped++; console.log('SKIP ' + name + ' (jsdom not installed)'); } else { failed++; console.log('FAIL ' + name + '\n  ' + (e && e.message) + (e && e.stack ? '\n  ' + e.stack.split('\n').slice(1, 4).join('\n  ') : '')); } }
+    let timer; const guard = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('hang: the test never finished (a promise that is never settled)')), 4000); });
+    try { await Promise.race([fn(), guard]); clearTimeout(timer); console.log('PASS ' + name); }
+    catch (e) { clearTimeout(timer); if (e && e.skip) { skipped++; console.log('SKIP ' + name + ' (jsdom not installed)'); } else { failed++; console.log('FAIL ' + name + '\n  ' + (e && e.message) + (e && e.stack ? '\n  ' + e.stack.split('\n').slice(1, 4).join('\n  ') : '')); } }
   }
   console.log(failed ? failed + ' failed' : 'all passed' + (skipped ? ' (' + skipped + ' skipped)' : '')); process.exit(failed ? 1 : 0);
 })();

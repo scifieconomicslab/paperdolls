@@ -81,20 +81,33 @@
   // run being replaced stay on screen until the new run has reached the time being looked at, so a slider moves the map without a flicker back to time 0.
   function createController(o) {
     const { manifest, runtime, store } = o, horizon = manifest.time.steps, isAsync = !!runtime.async;
-    const ctl = { wall: 0, dirty: false, runs: 0, lastRunMs: 0, error: null, acc: 0, gen: 0, shown: 0, shownParams: null, runParams: null, running: false, async: isAsync, get mode() { return runtime.mode || 'inline'; } };
+    const ctl = { wall: 0, dirty: false, runs: 0, lastRunMs: 0, error: null, acc: 0, gen: 0, shown: 0, shownParams: null, runParams: null, running: false, notice: null, async: isAsync, get mode() { return runtime.mode || 'inline'; } };
     const clock = () => (root.performance && root.performance.now ? root.performance.now() : Date.now());
     const fail = e => { ctl.error = (e && e.message) || String(e); if (root.console) root.console.error(e); };
-    function finish(t0) { if (!ctl.error) ctl.shownParams = ctl.runParams; ctl.runs++; ctl.lastRunMs = clock() - t0; ctl.running = false; ctl.onRun && ctl.onRun(ctl); }
+    let retried = 0;
+    function finish(t0) {
+      if (!ctl.error) { ctl.shownParams = ctl.runParams; retried = 0; }
+      ctl.runs++; ctl.lastRunMs = clock() - t0; ctl.running = false;
+      if (ctl.error && isAsync && store.time().playing && store.time().t >= store.length() - 1) store.setPlaying(false);        // nothing more will come: Play must not stay on Pause
+      if (ctl.onRun) { try { ctl.onRun(ctl); } catch (e) { if (root.console) root.console.error(e); } }
+    }
+    // A request of run `gen` failed. If the transport died and the adapter has started again on the main thread (e.recoverable), the run is repeated once from scratch; else it is the run's failure.
+    function failed(gen, t0, e) {
+      if (gen !== ctl.gen) return;
+      if (e && e.recoverable && retried < 1) { retried++; ctl.notice = 'The model worker stopped; the model now runs on the main thread, where moving a slider may feel slower.'; if (root.console) root.console.warn(e); ctl.start(store.time().t); return; }
+      fail(e); finish(t0);
+    }
     // Stream a run into the store: hold the chunks until they reach `want` (or the run ends), replace the old frames with them once, then extend.
     function stream(gen, first, want) {
-      let held = [first], replaced = false;
+      let held = [first], replaced = false, got = 1;
       const put = (frames, last) => {
         if (gen !== ctl.gen) return;
-        held = held.concat(frames);
+        got += frames.length; held = held.concat(frames);
         if (!replaced && (held.length > want || last)) { store.pushFrames(held, { replace: true }); ctl.shown = gen; replaced = true; held = []; }
         else if (replaced && frames.length) { store.pushFrames(frames); held = []; }
       };
-      return runtime.run(horizon, fr => put(fr, false)).then(r => { if (!r.cancelled) put([], true); });
+      // a run that is not cancelled must deliver all of its frames: the horizon and frame 0; a chunk that went missing is a failure, not a shorter timeline
+      return runtime.run(horizon, fr => put(fr, false)).then(r => { if (!r.cancelled) { put([], true); if (gen === ctl.gen && got !== horizon + 1) throw new Error('the run delivered ' + got + ' of ' + (horizon + 1) + ' frames'); } });
     }
     function rerun() {
       const t0 = clock();
@@ -106,7 +119,7 @@
           if (!store.length()) store.pushFrames([res.frame || null].filter(Boolean), { replace: true });
           ctl.shown = gen;
           return null;
-        }).then(() => { if (gen === ctl.gen) { ctl.error = null; finish(t0); } }, e => { if (gen === ctl.gen) { fail(e); finish(t0); } });
+        }).then(() => { if (gen === ctl.gen) { ctl.error = null; finish(t0); } }, e => failed(gen, t0, e));
         return;
       }
       try {
@@ -118,11 +131,11 @@
       } catch (e) { fail(e); }
       finish(t0);
     }
-    ctl.start = () => {
+    ctl.start = want => {
       if (isAsync) {
         const gen = ++ctl.gen, t0 = clock(); ctl.running = true; ctl.runParams = store.params();
-        const done = runtime.start(ctl.runParams).then(f0 => (gen !== ctl.gen ? null : runtime.policy === 'rerun' ? stream(gen, f0, 0) : (store.pushFrames([f0], { replace: true }), void (ctl.shown = gen))))
-          .then(() => { if (gen === ctl.gen) { ctl.error = null; finish(t0); } }, e => { if (gen === ctl.gen) { fail(e); finish(t0); } });
+        const done = runtime.start(ctl.runParams).then(f0 => (gen !== ctl.gen ? null : runtime.policy === 'rerun' ? stream(gen, f0, want | 0) : (store.pushFrames([f0], { replace: true }), void (ctl.shown = gen))))
+          .then(() => { if (gen === ctl.gen) { ctl.error = null; finish(t0); } }, e => failed(gen, t0, e));
         return done;
       }
       try { ctl.runParams = store.params(); store.pushFrames([runtime.start(ctl.runParams)].concat(runtime.policy === 'rerun' ? runtime.run(horizon) : []), { replace: true }); ctl.shown = ctl.gen; ctl.error = null; }
@@ -141,7 +154,7 @@
         ctl.acc -= 1;
         const next = store.time().t + 1;
         if (next > horizon) { store.setPlaying(false); ctl.acc = 0; break; }
-        if (isAsync && next >= store.length()) { ctl.acc = 0; break; }              // the clock waits for the frame to arrive
+        if (isAsync && next >= store.length()) { ctl.acc = 0; if (!ctl.running) store.setPlaying(false); break; }       // the clock waits for the frame to arrive; when none is coming the timeline is over
         ctl.ensure(next); store.setTime(next);
       }
     };
