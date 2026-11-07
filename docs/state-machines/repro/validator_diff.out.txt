@@ -1,0 +1,13 @@
+{"total": 3000, "py_crash": 37, "js_crash": 0, "verdict_differs": 0, "message_set_differs": 268, "schema_accepts_but_both_reject": 101, "schema_rejects_but_both_accept": 44, "both_accept": 249}
+
+== first schema_accepts_but_both_reject: m5: py=['layout.left[0].groups: no parameter is in group a (groups: A, B)', 'layout.left[0].groups: no parameter is in group a (groups: A, B)']
+   mutated paths: ['layout', 'layout.left', 'layout.left.0', 'layout.left.0.groups']
+
+== first message_set_differs: m11: py=['mappings[0].entity: unknown entity [object Object]', "mappings[0].entity: unknown entity {'a': 1}"] only-in-one
+   mutated paths: ['mappings', 'mappings.0', 'mappings.0.entity', 'mappings.0.entity.a']
+
+== first py_crash: m21: TypeError: sequence item 1: expected str instance, float found
+   mutated paths: ['entities', 'entities.thing', 'entities.thing.fields', 'entities.thing.fields.kind']
+
+== first schema_rejects_but_both_accept: m75: {'value': 'y', 'label': 'Why', '': 1000000000000000} is not valid under any of the given schemas
+   mutated paths: ['params', 'params.mode', 'params.mode.values', 'params.mode.values.1']

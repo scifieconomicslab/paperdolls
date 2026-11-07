@@ -1,0 +1,8 @@
+B01 duplicate scene ids REPRODUCED: entity->scene index = [0,-1,2] warnings=["1 building entities share a scene building with an earlier one (w1): not drawn"] (3 residential buildings in the scene, 3 entities; the entity for the 2nd w1 has pos -1)
+B02 "1" vs 1 REPRODUCED: pos=-1,-1 ok=true warnings=["2 building entities name a building the scene does not have (1, 2): not drawn"]
+B03 entity omitted by bindScene REPRODUCED: ok=true bound=true counts={} pos keys= warnings=0 (packhost.bindRenderer then falls back to the invented placement because bound.pos[en] is undefined)
+B04 no residential building REPRODUCED: empty scene -> ok=false "bindScene: the scene has no residential buildings to bind to"; all other -> ok=false "bindScene: the scene has no residential buildings to bind to" (the page must show this, see sm-runtime)
+B05 dirty neighbours REPRODUCED: attrs.neighbours=[[1,0,1],[0]] (self link and the repeated w2 survive; the unknown id is dropped)
+B06 missing / falsy ids REFUTED: pos=0,1,2,3 keys=["#0","#1",0,"0"] warnings=[]
+B07 count above buildings REPRODUCED: pos=0,1,-1,-1,-1 warnings=["1 building entities name a building the scene does not have (nope): not drawn"] (only the unknown id warns; null/undefined are silent by design)
+B08 bad geometry reaches the model REPRODUCED: attrs.area=[null] (NaN area; the model derives units/hub from it)
