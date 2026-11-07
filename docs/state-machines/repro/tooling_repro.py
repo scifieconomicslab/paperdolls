@@ -430,7 +430,8 @@ def t18_pack_build_not_atomic_and_unprotected_against_a_second_process():
             with contextlib.suppress(OSError):
                 sizes.add(out.stat().st_size)
     t = threading.Thread(target=reader); t.start()
-    out.write_text(big, encoding="utf-8")                                      # exactly the call cmd_pack makes
+    from paperdolls.fsutil import write_atomic
+    write_atomic(out, big)                                                     # exactly the call cmd_pack makes (it was Path.write_text)
     stop.set(); t.join()
     partial = sorted(s for s in sizes if 0 < s < len(big))
     return bool(partial) or 0 in sizes, f"final={len(big)} bytes; sizes seen by a concurrent reader={sorted(sizes)[:6]}"
@@ -530,11 +531,12 @@ def t22_export_out_without_npz_suffix_writes_a_different_file():
     d = tmp()
     spec = d / "render.yaml"
     import yaml
-    spec.write_text(yaml.safe_dump({"name": "t", "model": {"path": str(ROOT / "tests" / "toy_model.py"), "params": {"n": 12, "run_time": 6}}, "replay": {"weeks": [0, 5], "palettes": ["ce"]}}))
+    spec.write_text(yaml.safe_dump({"name": "t", "model": {"path": str(ROOT / "tests" / "toy_model.py"), "params": {"n": 12, "run_time": 6}}, "replay": {"weeks": [0, 5], "palettes": ["ce"], "registers": ["formal"]}}))
     rc, out, err = run_cli("export", str(spec), "--out", str(d / "traj"))
     exists = (d / "traj").exists()
+    printed = Path(out.strip().split("wrote ", 1)[-1])
     rc2, out2, err2 = run_cli("frames", str(spec), str(d / "traj"), "--out", str(d / "f"))
-    return (rc == 0 and not exists and rc2 != 0), f"export exit={rc} printed '{out.strip()}'; file 'traj' exists={exists}; files={sorted(p.name for p in d.iterdir())}; next command exit={rc2}: {tail(err2, 1)[:100]}"
+    return (rc == 0 and (not printed.exists() or rc2 != 0)), f"export exit={rc} printed '{out.strip()}'; file 'traj' exists={exists}; files={sorted(p.name for p in d.iterdir())}; printed path exists={printed.exists()}; next command exit={rc2}: {tail(err2 or out2, 1)[:100]}"
 
 
 # ---------------------------------------------------------------- intake / spec

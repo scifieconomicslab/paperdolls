@@ -20,6 +20,7 @@ from pathlib import Path
 import yaml
 
 from . import model_loader
+from .fsutil import YamlFileError, read_yaml_mapping, write_atomic
 from .render import palettes
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -81,23 +82,29 @@ class Intake:
         self.bank = load_bank()
         self.questions = self.bank["questions"]
         self.by_id = {q["id"]: q for q in self.questions}
-        self.data = yaml.safe_load(self.path.read_text(encoding="utf-8")) if self.path.exists() else None
-        self.data = self.data or {}
+        self.data = self._read()
         self.families = palettes.load_families()
 
     # ---------- file ----------
+    def _read(self):
+        """The file as a mapping. A half-written, empty or non-mapping file is an error that names it: it must never read as 'no answers yet'."""
+        try:
+            return read_yaml_mapping(self.path, allow_missing=True)
+        except YamlFileError as e:
+            raise IntakeError(str(e))
+
     @classmethod
     def init(cls, path, force=False):
         p = Path(path)
         if p.exists() and not force:
             raise IntakeError(f"{p} already exists. Use --force to start over, or continue with 'intake next'.")
-        p.write_text(yaml.safe_dump({"intake": {"version": 1}}, sort_keys=False), encoding="utf-8")
+        write_atomic(p, yaml.safe_dump({"intake": {"version": 1}}, sort_keys=False))
         return cls(p)
 
     def save(self):
         d = {k: v for k, v in self.data.items() if k != "intake"}
         d["intake"] = self.data.get("intake", {"version": 1})
-        self.path.write_text(yaml.safe_dump(d, sort_keys=False, allow_unicode=True, width=100), encoding="utf-8")
+        write_atomic(self.path, yaml.safe_dump(d, sort_keys=False, allow_unicode=True, width=100))
 
     @property
     def meta(self):

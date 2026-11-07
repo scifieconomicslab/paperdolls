@@ -305,3 +305,137 @@ def test_each_validator_rule_added_for_agreement_is_enforced():                 
         cur[parts[-1]] = value
         errors, _ = pack.validate(m)
         assert any(word in e for e in errors), (path, errors)
+
+
+# ================================================================ #10 atomic writes: T14, T18, T22, T24
+
+def test_write_atomic_never_shows_a_reader_a_prefix(tmp_path):                                       # T18
+    from paperdolls.fsutil import write_atomic
+    big, out, sizes, stop = "x" * (12 * 1024 * 1024), tmp_path / "pack.html", set(), threading.Event()
+    write_atomic(out, "old")
+
+    def reader():
+        while not stop.is_set():
+            with contextlib.suppress(OSError):
+                sizes.add(out.stat().st_size)
+    t = threading.Thread(target=reader); t.start()
+    write_atomic(out, big)
+    stop.set(); t.join()
+    assert sizes <= {3, len(big)} and out.read_text() == big
+    assert [p.name for p in tmp_path.iterdir()] == ["pack.html"], "no temp file is left behind"
+
+
+def test_a_failed_write_leaves_the_old_file_and_no_temp_file(tmp_path, monkeypatch):                # T18: a kill or a full disk during the write
+    import os
+    from paperdolls import fsutil
+    out = tmp_path / "pack.html"
+    out.write_text("old")
+
+    def boom(fd):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(os, "fsync", boom)
+    with pytest.raises(OSError):
+        fsutil.write_atomic(out, "new content")
+    assert out.read_text() == "old" and [p.name for p in tmp_path.iterdir()] == ["pack.html"]
+
+
+def test_pack_build_writes_its_output_atomically(tmp_path, monkeypatch):                            # T18
+    from paperdolls import cli
+    seen = []
+    real = cli.write_atomic
+    monkeypatch.setattr(cli, "write_atomic", lambda p, d, *a, **k: seen.append(Path(p).name) or real(p, d, *a, **k))
+    cli.main(["pack", "build", str(ROOT / "packs" / "toy-epidemic"), "--out", str(tmp_path / "pack.html")])
+    assert seen == ["pack.html"] and (tmp_path / "pack.html").stat().st_size > 1000
+
+
+def test_t14_a_failure_on_one_ingest_output_replaces_none_of_them(tmp_path):                         # T14
+    f = tmp_path / "e.json"
+    write_extract(f, [bld(1, square(50.0, 4.0)), ROAD])
+    assert cli("ingest", f, "--out", tmp_path / "scene.json")[0] == 0
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    write_extract(f, [bld(1, square(50.0, 4.0)), bld(2, square(50.01, 4.0)), ROAD])
+    (tmp_path / "scene_report.json").unlink()
+    (tmp_path / "scene_report.json").mkdir()                                                          # any reason the third write fails
+    rc, out, err = cli("ingest", f, "--out", tmp_path / "scene.json")
+    assert rc == 1 and "Traceback" not in err and "scene_report.json" in err
+    assert (tmp_path / "scene.json").read_bytes() == before["scene.json"] and (tmp_path / "scene_report.md").read_bytes() == before["scene_report.md"]
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_t14_place_writes_the_scene_after_its_reports(tmp_path, monkeypatch):                        # T14: the order a reader relies on
+    from paperdolls import place
+    order = []
+    real = place.write_atomic_group
+    monkeypatch.setattr(place, "write_atomic_group", lambda items, *a, **k: order.append([Path(p).name for p, _ in items]) or real(items, *a, **k))
+    spec = place_spec(tmp_path, [50.0, 4.0, 50.01, 4.01])
+    with fake_overpass() as srv:
+        place.run(spec, endpoint=srv.url)
+    assert order == [["scene_report.md", "scene_report.json", "scene.json"]]
+
+
+def test_t22_export_out_without_a_suffix_prints_the_file_it_wrote(tmp_path):                         # T22
+    spec = tmp_path / "render.yaml"
+    spec.write_text(yaml.safe_dump({"name": "t", "model": {"path": str(ROOT / "tests" / "toy_model.py"), "params": {"n": 12, "run_time": 6}},
+                                    "replay": {"weeks": [0, 5], "palettes": ["ce"], "registers": ["formal"]}}), encoding="utf-8")
+    rc, out, err = cli("export", spec, "--out", tmp_path / "traj")
+    assert rc == 0, err
+    written = Path(out.strip().split("wrote ", 1)[1])
+    assert written.name == "traj.npz" and written.exists() and not (tmp_path / "traj").exists()
+    rc, out, err = cli("frames", spec, written, "--out", tmp_path / "f")
+    assert rc == 0 and list((tmp_path / "f").glob("*.png"))
+    assert cli("frames", spec, tmp_path / "traj", "--out", tmp_path / "g")[0] == 0, "the name given without the suffix still finds the file"
+
+
+def test_t22_a_truncated_trajectory_is_a_message(tmp_path):                                           # T22: a kill during the old non-atomic save
+    from paperdolls import cli as climod
+    bad = tmp_path / "t.npz"
+    bad.write_bytes(b"PK\x03\x04 truncated")
+    with pytest.raises(SystemExit) as e:
+        climod.main(["frames", str(ROOT / "assets" / "demo_render.yaml"), str(bad), "--out", str(tmp_path / "f")])
+    assert "not a complete trajectory" in str(e.value) or "cannot continue" in str(e.value)
+
+
+def _intake_file(tmp_path):
+    from paperdolls.intake import Intake
+    p = tmp_path / "render.yaml"
+    Intake.init(p)
+    for q, v in (("goal", "model_replay"), ("name", "alpha")):
+        Intake(p).answer(q, v)
+    return p
+
+
+def test_t24_a_half_written_render_yaml_is_an_error_that_names_the_file(tmp_path):                  # T24 (a)
+    p = _intake_file(tmp_path)
+    p.write_text(p.read_text() + "replay: {weeks: [0, 26,")
+    damaged = p.read_text()
+    for cmd in (("next", p), ("status", p), ("show", p), ("answer", p, "name", "beta")):
+        rc, out, err = cli("intake", *cmd)
+        assert rc == 3 and "Traceback" not in err and str(p) in err and "not valid YAML" in err, (cmd, err)
+    assert p.read_text() == damaged, "a damaged file is never overwritten"
+
+
+def test_t24_a_file_cut_to_zero_bytes_is_not_a_new_interview(tmp_path):                              # T24 (b)
+    p = _intake_file(tmp_path)
+    p.write_text("")
+    rc, out, err = cli("intake", "next", p, "--json")
+    assert rc == 3 and "is empty" in err and str(p) in err and out.strip() == ""
+    assert p.read_text() == ""
+    rc, out, err = cli("intake", "init", p)
+    assert rc == 3 and "already exists" in err, "init does not silently replace it either"
+
+
+def test_t24_a_yaml_list_is_an_error_too(tmp_path):                                                    # T24 (SUSPECTED in the part file; now covered)
+    p = _intake_file(tmp_path)
+    p.write_text("- a\n- b\n")
+    rc, out, err = cli("intake", "next", p)
+    assert rc == 3 and "must hold a mapping" in err
+
+
+def test_t24_the_confirmation_gate_names_a_damaged_file_as_well(tmp_path):                            # T24: require_confirmed reads the file itself
+    from paperdolls import spec
+    p = tmp_path / "render.yaml"
+    p.write_text("name: [unclosed")
+    with pytest.raises(spec.SpecError, match="not valid YAML"):
+        spec.require_confirmed(p)
+    rc, out, err = cli("place", p)
+    assert rc == 1 and "Traceback" not in err and "not valid YAML" in err

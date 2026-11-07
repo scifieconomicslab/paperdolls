@@ -5,9 +5,15 @@ separate investor-ownership flag (0 or 1). Keeping them apart means an investor-
 building still shows its retrofit state.
 Codes: 0 to_do, 1 queued, 2 in_progress, 3 finished.
 """
+import io
 import json
+import zipfile
+from pathlib import Path
+
 import numpy as np
+
 from . import model_loader
+from .fsutil import write_atomic
 
 CODE = {"to_do": 0, "queued": 1, "in_progress": 2, "finished": 3}
 
@@ -30,7 +36,15 @@ def _classify(building, households):
     investor = 1 if (owner is not None and getattr(owner, "is_investor", False)) else 0
     return CODE.get(building.state, 0), investor
 
+def npz_path(out_path):
+    """The file numpy really writes: it appends .npz when the name does not end in it."""
+    p = Path(out_path)
+    return p if p.suffix == ".npz" else p.with_name(p.name + ".npz")
+
+
 def run_and_export(params_dict, out_path, model_path=None, variables=()):
+    """Run the model and write the trajectory. Returns the path written (always ending in .npz); the file appears whole or not at all."""
+    out_path = npz_path(out_path)
     mod = model_loader.load(model_path)
     try:
         params = mod.Params(**params_dict)
@@ -59,8 +73,9 @@ def run_and_export(params_dict, out_path, model_path=None, variables=()):
             aggregates[s] = np.asarray(val)
     meta = dict(params=params_dict, model_sha256=model_loader.file_sha256(model_path),
                 weeks_recorded=len(weeks_ids), total_weeks=int(result.total_weeks))
+    buf = io.BytesIO()
     np.savez_compressed(
-        out_path,
+        buf,
         ids=np.concatenate(weeks_ids) if weeks_ids else np.array([], np.int32),
         codes=np.concatenate(weeks_codes) if weeks_codes else np.array([], np.int8),
         investor=np.concatenate(weeks_inv) if weeks_inv else np.array([], np.int8),
@@ -69,10 +84,17 @@ def run_and_export(params_dict, out_path, model_path=None, variables=()):
         **{f"agg_{k}": v for k, v in aggregates.items()},
         **{f"var_{v}": (np.concatenate(a) if a else np.array([], np.float32)) for v, a in var_weeks.items()},
     )
+    write_atomic(out_path, buf.getvalue())
     return out_path
 
 def load(path):
-    z = np.load(path, allow_pickle=False)
+    path = Path(path)
+    if not path.exists() and npz_path(path).exists():          # a name given without the suffix that numpy adds
+        path = npz_path(path)
+    try:
+        z = np.load(path, allow_pickle=False)
+    except (zipfile.BadZipFile, EOFError) as e:
+        raise ValueError(f"{path} is not a complete trajectory file ({e}). Run 'paperdolls export' again")
     meta = json.loads(str(z["meta"]))
     offsets = z["offsets"]
     ids, codes, inv = z["ids"], z["codes"], z["investor"]
