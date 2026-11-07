@@ -1,0 +1,6 @@
+plain                                                      idle frame median 6.80 ms  (min 6.28, max 8.14)
+terrain (relief) only                                      idle frame median 9.32 ms  (min 7.88, max 10.43)
++ ground marks, 200 m cells (204 cells)                    idle frame median 44.79 ms  (min 43.38, max 51.39)
++ ground marks, 100 m cells (704 cells)                    idle frame median 54.62 ms  (min 53.94, max 62.33)
++ ground tint, 40 m cells (4480 cells), opacity .5         idle frame median 9.71 ms  (min 9.28, max 10.39)
+ratio to plain: marks(200 m) x6.6, marks(100 m) x8.0, tint x1.4

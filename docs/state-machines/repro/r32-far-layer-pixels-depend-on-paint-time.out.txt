@@ -1,0 +1,3 @@
+DPR 1, 0.47 px/m: cold start vs exact-from-frame-0 -> 0 of 2160000 bytes differ, largest channel difference 0  (frames to whole: 23 / 46)
+DPR 2, 0.47 px/m: cold start vs exact-from-frame-0 -> 0 of 8640000 bytes differ, largest channel difference 0  (frames to whole: 23 / 46)
+DPR 2, 0.8 px/m: cold start vs exact-from-frame-0 -> 682263 of 8640000 bytes differ, largest channel difference 193  (frames to whole: 23 / 46)

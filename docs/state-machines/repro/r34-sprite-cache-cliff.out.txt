@@ -1,0 +1,3 @@
+settled (150 still frames): 406 sprites, 79.5 Mpx of 90 Mpx cap; clear-all line at 72 Mpx
+pan of 400 frames: cache dropped by more than 20 sprites at 1 frame(s); first at frame 175, largest drop 471 sprites; pixels now 69.3 Mpx
+after a clear-all, frames until the still view is sharp and builds nothing: 4 (builds per frame at 60 max: 116,60,2,0,0,...)

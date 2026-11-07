@@ -1,0 +1,3 @@
+I6 ordinary wheel burst: pendingZoom=0 scale finite=true
+300 runs, 32831 frames checked, 0 invariant violations
+I6 synthetic wheel deltaY=1e6 (smoothZoom): pendingZoom=0, camera scale=0.7901532076412859 -> finite
