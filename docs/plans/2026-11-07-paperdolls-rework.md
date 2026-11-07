@@ -12,9 +12,9 @@ Recommendations:
 
 1. **Replace the world renderer with a WebGL renderer behind a `WorldRenderer` interface, and choose between PixiJS v8 and three.js with a two-week bake-off on Jette.** The default leaning is **PixiJS v8** (paperdolls#1). The asset library already paints every (asset, heading, colour set) to a canvas, so those canvases can become atlas textures and the current look carries over. three.js is the alternative if free rotation, footprints at any angle, or the frame-rate targets need it. Keep the current Canvas 2D engine as the legacy renderer until the new one reaches parity on Jette.
 2. **Version the contract as Model Protocol v2.** It adds entity *kinds* (anchored, mobile, aggregate), binary struct-of-arrays frames, interventions, a full parameter schema, and a `describe()` call so the UI can be generated from the model.
-3. **Python stays the economists' language.** Runtimes come in three tiers: a local CPython server (no port needed, for development), a parity-checked JS port (for fast, offline, shipped pages), and Pyodide (small models only).
-4. **Ingestion becomes `paperdolls adopt`.** It reads a model's code, drafts the manifest and adapter, asks the economist only what code cannot answer, records the answers, and gates on the same contract checks that `pack check` runs today.
-5. **Worlds become providers plus asset kits**: OSM (today's ingest), procedural (fantasy and sci-fi maps), grid or tile, and abstract graphs (trade networks with no geography). A kit maps archetypes to part lists, which are baked to sprite atlases (Pixi) or built as meshes (three.js), so a medieval kingdom is a new kit, not a new renderer.
+3. **NetLogo stays the economists' language, and runs in the page as written.** NetLogo Web's compiler (Tortoise) turns a NetLogo 7 model into JavaScript, which paperdolls runs in its worker. The model's Interface widgets become the parameter schema, breeds become entity kinds, and plots become series. New models need no Python or JS rewrite, and no new language either (D7). `paperdolls serve` (Python, or headless desktop NetLogo) and hand-made JS ports stay for models that already exist in those forms (the Great Retrofit v3) or that outgrow NetLogo Web's speed.
+4. **Ingestion becomes `paperdolls adopt`.** For a NetLogo model it is mostly mechanical: it reads the `.nlogox` file (widgets, breeds, `-own` variables, plots, monitors), asks the economist only about meaning (what to draw and how, which world, which asset pack), records the answers, and gates on desktop-versus-web parity plus the contract checks that `pack check` runs today.
+5. **Worlds become providers, and every model ships its own asset pack**: OSM (today's ingest), procedural (fantasy and sci-fi maps), grid or tile, and abstract graphs (trade networks with no geography). An asset pack is made by one standard, gated image-model process ([asset-pipeline.md](2026-11-07-asset-pipeline.md)), in the style of Pixel Singapore. A medieval kingdom is a new asset pack, not a new renderer.
 6. **A Surfaces pane** (paperdolls#2) lets the economists decide what the main UI exposes. It saves `surfaces.json` and checks that each choice is safe to expose before saving.
 
 Difficulty in one line: making either WebGL renderer *fast* is easy. Keeping the colorfigures look is easy-to-moderate with Pixi and serious with three.js. Making arbitrary economist code adoptable with an LLM in the loop is the hardest problem in this document, and it is a process problem as much as a code problem.
@@ -130,19 +130,33 @@ interface WorldRenderer {
 
 The manifest, store, worker and `checkRuntime` stay. v2 is **additive**: a `spec: 1` pack keeps working through an adapter. Section 3 has the details.
 
-### D3. Python is the source of truth. Runtimes come in tiers
+### D3. NetLogo is the source of truth. Runtimes come in tiers
+
+The economists write NetLogo. Rewriting it in Python and then porting that to JS (the Great Retrofit's path) is two rewrites per model change. NetLogo Web already compiles NetLogo to JavaScript, so the default is to run the economists' own file:
 
 | Runtime | Use | Cost |
 |---|---|---|
-| `python` (local CPython over WebSocket, `paperdolls serve`) | **Development and research.** The economist's code runs unmodified behind a generated adapter, and frames stream as they come, so the timeline fills while the model runs. | Not offline, and as slow as the model (28.6 s for v3 on Jette; with streaming, the first months show in under a second). |
-| `js` (port) | **Shipped and policy pages**: offline, single-file, slider reruns in about 2 s. | A port, parity-checked against the Python reference (as now), with the LLM producing the port and the harness gating it. |
-| `pyodide` | Small models (≈1k agents or vectorised numpy) that should ship offline without a port. | Load time (≈10 MB) and speed. |
+| `netlogo` (Tortoise in the worker) | **The default for every NetLogo model**: offline, single-file, no rewrite. | Speed at 10,000 turtles is unmeasured (Phase 0). Extension coverage and file I/O are limited (below). |
+| `netlogo-desktop` (headless desktop NetLogo behind `paperdolls serve`) | Models that need an extension NetLogo Web lacks, desktop JVM speed, or BehaviorSpace sweeps. Also the reference for parity. | Not offline; needs Java on the machine. |
+| `python` (`paperdolls serve`) | Python models, including the Great Retrofit v3 as it is today. | As slow as the model (28.6 s for v3 on Jette; streaming shows the first months in under a second). |
+| `js` (port) | Only when a model is too slow in Tortoise at its target agent count, and the v3 pack as it is now. | A port, parity-checked against its reference. |
+| `pyodide` | Small Python models that should ship offline. | Load time (≈10 MB) and speed. |
 
-All three speak the same protocol (section 3.1), so the page does not know which one it is talking to. That is the same property `PackWorker` has today across worker and inline modes.
+All of them speak the same protocol (section 3.1), so the page does not know which one it is talking to. That is the same property `PackWorker` has today across worker and inline modes.
+
+What NetLogo Web gives today, from its release notes ([What's new in NetLogo Web](https://netlogoweb.org/whats-new)) and the Tortoise wiki:
+
+- It reads the **NetLogo 7 file format** (v2.12.0, September 2025).
+- It has used a **direct port of desktop NetLogo's random number generator** since v2.10.8 (2023), so a seed passed to `random-seed` gives the same run as desktop. Desktop and web must be on the same NetLogo version: NetLogo says scheduling and RNG details can change between versions.
+- **Extensions:** array, matrix, table, csv, fp, string, bitmap, palette, encode, resource, and since v2.16.0 (July 2026) **nw, gis and rnd**. In gis, nw and rnd, loading and saving files are replaced by string-based primitives. `wait` does nothing. Whatever is not in this list (ls, py, r, sql, ...) needs the `netlogo-desktop` runtime.
+- **Headless:** the compiler and engine run under Node (the NetLogo team tests that way). There was no documented, stable API as of 2023, so paperdolls pins a Tortoise version and wraps it behind its own adapter.
+- **Unknown until measured:** how fast Tortoise runs 10,000 turtles, and the cost of reading their variables out every tick. Both are Phase 0 measurements.
 
 ### D4. Worlds are providers. Looks are kits
 
 A **world** is terrain + features + networks + regions, the generalisation of today's scene JSON. A **kit** maps archetype names to part-list generators, materials and palettes; the renderer turns part lists into atlas frames (Pixi) or meshes (three.js). Today's 12 regions × 3 looks become the `earth` kit. Medieval and sci-fi are new kits written against the same primitive library (`box`, `prism`, `lathe`, `extrudeFootprint`, `roof(type)`, `facade(grammar)`). Section 5.
+
+**Asset packs are per model.** A pack names its asset pack in `pack.yaml` (`assets: {pack: ./assets}` or `assets: {pack: medieval-kingdom, version: 1.2.0}`), and the engine loads only that pack. A model with no asset pack yet runs on the engine's plain kit (flat extrusions and dots), so the economics can be checked before any art exists. Every asset pack is made by the same workflow ([asset-pipeline.md](2026-11-07-asset-pipeline.md)): part lists, an art bible a human approves, control renders, image-model generation, deterministic post-processing, automatic gates, a contact sheet a human reviews, and `paperdolls assets build` and `check`. The asset-pack format (frame anchors, headings, role ramps, overlay attach points, atlas layout) is fixed after the Phase 0 graphics work, not before.
 
 ### D5. TypeScript, Vite, and a small component framework for the shell
 
@@ -155,6 +169,12 @@ The contracts are the product, and generated packs are written by LLMs, so typed
 ### D6. Ingestion is a pipeline with gates, not an interview
 
 `paperdolls adopt <model>` runs static extraction, then drafts files, then asks only what code cannot answer, then generates code, then runs gates. Every answer goes into a ledger (`adopt.yaml`) that a person can review. An LLM drives the drafting and porting. The gates (schema, determinism, parity, render smoke test) decide what passes. Section 6.
+
+### D7. No new language
+
+A custom scripting language for the engine was considered and is rejected. The economists already write NetLogo, and LLM agents have read decades of NetLogo models and the NetLogo dictionary. A new language would have no training data, no editor support and no users, which is the opposite of "LLM agent-friendly". The engine-specific vocabulary is small enough to be a **NetLogo include file** (section 6.0), which works the same in desktop NetLogo and in the page.
+
+For a model that outgrows NetLogo Web's speed, the port target is a **NetLogo-shaped TypeScript library** (`breeds`, `ask`, `with`, `patches`, `neighbors`, `tick`, `random-*` on the NetLogo RNG), so an LLM can port NetLogo to it nearly line by line and the parity gate can compare it with desktop NetLogo tick by tick. It is a library, not a language: TypeScript that every agent already knows.
 
 ---
 
@@ -284,6 +304,45 @@ Both are deterministic and seeded, so they stay inside the model's determinism c
 
 The aim: an economist hands over a model folder, and a reviewable pack comes out. The economist answers questions about meaning, never about plumbing.
 
+### 6.0 NetLogo models (the default path)
+
+A NetLogo model already declares most of what the engine needs, so `adopt` reads it instead of asking:
+
+| In the `.nlogox` file | Becomes |
+|---|---|
+| Slider (min, max, increment, value), switch, chooser, input box | A parameter with its type, range, step and default. Sliders whose bounds are reporters are evaluated at setup. |
+| `setup` and `go` | `init` and `step`; one tick is one step. A `go` forever button with a stop condition gives the horizon. |
+| `breed [households household]` and `households-own [...]` | An entity kind and its fields. Whether it is `anchored`, `mobile` or `unplaced` is asked once. |
+| Patches and `patches-own` | A `grid` world and its fields (ground tint, terrain type). |
+| Links and link breeds | The `link` kind. |
+| Plots and pens | Series, one value per pen per tick. |
+| Monitors | KPI tiles. |
+| Info tab | The pack's description. The human edits the banner. |
+| The NetLogo 2D view | Ignored. paperdolls draws the world. |
+
+**The world comes in through an include file.** `paperdolls world export --netlogo` writes `paperdolls-world.nls`. It declares breeds for the world's features (`pd-buildings`, `pd-roads`, ...), with `-own` variables for what the world knows (scene id, area, storeys and whether they were assumed, residential class, height, neighbours as links), a `pd-patch-m` constant (metres per patch), and a `pd-setup-world` procedure that sizes the world and creates them. The economist adds `__includes ["paperdolls-world.nls"]`, calls `pd-setup-world` from `setup`, and gets the real Jette buildings **in desktop NetLogo too**, so they develop against the same world the page shows. The build inlines the include before compiling with Tortoise, so it works whether or not NetLogo Web supports `__includes` (to check). Binding is then free: each `pd-building` carries its scene id.
+
+**Conventions** (checked by `paperdolls lint model.nlogox`, listed in `docs/model-author-guide.md`):
+
+1. Parameters are Interface widgets, not globals set in code.
+2. `setup` makes the start state, and `go` advances one tick.
+3. Randomness only through NetLogo's own RNG. The host calls `random-seed`, and the model never does.
+4. No file I/O, `user-*` dialogs, `wait` or `display`-dependent logic. World data comes from the include.
+5. Only the extensions NetLogo Web supports, unless the pack declares `runtime: netlogo-desktop`.
+
+**Interventions are NetLogo commands.** The manifest declares templates (`pilot: "ask pd-building {id} [ set pilot? true ]"`), the scenario list records them with a tick, and the runtime compiles and runs them at that tick (Tortoise compiles commands at runtime, as its Command Center does). They stay data, so rerun, A/B and undo keep working (3.4).
+
+**The live loop:** `paperdolls dev model.nlogox --world jette` watches the file. The economist saves in desktop NetLogo, and within seconds the page recompiles with Tortoise, reruns, and shows it on the isometric map.
+
+**The parity gate:** run desktop NetLogo headless (BehaviorSpace, or `pynetlogo`) and Tortoise under Node on N seeds × M presets, and compare every plot pen and every drawn variable tick by tick. With the shared RNG the expectation is an **exact** match. NetLogo states that some desktop primitives cannot be duplicated exactly on the web, so any divergence is reported with the first tick and variable where it appears, and a human accepts it or the model avoids that primitive.
+
+**What is left to ask** is meaning only: which breeds to draw and as what (a kit archetype), how each variable looks (colour, overlay), which parameters the front panel shows (the Surfaces pane), which world, which asset pack, and which values are data rather than placeholders.
+
+### 6.1 Python and other models
+
+The stages below are the path for models written in Python (the Great Retrofit v3) or other languages. For NetLogo models, stage 1 is the table above and stage 3 is the include file plus Tortoise.
+
+
 ### Stages
 
 1. **Extract (static, no LLM needed for the common case).** Parse Python with `ast`: a `Params` dataclass gives names, types, defaults and the comment after each field (v3's `# PLACEHOLDER ...` comments become `help` and `placeholder: true`). Tuples become `array`, `Optional` becomes `nullable`, nested dataclasses become `object`. Also find the step function, the frame or output shape (TypedDicts like `frames.py`), the RNG use (flag `random.`/`numpy.random` without a seed), and the entities (dataclasses with per-agent state). Write a draft `describe()` and an `adopt.yaml` ledger. An LLM fills the gaps when the code is less tidy than v3.
@@ -363,10 +422,11 @@ Estimates are for one experienced developer with LLM help, working against the t
 
 | Item | Why |
 |---|---|
-| **Matching the colorfigures and formal looks in WebGL** (serious with three.js; with Pixi it drops to difficult, because the atlases are today's sprites, and the open part is footprints at any angle) | The current look is the result of months of tuning (banded tones, ink silhouettes, grain, bevels, fog, posterize). In 3D it means a custom flat-band shader, an outline post-pass that does not shimmer while zooming, and facade detail that stays legible at 0.12 px/m and at 6 px/m. This is the most likely place for v2 to look *worse* than v1 for a long time. Budget for an art-direction loop with screenshots against the current renderer. |
-| **LLM-driven adoption of arbitrary economist code** | v3 is a best case: stdlib-only, a dataclass of params, seeded hash RNG, TypedDict frames, already designed for a port. Notebooks with globals, numpy RNG, Mesa models and R models will not extract cleanly. JS ports of numerical code drift in floating point (summation order, `round` semantics: v3 needed `pyRound` and `pySum`). The pipeline is only as trustworthy as its gates, so the parity and fuzz harness must be generic and strict. Expect each new model to surface a new class of problem for the first several models. |
-| **The Python speed gap** | 16× on v3 means the shipped, slider-driven experience needs a port, or a vectorised model, or a server. There is no free option. Choose per model, and say in the UI when a rerun will take 30 s. |
-| **Kits for non-earth worlds, and the procedural world provider** | Each kit is a small art project (archetypes, palettes, agent models) and needs a person's taste to sign off. Procedural maps that look intentional (rivers that flow downhill, settlements on sensible sites) are a known-hard generative problem. |
+| **The look: Pixel Singapore-style image-model art** ([asset-pipeline.md](2026-11-07-asset-pipeline.md)), replacing a hand match of colorfigures | The pipeline is new: control renders, generation, post-processing, nine gates, contact sheets. Its thresholds are guesses until Phase 0. The image model may drift between headings or invent detail (Pixel Singapore's model painted tree crowns over clear streets), and states must come from palette swaps of a data ramp, not from regenerating. With Pixi, painted sprites go straight into atlases. With three.js they would have to become textures on meshes, which loses most of the benefit, so this weighs strongly toward Pixi. Hand-matching the old colorfigures look in three.js would stay serious (custom shaders, outlines that do not shimmer, facade detail legible from 0.12 to 6 px/m). |
+| **LLM-driven adoption of non-NetLogo code** (for NetLogo models adoption drops to *difficult*: it is mostly reading the `.nlogox` file) | v3 is a best case: stdlib-only, a dataclass of params, seeded hash RNG, TypedDict frames, already designed for a port. Notebooks with globals, numpy RNG, Mesa models and R models will not extract cleanly. JS ports of numerical code drift in floating point (summation order, `round` semantics: v3 needed `pyRound` and `pySum`). The pipeline is only as trustworthy as its gates, so the parity and fuzz harness must be generic and strict. Expect each new model to surface a new class of problem for the first several models. |
+| **NetLogo Web at 10,000 agents** | Unmeasured. Tortoise is an interpreter-like JS engine over NetLogo's agent model, and reading thousands of turtle variables per tick may cost more than the model step. If it is too slow, a model either moves to `netlogo-desktop` (not offline) or gets a port to the NetLogo-shaped TS library, which brings back the porting problem for that model. |
+| **The Python speed gap** (now only for Python models such as v3) | 16× on v3 means the shipped, slider-driven experience needs a port, or a vectorised model, or a server. There is no free option. Choose per model, and say in the UI when a rerun will take 30 s. |
+| **Asset packs for non-earth worlds, and the procedural world provider** (the image-model process in [asset-pipeline.md](2026-11-07-asset-pipeline.md) makes the art mostly unattended, but consistency across a pack, the gates' thresholds and the model's output licence are real risks) | Each kit is a small art project (archetypes, palettes, agent models) and needs a person's taste to sign off. Procedural maps that look intentional (rivers that flow downhill, settlements on sensible sites) are a known-hard generative problem. |
 | **Parity between the old and new renderer on Jette before switching** | The current renderer is verified (screenshots, GPU frame rates, desktop and tablet widths). The new one has to meet the same checks before the old one can go. |
 
 ---
@@ -377,13 +437,14 @@ Each phase ends with a demo and its gate.
 
 | Phase | Scope | Exit criterion |
 |---|---|---|
-| **0. Bake-off (2 weeks)** | The `WorldRenderer` interface, then two Jette pages on the same store and v3 JS runtime: **Pixi v8** (current `AssetLib` sprites in atlases, `ParticleContainer` agents, radix depth sort, one trial of normal-based tones on an off-axis footprint) and **three.js** (extruded footprints, per-instance colour, flat-band shader with outlines). Both get 10k synthetic mobile agents | 60 fps at fit and street zoom on the RTX machine and on an integrated-GPU laptop; both pages scored on the D1 criteria, with screenshots next to the current renderer, and one library chosen |
+| **0a. NetLogo and art probes (in the same 2 weeks)** | Compile one of the economists' NetLogo models (or a library model scaled to 10,000 turtles) with Tortoise under Node and time 100 ticks, plus the cost of reading turtle variables into typed arrays each tick. Probe the image API and make one archetype through asset-pipeline.md steps 1 to 6 in both renderers. | Tortoise time per tick and read-out cost recorded at 10,000 turtles; `art/capabilities.yaml` written; one archetype through gates G0 to G8 in both renderers |
+| **0b. Renderer bake-off (2 weeks)** | The `WorldRenderer` interface, then two Jette pages on the same store and v3 JS runtime: **Pixi v8** (current `AssetLib` sprites in atlases, `ParticleContainer` agents, radix depth sort, one trial of normal-based tones on an off-axis footprint) and **three.js** (extruded footprints, per-instance colour, flat-band shader with outlines). Both get 10k synthetic mobile agents | 60 fps at fit and street zoom on the RTX machine and on an integrated-GPU laptop; both pages scored on the D1 criteria, with screenshots next to the current renderer, and one library chosen |
 | **1. Protocol v2 + params** | TS types; `describe()`; new param types and tiers; v1 pack adapter; transferables; bitECS page state; generated Control UI; Surfaces pane and `surfaces.json` checks | The GR pack shows all 45 params; the toy pack is unchanged; validator parity across both languages |
 | **2. Renderer v2 core** | Kit API, `earth` kit port, picking, inspector, legend from mappings, layer panel, terrain | Jette pack at parity with the current verification suite (screenshots, interaction, desktop and tablet widths, GPU frame rates) |
-| **3. Runtimes** | `paperdolls serve`; keyframe storage; Pyodide for small models | v3 runs from unmodified Python in the page; streaming starts in under 1 s; scrubbing a 1,000-step run stays under a memory cap |
+| **3. Runtimes** | `netlogo` (Tortoise in the worker, pinned version), `paperdolls dev model.nlogox` live loop, the world include file; `paperdolls serve` for Python and headless desktop NetLogo; keyframe storage; Pyodide for small models | A NetLogo model runs unmodified in the page and in desktop NetLogo on the same Jette world, with an exact parity match on 10 seeds; v3 runs from unmodified Python; scrubbing a 1,000-step run stays under a memory cap |
 | **4. Agents + interventions** | `mobile`, `link`, `events`, the scenario list | A 10k-agent toy market (shoppers and shops on Jette roads) at 60 fps with smooth interpolation; GR "pilot here" intervention in A/B |
-| **5. adopt** | Extraction, question bank, ledger, port generation, gates | Re-adopt v3 from scratch and reproduce today's pack, then adopt one model the pipeline has not seen (an economist's notebook) |
-| **6. Worlds + kits** | `grid`/`hex`, `graph`, `procedural`; `medieval` and `scifi` kits | The medieval and sci-fi stress tests (section 8) run as packs |
+| **5. adopt** | `.nlogox` reader and `paperdolls lint` first, then Python extraction; question bank, ledger, port generation (NetLogo-shaped TS library) only when needed, gates | Adopt one of the economists' own NetLogo models with no code changes beyond the include line, then re-adopt v3 from Python and reproduce today's pack |
+| **6. Worlds + asset packs** | Fix the asset-pack format from the Phase 0 results; the asset pipeline tools (`paperdolls art probe/control/generate/post/qa/sheet`, `assets build/check`); `grid`/`hex`, `graph`, `procedural` worlds; an `earth` pack for Jette, then `medieval` and `scifi` packs | One asset pack made end to end by an agent following asset-pipeline.md with only the HUMAN steps done by people; the medieval and sci-fi stress tests (section 8) run with their own packs |
 | **7. Retire v1 renderer** | Remove `vizlib`'s draw path, layer caches and far layer (with Pixi, `AssetLib`'s part lists and sprite painting stay as the atlas source); keep the Python ingest | All packs and verification scripts on v2 |
 
 Phase 0 is the decision point. Pixi is the default if it meets the look and frame-time criteria; three.js wins only if footprints at any angle or free rotation turn out to matter more than keeping today's art. The protocol, UI, runtime and adoption work (phases 1, 3, 4 and 5) do not depend on the renderer and can go ahead either way.
@@ -391,9 +452,10 @@ Phase 0 is the decision point. Pixi is the default if it meets the look and fram
 ## 11. Open questions for you
 
 1. **How important are free rotation and footprints at any angle, against keeping the current hand-inked look?** This is the main weight in the bake-off.
-2. **Offline single-file pages: required for every model, or only for shipped policy pages?** That decides how hard to push on JS ports and Pyodide versus `paperdolls serve`.
+2. **Offline single-file pages: required for every model, or only for shipped policy pages?** That decides how hard to push on Tortoise speed and JS ports versus `paperdolls serve`.
 3. **Who signs off a port?** Gates catch drift; someone still has to accept a tolerance. The economist, or the lab?
-4. **Are R, Julia or NetLogo models in scope?** If so, the protocol should use Arrow IPC from the start, and `serve` becomes language-neutral.
+4. **Which NetLogo extensions do the economists' models use, and which NetLogo version?** Anything outside NetLogo Web's list (D3) forces the `netlogo-desktop` runtime, and desktop and web must be on the same NetLogo version for parity. A list of their current models would settle it.
+6. **Which image model and API, and are its output terms acceptable for public release?** The asset pipeline's capability probe decides what is possible (product B needs masked inpainting), and the licence is checked before any pack ships.
 5. **Is the paperdolls Claude plugin (skills, commands) still the main way in?** If yes, `adopt` should be a skill plus CLI, with the question bank in YAML as now.
 
 ## 12. Where the open issues went
@@ -403,4 +465,12 @@ Phase 0 is the decision point. Pixi is the default if it meets the look and fram
 | paperdolls#1: PixiJS v8 for rendering, with bitECS for the simulation state | D1 (Pixi v8 as the default leaning, settled by the Phase 0 bake-off: `ParticleContainer`, atlases, radix depth sort, `Culler`, tilemap terrain, LOD, cheap finishing; Phaser 3 and raw WebGL rejected for the reasons given there), D5 (bitECS for page state; threads, transferables, and why `SharedArrayBuffer` is optional, given COOP/COEP and offline pages), section 5 (spatial hash and flow fields) |
 | paperdolls#2: Surfaces pane | Section 3.6, with the validity checks spelled out; Phase 1 |
 | paperdolls#16: phone layout | Not carried over. Phones are a non-goal (D0) |
+
+### Assumptions added on review (2026-11-07)
+
+| Assumption | Where it landed |
+|---|---|
+| Asset packs load per model, against a spec fixed after the graphics work, with a standard workflow | D4 (per-model packs, the plain-kit fallback), Phase 6 (format fixed from Phase 0), [asset-pipeline.md](2026-11-07-asset-pipeline.md) (the workflow) |
+| The economists write NetLogo. The Python and JS versions are rewrites | Summary item 3, D3 (NetLogo Web as the default runtime), D7 (no new language; a NetLogo-shaped TS library for ports), section 6.0 (NetLogo adoption, the world include file, the live loop, the parity gate), Phases 0, 3 and 5 |
+| The target art is Pixel Singapore-style image-model pixel art, made by a strict process an LLM agent can follow given an image API | [asset-pipeline.md](2026-11-07-asset-pipeline.md): products A (sprite kits) and B (painted base maps), gates, HUMAN checkpoints, provenance; section 9 (why this favours Pixi) |
 
