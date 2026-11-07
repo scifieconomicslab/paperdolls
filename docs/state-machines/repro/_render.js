@@ -8,8 +8,15 @@
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const ROOT = path.resolve(__dirname, '..', '..', '..'), VIZ = path.join(ROOT, 'viz');
 let createCanvas;
-try { createCanvas = require(process.env.NODE_CANVAS || path.join(process.env.PAPERDOLLS_NODE_MODULES || 'node_modules', 'canvas')).createCanvas; }
-catch (e) { console.log('SKIP (node-canvas not found; set PAPERDOLLS_NODE_MODULES)'); process.exit(0); }
+// Resolution order: NODE_CANVAS, PAPERDOLLS_NODE_MODULES/canvas, <repo>/node_modules/canvas, then a bare require('canvas') (NODE_PATH, the normal lookup:
+// this is what CI uses after `npm ci`). A relative-looking path such as 'node_modules/canvas' is NOT resolved against the working directory by require().
+function loadCanvas() {
+  const tries = [process.env.NODE_CANVAS, process.env.PAPERDOLLS_NODE_MODULES && path.join(process.env.PAPERDOLLS_NODE_MODULES, 'canvas'), path.join(ROOT, 'node_modules', 'canvas'), 'canvas'].filter(Boolean);
+  let last; for (const t of tries) { try { return require(t); } catch (e) { last = e; } }
+  throw last;
+}
+try { createCanvas = loadCanvas().createCanvas; }
+catch (e) { console.log('SKIP (node-canvas not found; run npm ci, or set PAPERDOLLS_NODE_MODULES / NODE_CANVAS)'); process.exit(0); }
 
 const clock = { t: 0, step: 0.25, calls: 0, set(s) { this.step = s; }, now() { this.calls++; this.t += this.step; return this.t; } };
 const g = { console, Math, Object, Map, WeakMap, Array, Infinity, JSON, Set, Date, Number, String, Promise, Int8Array, Int16Array, Int32Array, Float32Array, Float64Array, Uint8Array, Uint32Array, ArrayBuffer, isFinite, isNaN, parseInt, parseFloat, Error, TypeError, performance: { now: () => clock.now() }, setTimeout, clearTimeout };

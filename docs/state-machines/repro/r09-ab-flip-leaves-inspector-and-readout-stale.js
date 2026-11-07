@@ -2,7 +2,7 @@
  * (params, time, frames) listen to none of those, so after a flip they keep showing the run that was on screen BEFORE the flip until time moves.
  * Needs jsdom: PAPERDOLLS_NODE_MODULES=<node_modules dir>. Run: node docs/state-machines/repro/r09-ab-flip-leaves-inspector-and-readout-stale.js */
 const path = require('path'); let JSDOM;
-try { ({ JSDOM } = require(path.join(process.env.PAPERDOLLS_NODE_MODULES || 'node_modules', 'jsdom'))); } catch (e) { console.log('SKIP (jsdom not found; set PAPERDOLLS_NODE_MODULES)'); process.exit(0); }
+try { ({ JSDOM } = (() => { try { return require('jsdom'); } catch (e) { return require(path.join(process.env.PAPERDOLLS_NODE_MODULES || path.resolve(__dirname, '..', '..', '..', 'node_modules'), 'jsdom')); } })()); } catch (e) { console.log('SKIP (jsdom not found; set PAPERDOLLS_NODE_MODULES)'); process.exit(0); }
 const H = require('./_harness'), { G } = H;
 (async () => {
   const env = H.makeEnv({ chunk: 40 }); env.manifest.layout = { left: [{ control: 'params' }], right: [{ control: 'legend' }], bottom: [{ control: 'timeline' }, { control: 'compare' }] };
