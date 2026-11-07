@@ -14,7 +14,7 @@ const W = 900, H = 600;
   const sc = V.makePlaceholderScene(7); sc.terrain = { x0: -100, y0: -100, dx: 100, dy: 100, nx: 12, ny: 8, z: Array.from({ length: 96 }, (_, i) => (i % 12) * 4) };
   sc.buildings.push({ id: 'collinear', footprint: [[300, 300], [310, 300], [320, 300]], levels: 3, archetype: 'terrace', state: 'none', investor: false });
   const chk = V.validateScene(sc), sim = V.createSim(sc, { seed: 1, theme: R.theme(), region: 'nw' }), d = sim.buildings[sim.buildings.length - 1];
-  console.log('a  validateScene ok=' + chk.ok + '; fit=' + JSON.stringify({ ok: d.fit.ok, reason: d.fit.reason, cx: d.fit.cx, cy: d.fit.cy }) + '; e.z=' + d.z + ' but the terrain at its footprint (305,300) is ' + sim.terrain.at(305, 300).toFixed(1) + ' m; renderer sort key d = fit.cx+fit.cy+z = ' + (d.fit.cx + d.fit.cy + d.z) + ' instead of ~' + (610 + sim.terrain.at(305, 300)).toFixed(0));
+  console.log('a  validateScene ok=' + chk.ok + ' warnings=' + JSON.stringify(chk.warnings) + '; fit=' + JSON.stringify({ ok: d.fit.ok, reason: d.fit.reason, cx: d.fit.cx, cy: d.fit.cy }) + '; e.z=' + d.z + ' but the terrain at its footprint (305,300) is ' + sim.terrain.at(305, 300).toFixed(1) + ' m; renderer sort key d = fit.cx+fit.cy+z = ' + (d.fit.cx + d.fit.cy + d.z) + ' instead of ~' + (610 + sim.terrain.at(305, 300)).toFixed(0));
 }
 // ---- b
 {
@@ -38,11 +38,11 @@ const W = 900, H = 600;
 }
 // ---- d
 {
-  const sc = V.makePlaceholderScene(7), s1 = R.mkSim(sc, {}), N = sc.buildings.length;
+  const sc = V.makePlaceholderScene(7), s1 = R.mkSim(sc, {}), N = sc.buildings.length, before = sc.buildings.filter(b => b.state === 'finished').length;
   const data = { n: N, mapping: [], states: [{ key: 'to_do', label: 'x' }], weeks: [{ codes: Array.from({ length: N }, () => 3) }] };
   g.Replay.create(s1, data);                                                       // no mapping: paintStates writes e.src.state on the SCENE's building objects
   const s2 = R.mkSim(sc, {});
-  console.log('d  after a replay on sim 1, a new sim from the same scene starts with ' + s2.buildings.filter(e => e.state === 'finished').length + ' of ' + N + ' buildings already "finished" (scene object shared: e.src === scene.buildings[i] = ' + (s1.buildings[0].src === sc.buildings[0]) + ')');
+  console.log('d  the scene has ' + before + ' of ' + N + ' buildings "finished"; after a replay on sim 1 (all set to finished in sim 1: ' + s1.buildings.filter(e => e.state === 'finished').length + '), a new sim from the same scene starts with ' + s2.buildings.filter(e => e.state === 'finished').length + ' (scene object shared: e.src === scene.buildings[i] = ' + (s1.buildings[0].src === sc.buildings[0]) + ')');
 }
 // ---- e
 {
@@ -55,8 +55,8 @@ const W = 900, H = 600;
   const mk = lv => { const sc = V.makePlaceholderScene(7); const b = sc.buildings[0]; const [cx, cy] = b.footprint[0]; b.footprint = [[cx, cy], [cx + 12, cy + 12], [cx + 6, cy + 24], [cx - 6, cy + 12]]; b.levels = lv; b.archetype = 'terrace'; return sc; };   // rotated 45 degrees: no asset slot, drawn as an extrusion
   const times = {};
   for (const lv of [4, 20000, 200000]) { const sc = mk(lv), chk = V.validateScene(sc), sim = R.mkSim(sc, {}); const e = sim.buildings[0]; const c = R.ctx2d(W, H); const p = V.proj(R.viewAt(sc, 4, W, H), e.fit.cx, e.fit.cy, 0), v = R.viewAt(sc, 4, W, H);
-    v.ox += 450 - p[0]; v.oy += 300 - p[1]; R.clock.set(0.25); const t0 = process.hrtime.bigint(); V.renderFrame(c, sim, v, { buildings: true, trees: false, vehicles: false, people: false }); times[lv] = { ok: chk.ok, extruded: !e.params, ms: Number(process.hrtime.bigint() - t0) / 1e6 }; }
-  console.log('f  levels -> validateScene ok / drawn as extrusion / first-frame ms: ' + Object.entries(times).map(([k, t]) => k + ' -> ' + t.ok + ' / ' + t.extruded + ' / ' + t.ms.toFixed(0)).join('; '));
+    v.ox += 450 - p[0]; v.oy += 300 - p[1]; R.clock.set(0.25); const t0 = process.hrtime.bigint(); V.renderFrame(c, sim, v, { buildings: true, trees: false, vehicles: false, people: false }); times[lv] = { ok: chk.ok, warn: chk.warnings.filter(w => /levels/.test(w)).length, drawnLevels: e.levels, extruded: !e.params, ms: Number(process.hrtime.bigint() - t0) / 1e6 }; }
+  console.log('f  levels -> validateScene ok / drawn as extrusion / first-frame ms: ' + Object.entries(times).map(([k, t]) => k + ' -> ' + t.ok + ' (' + t.warn + ' levels warning, drawn with ' + t.drawnLevels + ') / ' + t.extruded + ' / ' + t.ms.toFixed(0)).join('; '));
 }
 // ---- g
 {
@@ -64,5 +64,5 @@ const W = 900, H = 600;
   for (const k of [NaN, 0, -1, Infinity]) { const s = R.mkSim(V.makePlaceholderScene(7)); const c = R.ctx2d(W, H); R.resetSprites(); try { const t0 = Date.now(); V.renderFrame(c, s, { w: W, h: H, scale: k, ox: 300, oy: 200 }, {}); out.push('scale ' + k + ': no error, ' + A.sprites.cache.size + ' sprites built'); } catch (e) { out.push('scale ' + k + ': THROWS ' + String(e.message).slice(0, 60)); } }
   for (const [w, h] of [[0, 0], [0, 300], [300, 0]]) { const s = R.mkSim(V.makePlaceholderScene(7)); const c = R.ctx2d(Math.max(1, w), Math.max(1, h)); try { V.renderFrame(c, s, { w, h, scale: 0.5, ox: 0, oy: 0 }, {}); out.push('view ' + w + 'x' + h + ': no error'); } catch (e) { out.push('view ' + w + 'x' + h + ': THROWS ' + String(e.message).slice(0, 60)); } }
   const cam = g.LabCamera.create({ bounds: [0, 0, 800, 600], width: 1200, height: 700 }); cam.zoomAt(NaN);
-  console.log('g  ' + out.join('; ') + '. camera.zoomAt(NaN) leaves scale = ' + cam.scale + ' (clamp does not catch NaN, camera.js:zoomAt); every later view is NaN.');
+  console.log('g  ' + out.join('; ') + '. camera.zoomAt(NaN), zoomAt(0) and zoomAt(-2) leave scale = ' + cam.scale + ' (guarded in camera.js zoomAt; before: NaN for good).');
 }
