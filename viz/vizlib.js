@@ -818,6 +818,10 @@
   // At most SPRITE_BUILDS_PER_FRAME sprites are rebuilt at the exact scale in one frame, so a settled view sharpens over a few frames
   // instead of stalling on one.
   const SPRITE_BUILDS_PER_FRAME = 60;
+  // A building whose colours or overlays change gets a new asset (vector parts, about 0.2 ms each) and then a new sprite. Drawing buildings one by one, at most RESTYLES_PER_FRAME of them are
+  // restyled in a frame (sim.opts.restyleBudget); the rest keep their last picture until a later frame, so a month that recolours 400 buildings is a sweep over a few frames, not one 120 ms frame (paperdolls#18).
+  const RESTYLES_PER_FRAME = 64;
+  let restyleLeft = Infinity;                          // the restyles left in this frame; Infinity outside the one-by-one draw (the far layer paints exactly)
   const BUILD_MS_PER_FRAME = 8;                      // wall time a frame may spend building sprites (at least one is always built)
   const PREWARM_MS = 4;                              // and pre-rendering neighbouring levels while the view is still
   const PREWARM_STILL_FRAMES = 8;                    // frames the view must not have moved before neighbouring levels are pre-rendered
@@ -834,7 +838,7 @@
     const ps = finish && A.sprites.factory && o.pixel > 1 ? o.pixel : 1;
     A.sprites.posterize = ps > 1 && o.posterize > 1 ? o.posterize : 0;
     A.sprites.grain = ps === 1; A.sprites.minDetail = ps > 1 ? 1.25 : 2.5;
-    A.sprites.builds = 0; A.sprites.maxBuilds = SPRITE_BUILDS_PER_FRAME; A.sprites.maxZoomBuilds = ZOOM_BUILDS_PER_FRAME;
+    A.sprites.frame++; A.sprites.builds = 0; A.sprites.maxBuilds = SPRITE_BUILDS_PER_FRAME; A.sprites.maxZoomBuilds = ZOOM_BUILDS_PER_FRAME;
     A.sprites.frameStart = clockNow(); A.sprites.maxBuildMs = sim.opts.buildMs === undefined ? BUILD_MS_PER_FRAME : sim.opts.buildMs;
     try {
       if (ps === 1) renderFrameInner(ctx, sim, view, layers);
@@ -994,7 +998,9 @@
     // than the draws it saves (see viz/README.md), so it is opt-in.
     if (sim.opts.occlusion === true && A.sprites.exact && F && items.length >= (sim.opts.occlusionMin || OCCLUSION_MIN_ITEMS)) items = cullHidden(items, sim, view, layers, pal);
     else sim.occlusionStats = null;
-    drawItems(ctx, items, view);
+    restyleLeft = sim.opts.restyleBudget === undefined ? RESTYLES_PER_FRAME : sim.opts.restyleBudget;
+    A.sprites.staleOk = true;
+    try { drawItems(ctx, items, view); } finally { restyleLeft = Infinity; A.sprites.staleOk = false; }
   }
 
   // A layer that is cached in a canvas bigger than the screen (LAYER_MARGIN of the view on every side) and anchored to the world.
@@ -1390,6 +1396,8 @@
     if (!e.params) { e._fv = ver; e._th = pal; e._asset = null; e._fdata = data || wall; e._froof = roof; drawExtruded(ctx, view, reg, pal, e, shadowCol, data || wall, roof); return; }
     const ov = style.overlays || [], key = pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + wall + '|' + data + '|' + roof + '|' + ov.join(',') + (seg ? '|' + seg[0] + ':' + seg[1] + ':' + style.seg.done + ':' + (style.seg.todo || '') : '');
     if (e._ck !== key) {
+      if (e._asset && restyleLeft <= 0) { drawBuildingSprite(ctx, view, A, areg, e); return; }       // over the frame's restyle budget: the last picture stays and is restyled on a later frame
+      restyleLeft--;
       e._cols = A.buildingColours(areg, pal, { wall, data, roof, seed: e.seed, seg: seg ? style.seg : null });
       e._asset = A.getAsset('buildings', e.kind, e.fit.heading, A.buildingExtra(e.params, ov, seg));
       e._ck = key;
@@ -1404,7 +1412,7 @@
   }
   function drawBuildingSprite(ctx, view, A, areg, e) {
     const p = proj(view, e.fit.cx, e.fit.cy, e.z);
-    A.drawSprite(ctx, e._asset, e._cols, areg, p[0], p[1], view.scale);
+    A.drawSprite(ctx, e._asset, e._cols, areg, p[0], p[1], view.scale, e);
   }
 
   // A tree: a cached asset sprite, coloured from the look, with a ground shadow. A binding can recolour the foliage.

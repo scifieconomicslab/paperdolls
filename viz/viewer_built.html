@@ -402,7 +402,7 @@
 
   // Sprite cache: an asset at a given scale and colouring is painted once into an offscreen canvas, then blitted.
   // Set AssetLib.sprites.factory = (w, h) => canvas (browser: document.createElement; node: createCanvas).
-  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false, ink: false, grain: true, minDetail: 2.5, posterize: 0, maxZoomBuilds: Infinity, maxBuildMs: Infinity, frameStart: 0, zooming: false, collect: null, index: new Map() };
+  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false, ink: false, grain: true, minDetail: 2.5, posterize: 0, maxZoomBuilds: Infinity, maxBuildMs: Infinity, frameStart: 0, zooming: false, collect: null, index: new Map(), shapes: new Map(), frame: 0, evictions: 0, staleOk: false };       // staleOk: the caller draws to the screen, so a sprite in other colours may stand in for one over the budget (never into a cached layer)
   // The canvas factory for browser pages. Every offscreen canvas the renderer makes (sprites, the ground and far layers, the patch scratch, the tint) is a cache that is written with
   // thousands of small drawImage / fill calls and only ever read by a drawImage. Chromium backs a plain canvas with the GPU and runs those calls as GPU work: 9,900 sprite canvases
   // and two 3x-view layers made the whole-commune view of Jette run at 0.8 fps on a real GPU (paperdolls#3; 40-60 fps with the canvases in memory, 20 fps while the layer was repainting).
@@ -423,13 +423,30 @@
   // Every frame may build at least one, so a view always makes progress.
   const clock = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const timeUp = () => sprites.builds > 0 && clock() - sprites.frameStart >= sprites.maxBuildMs;
-  // Over the sprite memory cap: drop the sprites built for scales far from the one wanted (more than 2.7 times away), keeping the neighbouring
-  // octaves a zoom can still use. Only when that is not enough is everything dropped. (Clearing everything made the next zoom rebuild it all.)
-  function evict(sbWanted) {
-    for (const [k, sp] of sprites.cache) if (Math.abs(Math.log(sp.sb / sbWanted)) > 1.0) { sprites.cache.delete(k); sprites.pixels -= sp.px; }
-    if (sprites.cache.size > sprites.limit * 0.8 || sprites.pixels > sprites.maxPixels * 0.8) { sprites.cache.clear(); sprites.pixels = 0; }
-    sprites.index.clear();
-    for (const sp of sprites.cache.values()) { const held = sprites.index.get(sp.ikey); if (held) held.push(sp); else sprites.index.set(sp.ikey, [sp]); }
+  // Over the sprite memory cap (paperdolls#18): free the least recently drawn sprites, never one the current frame has drawn (sp.used === sprites.frame), and only as many as make room for the
+  // sprite about to be built plus some headroom (down to 85% of the caps), so the cap is hit rarely and never empties the cache. Ties go to the sprite farthest in scale from the one wanted. If the
+  // frame's own sprites do not fit, the cache is allowed to be over the cap for the frame: the cap is a memory guard, not a reason to rebuild what is on screen. (It used to drop everything more
+  // than 2.7 times away in scale and, still over 80%, clear the whole cache, the sprites on screen included: a rebuild of the whole view, 60 a frame.)
+  function evict(sbWanted, needPx) {
+    const maxPx = sprites.maxPixels * 0.85 - (needPx || 0), maxN = sprites.limit * 0.85, frame = sprites.frame, old = [];
+    for (const sp of sprites.cache.values()) if (sp.used !== frame) old.push(sp);
+    old.sort((p, q) => (p.used || 0) - (q.used || 0) || Math.abs(Math.log(q.sb / sbWanted)) - Math.abs(Math.log(p.sb / sbWanted)));
+    let freed = 0;
+    for (const sp of old) {
+      if (sprites.pixels <= maxPx && sprites.cache.size <= maxN) break;
+      sprites.cache.delete(sp.key); sprites.pixels -= sp.px; freed++;
+    }
+    sprites.evictions += freed;
+    sprites.index.clear(); sprites.shapes.clear();
+    for (const sp of sprites.cache.values()) { addTo(sprites.index, sp.ikey, sp); addTo(sprites.shapes, sp.skey, sp); }
+  }
+  const lastOf = (holder, sb) => { if (!holder || holder._spk === undefined) return null; const h = sprites.cache.get(holder._spk); return h && Math.abs(Math.log(h.sb / sb)) <= 2.3 ? h : null; };
+  function addTo(map, k, sp) { const held = map.get(k); if (held) held.push(sp); else map.set(k, [sp]); }
+  // The held sprite nearest in scale to sb (within 2.3 octaves either way) among `list`, or null. Entries no longer in the cache (an outside clear) are skipped.
+  function nearestHeld(list, sb) {
+    let best = null, bd = Infinity;
+    if (list) for (const h of list) { const r = Math.log(h.sb / sb), d = Math.abs(r); if (r >= -2.3 && r <= 2.3 && d < bd && sprites.cache.get(h.key) === h) { best = h; bd = d; } }
+    return best;
   }
   // The keys of the sprite for an asset at sprite scale sb (device pixels per metre). key is exact; ikey leaves out the scale and the detail and ink
   // flags, so a sprite at a neighbouring scale can stand in for a missing one while the view is zooming.
@@ -439,13 +456,13 @@
     const detail = sprites.detail && asset.group === 'buildings' && sb >= sprites.minDetail;                 // baked detail only where it can be seen
     const ink = sprites.ink && (asset.group === 'buildings' || asset.group === 'trees') && sb >= sprites.minDetail;   // heavy ink on the silhouette only, hairlines inside
     const pz = sprites.posterize ? '|p' + sprites.posterize : '', base = asset.id + '|' + asset.heading + '|' + reg.id;
-    return { detail, ink, key: base + '|' + sb + '|' + ck + (detail ? (sprites.grain ? '|d' : '|D') : '') + (ink ? '|i' : '') + pz, ikey: base + '|' + ck + pz };
+    return { detail, ink, key: base + '|' + sb + '|' + ck + (detail ? (sprites.grain ? '|d' : '|D') : '') + (ink ? '|i' : '') + pz, ikey: base + '|' + ck + pz, skey: base + pz };       // skey: the shape alone, any colours
   }
   // Paint one sprite into the cache. scale is the css scale the ink width follows.
   function buildSprite(asset, colours, reg, sb, scale, kk) {
-    const q = sprites.dpr || 1, bb = asset.bbox, m = 2, { detail, ink, key, ikey } = kk;
+    const q = sprites.dpr || 1, bb = asset.bbox, m = 2, { detail, ink, key, ikey, skey } = kk;
     const w = Math.ceil((bb.maxX - bb.minX) * sb) + m * 2, h = Math.ceil((bb.maxY - bb.minY) * sb) + m * 2;
-    if (sprites.cache.size > sprites.limit || sprites.pixels + w * h > sprites.maxPixels) evict(sb);
+    if (sprites.cache.size > sprites.limit || sprites.pixels + w * h > sprites.maxPixels) evict(sb, w * h);
     sprites.pixels += w * h;
     const cv = sprites.factory(w, h), c = cv.getContext('2d');
     paint(c, asset, colours, reg, m - bb.minX * sb, m - bb.minY * sb, sb, Math.max(0.3, Math.min(1, scale / 10)) * (q > 1 ? q : 1) * (ink ? 0.5 : 1), detail);
@@ -458,8 +475,8 @@
       c.restore();
     }
     if (sprites.posterize) quantise(cv, sprites.posterize);
-    const sp = { cv, ox: m - bb.minX * sb, oy: m - bb.minY * sb, sb, key, ikey, px: w * h };
-    sprites.cache.set(key, sp); const held = sprites.index.get(ikey); if (held) held.push(sp); else sprites.index.set(ikey, [sp]);
+    const sp = { cv, ox: m - bb.minX * sb, oy: m - bb.minY * sb, sb, key, ikey, skey, px: w * h, used: sprites.frame };
+    sprites.cache.set(key, sp); addTo(sprites.index, ikey, sp); addTo(sprites.shapes, skey, sp);
     return sp;
   }
   // Pre-render and hold: while the view is still, build the sprites for the zoom levels either side of the current one (whole octaves, the same
@@ -481,7 +498,10 @@
     }
     return n;
   }
-  function drawSprite(ctx, asset, colours, reg, px, py, scale) {
+  // sprites.staleOk is set by the renderer only around the one-by-one draw to the frame: a layer is cached, so what it paints must be exact.
+  // holder (optional): the object that draws this sprite (a building). It remembers the key of the sprite it last drew (holder._spk), so when its colours or overlays change and the budget is
+  // spent, its own previous picture stays on screen until the new one is built (paperdolls#18).
+  function drawSprite(ctx, asset, colours, reg, px, py, scale, holder) {
     const lk = Math.max(0.3, Math.min(1, scale / 10));      // adaptive ink: full width from 10 px per metre up
     if (!sprites.factory) { paint(ctx, asset, colours, reg, px, py, scale, lk); return; }
     // sprites.exact: render at exactly the view's scale, so the blit is 1:1 (sharp, and several times cheaper than a resample).
@@ -496,16 +516,23 @@
     // scaled blit is soft; the view sharpens (exact sprites, 150 builds a frame) once it stops. With nothing held to scale, a building or tree is
     // built, and decoration (people, vehicles) is left out for a few frames.
     if (!sp && sprites.zooming && (sprites.builds >= sprites.maxZoomBuilds || timeUp())) {
-      const held = sprites.index.get(kk.ikey); let best = null, bd = Infinity;
-      if (held) for (const h of held) { const r = Math.log(h.sb / sb), d = Math.abs(r); if (r >= -2.3 && r <= 2.3 && d < bd && sprites.cache.get(h.key) === h) { best = h; bd = d; } }
+      const best = nearestHeld(sprites.index.get(kk.ikey), sb) || (sprites.staleOk ? lastOf(holder, sb) || nearestHeld(sprites.shapes.get(kk.skey), sb) : null);          // same colours first, else what this object drew last, else the same shape in other colours (paperdolls#18)
       if (best) { sp = best; sbUse = best.sb; }
       else if (asset.group === 'people' || asset.group === 'vehicles') return;
     }
-    if (!sp && sprites.exact && (sprites.builds >= sprites.maxBuilds || timeUp())) {      // over this frame's budget: show the bucketed sprite and sharpen on a later frame
+    if (!sp && sprites.exact && (sprites.builds >= sprites.maxBuilds || timeUp())) {      // over this frame's budget: show a sprite already held and sharpen on a later frame
+      // A colour change on a settled view has no sprite held under the new colours: the same shape in the old colours (or at the nearest scale) stands in until the exact one is built, a few
+      // frames later, so the builds of a frame never exceed the budget (paperdolls#18; one model month that recoloured 400 buildings built 362 sprites in one frame).
+      const stale = nearestHeld(sprites.index.get(kk.ikey), sb) || (sprites.staleOk ? lastOf(holder, sb) || nearestHeld(sprites.shapes.get(kk.skey), sb) : null);
+      if (stale) { sp = stale; sbUse = stale.sb; }
+    }
+    if (!sp && sprites.exact && (sprites.builds >= sprites.maxBuilds || timeUp())) {      // nothing of this shape is held at all: the bucketed sprite is built, scaled from a neighbour if one appears
       const z = sprites.zooming; sprites.exact = false; sprites.zooming = true;       // scaled from a sprite already held, not built: the octave sprite is not there yet
-      drawSprite(ctx, asset, colours, reg, px, py, scale); sprites.exact = true; sprites.zooming = z; return;
+      drawSprite(ctx, asset, colours, reg, px, py, scale, holder); sprites.exact = true; sprites.zooming = z; return;
     }
     if (!sp) { sprites.builds++; sp = buildSprite(asset, colours, reg, sb, scale, kk); }
+    sp.used = sprites.frame;                                                          // drawn this frame: eviction leaves it alone
+    if (holder) holder._spk = sp.key;
     const k = scale / sbUse;                                                         // sprite pixels to canvas units
     const dx = Math.round((px - sp.ox * k) * q) / q, dy = Math.round((py - sp.oy * k) * q) / q;   // whole device pixels: no sub-pixel filtering
     if (q === 1 && Math.abs(k - 1) < 1e-9) ctx.drawImage(sp.cv, dx, dy);                        // 1:1: no resampling at all
@@ -2376,6 +2403,10 @@
   // At most SPRITE_BUILDS_PER_FRAME sprites are rebuilt at the exact scale in one frame, so a settled view sharpens over a few frames
   // instead of stalling on one.
   const SPRITE_BUILDS_PER_FRAME = 60;
+  // A building whose colours or overlays change gets a new asset (vector parts, about 0.2 ms each) and then a new sprite. Drawing buildings one by one, at most RESTYLES_PER_FRAME of them are
+  // restyled in a frame (sim.opts.restyleBudget); the rest keep their last picture until a later frame, so a month that recolours 400 buildings is a sweep over a few frames, not one 120 ms frame (paperdolls#18).
+  const RESTYLES_PER_FRAME = 64;
+  let restyleLeft = Infinity;                          // the restyles left in this frame; Infinity outside the one-by-one draw (the far layer paints exactly)
   const BUILD_MS_PER_FRAME = 8;                      // wall time a frame may spend building sprites (at least one is always built)
   const PREWARM_MS = 4;                              // and pre-rendering neighbouring levels while the view is still
   const PREWARM_STILL_FRAMES = 8;                    // frames the view must not have moved before neighbouring levels are pre-rendered
@@ -2392,7 +2423,7 @@
     const ps = finish && A.sprites.factory && o.pixel > 1 ? o.pixel : 1;
     A.sprites.posterize = ps > 1 && o.posterize > 1 ? o.posterize : 0;
     A.sprites.grain = ps === 1; A.sprites.minDetail = ps > 1 ? 1.25 : 2.5;
-    A.sprites.builds = 0; A.sprites.maxBuilds = SPRITE_BUILDS_PER_FRAME; A.sprites.maxZoomBuilds = ZOOM_BUILDS_PER_FRAME;
+    A.sprites.frame++; A.sprites.builds = 0; A.sprites.maxBuilds = SPRITE_BUILDS_PER_FRAME; A.sprites.maxZoomBuilds = ZOOM_BUILDS_PER_FRAME;
     A.sprites.frameStart = clockNow(); A.sprites.maxBuildMs = sim.opts.buildMs === undefined ? BUILD_MS_PER_FRAME : sim.opts.buildMs;
     try {
       if (ps === 1) renderFrameInner(ctx, sim, view, layers);
@@ -2552,7 +2583,9 @@
     // than the draws it saves (see viz/README.md), so it is opt-in.
     if (sim.opts.occlusion === true && A.sprites.exact && F && items.length >= (sim.opts.occlusionMin || OCCLUSION_MIN_ITEMS)) items = cullHidden(items, sim, view, layers, pal);
     else sim.occlusionStats = null;
-    drawItems(ctx, items, view);
+    restyleLeft = sim.opts.restyleBudget === undefined ? RESTYLES_PER_FRAME : sim.opts.restyleBudget;
+    A.sprites.staleOk = true;
+    try { drawItems(ctx, items, view); } finally { restyleLeft = Infinity; A.sprites.staleOk = false; }
   }
 
   // A layer that is cached in a canvas bigger than the screen (LAYER_MARGIN of the view on every side) and anchored to the world.
@@ -2948,6 +2981,8 @@
     if (!e.params) { e._fv = ver; e._th = pal; e._asset = null; e._fdata = data || wall; e._froof = roof; drawExtruded(ctx, view, reg, pal, e, shadowCol, data || wall, roof); return; }
     const ov = style.overlays || [], key = pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + wall + '|' + data + '|' + roof + '|' + ov.join(',') + (seg ? '|' + seg[0] + ':' + seg[1] + ':' + style.seg.done + ':' + (style.seg.todo || '') : '');
     if (e._ck !== key) {
+      if (e._asset && restyleLeft <= 0) { drawBuildingSprite(ctx, view, A, areg, e); return; }       // over the frame's restyle budget: the last picture stays and is restyled on a later frame
+      restyleLeft--;
       e._cols = A.buildingColours(areg, pal, { wall, data, roof, seed: e.seed, seg: seg ? style.seg : null });
       e._asset = A.getAsset('buildings', e.kind, e.fit.heading, A.buildingExtra(e.params, ov, seg));
       e._ck = key;
@@ -2962,7 +2997,7 @@
   }
   function drawBuildingSprite(ctx, view, A, areg, e) {
     const p = proj(view, e.fit.cx, e.fit.cy, e.z);
-    A.drawSprite(ctx, e._asset, e._cols, areg, p[0], p[1], view.scale);
+    A.drawSprite(ctx, e._asset, e._cols, areg, p[0], p[1], view.scale, e);
   }
 
   // A tree: a cached asset sprite, coloured from the look, with a ground shadow. A binding can recolour the foliage.

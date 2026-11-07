@@ -107,4 +107,41 @@ test('#14 outline, halo, selection halo and vis() use the building\'s ground hei
   }
 });
 
+// ---- #18: the sprite budget holds when colours change, and eviction never drops what the frame draws ----
+test('#18 colour change on a settled view: sprite builds per frame stay within the budget, restyling is spread over frames, and the settled picture equals a from-scratch drawing', () => {
+  const k = 2.2, sc = V.makePlaceholderScene(7); R.resetSprites(); R.clock.set(0.25);
+  const sim = R.mkSim(JSON.parse(JSON.stringify(sc)), {}), c = R.ctx2d(W, H), v = R.viewAt(sc, k, W, H);
+  for (let n = 0; n < 60; n++) V.renderFrame(c, sim, v, {});
+  const vis = sim.buildings.filter(e => { const p = V.proj(v, e.fit.cx, e.fit.cy, e.z); return p[0] > 0 && p[0] < W && p[1] > 0 && p[1] < H; }).slice(0, 400);
+  assert(vis.length > 300, 'buildings on screen: ' + vis.length); vis.forEach(e => { e.src.state = 'finished'; });
+  let worst = 0, frames = 0; const first = []; for (let n = 0; n < 400; n++) { R.clock.set(0.25); V.renderFrame(c, sim, v, {}); worst = Math.max(worst, A.sprites.builds); if (n < 3) first.push(A.sprites.builds); frames++; if (n > 4 && A.sprites.builds === 0 && vis.every(e => e._ck && /finished|#/.test(String(e._ck)) || true) && !A.sprites.collect) { if (n > 30 && A.sprites.builds === 0) break; } }
+  assert(worst <= 60, 'sprites built in one frame: ' + worst + ' (budget 60)');
+  assert(frames > 3, 'the change is spread over several frames: ' + frames);
+  for (let i = 0; i < 6; i++) V.renderFrame(c, sim, v, {});
+  // the from-scratch reference: the same scene with the buildings finished from the start
+  const sc2 = JSON.parse(JSON.stringify(sc)); R.resetSprites(); R.clock.set(0.25);
+  const sim2 = R.mkSim(sc2, {}); sim2.buildings.forEach((e, i) => { if (vis.includes(sim.buildings[i])) e.src.state = 'finished'; });
+  const c2 = R.ctx2d(W, H); for (let n = 0; n < 80; n++) V.renderFrame(c2, sim2, v, {}); for (let i = 0; i < 6; i++) V.renderFrame(c2, sim2, v, {});
+  const d = maxDiff(px(c), px(c2)); assert.strictEqual(d.n, 0, 'settled picture equals the from-scratch one: ' + d.n + ' bytes differ, max ' + d.max);
+});
+test('#18 eviction is incremental and never drops a sprite the current frame drew (r34: 1920x1080, DPR 2, 10 px/m, a slow pan)', () => {
+  const w = 1920, h = 1080, dpr = 2, k = 10, scene = V.makePlaceholderScene(7); R.resetSprites(); A.sprites.dpr = dpr; R.clock.set(0.05);
+  try {
+    const sim = R.mkSim(JSON.parse(JSON.stringify(scene)), {}), cv = R.createCanvas(w * dpr, h * dpr), c = R.wrap(cv).getContext('2d'), view = R.viewAt(scene, k, w, h); c.scale(dpr, dpr);
+    let drawn = new Set(); const di = c.drawImage; c.drawImage = function (src, ...a) { if (src && src.width * src.height < w * h) drawn.add(src); return di.call(this, src, ...a); };
+    for (let n = 0; n < 150; n++) V.renderFrame(c, sim, view, {});
+    const settled = A.sprites.pixels; assert(settled > 0.8 * A.sprites.maxPixels && settled < A.sprites.maxPixels, 'settled between the clear line and the cap: ' + (settled / 1e6).toFixed(1) + ' Mpx of ' + A.sprites.maxPixels / 1e6);
+    let lost = 0, worstDrop = 0, prev = A.sprites.cache.size; const evictions0 = A.sprites.evictions || 0;
+    for (let n = 0; n < 400; n++) {
+      drawn = new Set(); V.renderFrame(c, sim, { w, h, scale: k, ox: view.ox - n * 4, oy: view.oy - n * 2 }, {});
+      const held = new Set(); for (const sp of A.sprites.cache.values()) held.add(sp.cv);
+      for (const s of drawn) if (!held.has(s)) lost++;
+      worstDrop = Math.max(worstDrop, prev - A.sprites.cache.size); prev = A.sprites.cache.size;
+    }
+    assert.strictEqual(lost, 0, 'sprites drawn by a frame and dropped from the cache in that frame: ' + lost + ' (biggest drop in one frame ' + worstDrop + ' of ' + prev + ')');
+    assert(worstDrop < 0.25 * prev, 'no frame emptied the cache: biggest drop ' + worstDrop + ' of ' + prev);
+    assert((A.sprites.evictions || 0) > evictions0, 'the cap was reached and eviction ran');
+  } finally { A.sprites.dpr = 1; }
+});
+
 console.log(failed ? passed + ' passed, ' + failed + ' FAILED' : 'all passed (' + passed + ')');
