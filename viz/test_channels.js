@@ -4,6 +4,8 @@
 const fs = require('fs'), path = require('path'), vm = require('vm'), assert = require('assert');
 const root = path.resolve(__dirname, '..');
 const g = { console, Math, Object, Map, WeakMap, Array, Infinity, JSON, Set, Date, Number, String, Promise, Int8Array, Int16Array, Int32Array, Float32Array, Float64Array, Uint8Array, ArrayBuffer, performance, setTimeout, clearTimeout }; g.globalThis = g; vm.createContext(g);
+// PD_SLOW_CLOCK=<ms>: every read of the engine's clock advances it by that many ms, so every wall-clock budget runs out at once (a slow machine, deterministically).
+if (process.env.PD_SLOW_CLOCK) { let t = 0; const step = Number(process.env.PD_SLOW_CLOCK); g.performance = { now: () => (t += step) }; }
 for (const f of ['assetlib.js', 'buildinglib.js', 'treelib.js', 'vizlib.js', 'packvalidate.js', 'packruntime.js', 'packstore.js', 'replay.js', 'packhost.js', 'packpick.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, f), 'utf8'), g, { filename: f });
 const A = g.AssetLib, V = g.VizLib, PackHost = g.PackHost;
 const pal = JSON.parse(fs.readFileSync(path.join(root, 'assets', 'palettes.json'), 'utf8'));
@@ -77,6 +79,9 @@ const scene = V.makePlaceholderScene(7);
 function mkSim(opts) { return V.createSim(scene, Object.assign({ seed: 5, trafficScale: 1, peopleScale: 1, theme: A.theme(pal.families.find(f => f.id === 'nw'), undefined, 'colorfigures'), region: 'nw', buildMs: Infinity, layerMs: Infinity, prewarmMs: Infinity }, opts || {})); }
 const nearView = { w: 1000, h: 700, scale: 9, ox: 500 - (330 - 262) * 9 * 0.8660254, oy: 350 - (330 + 262) * 9 * 0.5 };
 const ONLY_B = { buildings: true, vehicles: false, people: false, trees: false };
+// The far view is painted over several frames, by a wall-clock budget (layerMs, the coarse patch budget), so how many frames it takes depends on the machine.
+// Render until `ready()` holds (asserting that it does within `max` frames) instead of assuming that one frame is enough.
+function renderUntil(ctx, sim, view, ready, what, max) { for (let i = 0; i < (max || 400); i++) { V.renderFrame(ctx, sim, view, ONLY_B); if (ready()) return i + 1; } assert.fail('not settled after ' + (max || 400) + ' frames: ' + what); }
 
 if (!createCanvas) skip('segments render', 'canvas is not installed');
 else {
@@ -95,8 +100,7 @@ else {
     // far: below segMinScale there are no sections, and the wall colour has moved toward `done` by k/n
     s.frameVersion = 2;
     const far = V.fitView(s.scene, 1000, 700, 0.06); assert(far.scale < 1, 'a far view: ' + far.scale);
-    V.renderFrame(ctx, s, far, ONLY_B);
-    const e0 = ent[0];
+    const e0 = ent[0]; renderUntil(ctx, s, far, () => e0._fv === 2, 'the first building is redrawn for the far view');
     assert(!e0._asset.prims.some(x => x.role === 'segdone' || x.role === 'segtodo'), 'no sections at far zoom');
     assert.notStrictEqual(e0._cols.data, A.wallFor(s.theme, e0.seed), 'the wall is tinted toward done');
     assert.strictEqual(e0._cols.data, A.mix(A.wallFor(s.theme, e0.seed), '#00aa55', 0.85 * 2 / 6));
@@ -394,10 +398,9 @@ if (createCanvas) test('roof colour render: a building drawn as a generic extrus
   const s = mkSim(), ctx = createCanvas(1000, 700).getContext('2d'); s.frameVersion = 1;
   s.buildingStyle = () => ({ data: null, roof: '#ff8800', overlays: [], seg: null });
   V.renderFrame(ctx, s, nearView, ONLY_B); const e = s.buildings.find(x => x.params && x._cols); assert.strictEqual(e._cols.roof, '#ff8800');
-  const x = s.buildings.find(q => !q.params); V.renderFrame(ctx, s, V.fitView(s.scene, 1000, 700, 0.06), ONLY_B); if (x) assert.strictEqual(x._froof, '#ff8800', 'extruded: the roof is passed to the drawing');
+  const x = s.buildings.find(q => !q.params); assert(x, 'precondition: the placeholder scene (seed 7) has buildings without model parameters'); renderUntil(ctx, s, V.fitView(s.scene, 1000, 700, 0.06), () => x._fv === 1, 'the extruded building is drawn at far zoom'); assert.strictEqual(x._froof, '#ff8800', 'extruded: the roof is passed to the drawing');
   s.buildingStyle = () => ({ data: '#336699', roof: '#336699', overlays: [], seg: { n: 4, k: 2, done: '#00aa55', todo: null } }); s.frameVersion = 2;
-  V.renderFrame(ctx, s, V.fitView(s.scene, 1000, 700, 0.06), ONLY_B);
-  const f = s.buildings.find(q => q.params && q._cols); assert.strictEqual(f._cols.roof, A.mix('#336699', '#00aa55', 0.3 * 2 / 4), 'far: the roof is mixed toward done like the wall');
+  const f = s.buildings.find(q => q.params && q._cols); renderUntil(ctx, s, V.fitView(s.scene, 1000, 700, 0.06), () => f._fv === 2, 'a building with parameters is restyled for frame 2'); assert.strictEqual(f._cols.roof, A.mix('#336699', '#00aa55', 0.3 * 2 / 4), 'far: the roof is mixed toward done like the wall');
 });
 // a roof colour is an option of the wall mapping only (validators: tests/pack_cases.json)
 test('roof colour: validated like the spec says', () => {

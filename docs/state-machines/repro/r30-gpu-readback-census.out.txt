@@ -1,13 +1,13 @@
---- default options  (DPR 1, whole after 343 frames; {"buildings":9207,"layerRepaints":2,"farPatches":2,"farRects":102})
-  first paint totals: 9872 canvases created (17.48 Mpx), 13385 canvas-as-source drawImage calls; a 1920x1080 window at this DPR has layer canvases of 6.7 Mpx (27 MB) each, two of them blitted every frame, and a spare of each kept
-  first paint        per frame: getImageData 0  putImageData 0  drawImage(canvas) 39 [layer 2.0 x 2722kpx, sprite 37.0 x 1kpx]  canvases created 28.8 (51 kpx)
+--- default options  (DPR 1, whole after 34 frames; {"buildings":9207,"layerRepaints":2,"farPatches":2,"farRects":102})
+  first paint totals: 9872 canvases created (17.48 Mpx), 12767 canvas-as-source drawImage calls; a 1920x1080 window at this DPR has layer canvases of 6.7 Mpx (27 MB) each, two of them blitted every frame, and a spare of each kept
+  first paint        per frame: getImageData 0  putImageData 0  drawImage(canvas) 375.5 [layer 2.0 x 2722kpx, sprite 373.5 x 1kpx]  canvases created 290.4 (514 kpx)
   idle (settled)     per frame: getImageData 0  putImageData 0  drawImage(canvas) 2 [layer 2.0 x 2722kpx]  canvases created 0 (0 kpx)
-  one patch (150 b.) per frame: getImageData 0  putImageData 0  drawImage(canvas) 361.1 [layer 2.0 x 2722kpx, sprite 359.1 x 1kpx]  canvases created 9 (7 kpx)
+  one patch (150 b.) per frame: getImageData 0  putImageData 0  drawImage(canvas) 495.8 [layer 2.0 x 2722kpx, sprite 493.8 x 1kpx]  canvases created 12.4 (10 kpx)
   pan                per frame: getImageData 0  putImageData 0  drawImage(canvas) 2 [layer 2.0 x 2722kpx]  canvases created 0 (0 kpx)
---- default options  (DPR 2, whole after 343 frames; {"buildings":9207,"layerRepaints":2,"farPatches":2,"farRects":102})
-  first paint totals: 9872 canvases created (50.14 Mpx), 13385 canvas-as-source drawImage calls; a 1920x1080 window at this DPR has layer canvases of 26.9 Mpx (107 MB) each, two of them blitted every frame, and a spare of each kept
-  first paint        per frame: getImageData 0  putImageData 0  drawImage(canvas) 39 [layer 2.0 x 10886kpx, sprite 37.0 x 1kpx]  canvases created 28.8 (146 kpx)
+--- default options  (DPR 2, whole after 34 frames; {"buildings":9207,"layerRepaints":2,"farPatches":2,"farRects":102})
+  first paint totals: 9872 canvases created (50.14 Mpx), 12767 canvas-as-source drawImage calls; a 1920x1080 window at this DPR has layer canvases of 26.9 Mpx (107 MB) each, two of them blitted every frame, and a spare of each kept
+  first paint        per frame: getImageData 0  putImageData 0  drawImage(canvas) 375.5 [layer 2.0 x 10886kpx, sprite 373.5 x 1kpx]  canvases created 290.4 (1475 kpx)
   idle (settled)     per frame: getImageData 0  putImageData 0  drawImage(canvas) 2 [layer 2.0 x 10886kpx]  canvases created 0 (0 kpx)
-  one patch (150 b.) per frame: getImageData 0  putImageData 0  drawImage(canvas) 304.5 [layer 2.0 x 10886kpx, sprite 302.5 x 1kpx]  canvases created 9 (7 kpx)
+  one patch (150 b.) per frame: getImageData 0  putImageData 0  drawImage(canvas) 418 [layer 2.0 x 10886kpx, sprite 416.0 x 1kpx]  canvases created 12.4 (10 kpx)
   pan                per frame: getImageData 0  putImageData 0  drawImage(canvas) 2 [layer 2.0 x 10886kpx]  canvases created 0 (0 kpx)
---- pixel + posterize (viewer "pixel" checkbox), 6 frames from cold: getImageData 808, putImageData 808, pixels read 0.46 Mpx
+--- pixel + posterize (viewer "pixel" checkbox), 6 frames from cold: getImageData 2046, putImageData 2046, pixels read 1.23 Mpx

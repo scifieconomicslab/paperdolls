@@ -50,13 +50,18 @@
       if (m.scale.type === 'sequential') return sequential(m.scale.colours, m.scale.domain, v);
       const hit = m.scale.values[key(v)]; return hit && hit.colour ? hit.colour : NO_DATA;
     }
+    // The style is VERSIONED (paperdolls#17): sim.frameVersion changes whenever the week or the wall mapping does, and a building's style is a shared object per distinct (colour, overlays),
+    // so the renderer keeps its far layer on and asks for a style once per building per version, instead of drawing every building through this callback every frame.
+    let ver = 0; const shared = new Map();                 // the shared objects are kept across versions: a building whose look did not change keeps the same object, and the far layer repaints only the others
     function style(e) {
       const k = idx.get(e); let data = null; const ov = [];
       const wm = walls[Math.min(r.wall, walls.length - 1)];
       if (wm) data = colourOf(wm, value(wm, k));
       for (const m of overlays) { const v = value(m, k), hit = v === v ? m.scale.values[key(v)] : null; if (hit && hit.overlay) ov.push(hit.overlay); }
-      return { data, overlays: ov };
+      const id = data + '|' + ov.join(','); let o = shared.get(id); if (!o) shared.set(id, o = { data, overlays: ov });
+      return o;
     }
+    const bump = () => { if (placement.ok && mapping.length) sim.frameVersion = ++ver; };
     function paintStates() {                                // with no mapping, the four state codes go onto the scene and the default style draws them
       const w = weeks[r.week] || {};
       sim.buildings.forEach(e => {
@@ -65,8 +70,8 @@
         e.src.investor = !!(w.investor && w.investor[k]);
       });
     }
-    r.setWeek = t => { r.week = clamp(Math.round(t) || 0, 0, Math.max(0, weeks.length - 1)); if (placement.ok && !mapping.length) paintStates(); };
-    r.setWall = i => { r.wall = clamp(i | 0, 0, Math.max(0, walls.length - 1)); };
+    r.setWeek = t => { r.week = clamp(Math.round(t) || 0, 0, Math.max(0, weeks.length - 1)); bump(); if (placement.ok && !mapping.length) paintStates(); };
+    r.setWall = i => { r.wall = clamp(i | 0, 0, Math.max(0, walls.length - 1)); bump(); };
     r.advance = dt => {
       if (!r.playing) return;
       r.acc += dt * r.speed;

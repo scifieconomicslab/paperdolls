@@ -176,8 +176,9 @@
 <script>
 (function () {
   const V = window.VizLib, A = window.AssetLib, $ = id => document.getElementById(id);
-  A.sprites.factory = (w, hh) => { const c = document.createElement('canvas'); c.width = w; c.height = hh; return c; };
-  A.sprites.dpr = window.devicePixelRatio || 1;
+  A.sprites.screenFactory = A.canvasFactory(document, { soft: false });       // the tint and the marks are repainted per frame version and blitted whole: on the GPU
+  A.sprites.factory = A.canvasFactory(document);          // memory-backed offscreen canvases: see canvasFactory (paperdolls#3)
+  A.sprites.dpr = window.devicePixelRatio || 1;       // kept current by A.watchDpr below (browser zoom, another monitor)
   const FAMS = /*__PALETTES__*/;
   const MANIFEST = /*__PACK__*/;
   const EMBEDDED_SCENE = /*__SCENE__*/;                 // a scene object, or null for the synthetic placeholder
@@ -220,7 +221,7 @@
   box.addEventListener('wheel', e => { const r = box.getBoundingClientRect(); rf.anchor(e.clientX - r.left, e.clientY - r.top); }, { passive: true, capture: true });
   $('fit').onclick = () => cam.fitAll();
   function resize() {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = window.devicePixelRatio || 1; A.sprites.dpr = dpr;
     for (const [c, x] of [...ctxOf, [hilite, hctx]]) { c.width = canvas.clientWidth * dpr; c.height = canvas.clientHeight * dpr; x.setTransform(dpr, 0, 0, dpr, 0, 0); }
     rf.reset(); rf.anchor(canvas.clientWidth / 2, canvas.clientHeight / 2); cam.resize(canvas.clientWidth || 1200, canvas.clientHeight || 700);
   }
@@ -272,6 +273,7 @@
     } finally { requestAnimationFrame(frame); }
   }
   window.addEventListener('resize', resize);
+  A.watchDpr(window, () => resize());                  // a new device pixel ratio resizes the canvases at it; layers and sprites follow (they are keyed on it)
   resize(); cam.fitAll();
   requestAnimationFrame(frame);
 })();

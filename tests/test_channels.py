@@ -22,6 +22,14 @@ def test_js_channel_suite_passes():
     assert "FAIL" not in r.stdout, r.stdout
 
 
+def test_js_channel_suite_is_independent_of_machine_speed():
+    """paperdolls#22: the suite used to assume the far layer is painted in one frame; on a slow machine (every wall-clock budget spent at once) it failed.
+    PD_SLOW_CLOCK=20 makes each read of the engine clock advance 20 ms, so that is deterministic here."""
+    r = subprocess.run([node, str(ROOT / "viz" / "test_channels.js")], capture_output=True, text=True, env={**node_env(), "PD_SLOW_CLOCK": "20"}, timeout=300)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "FAIL" not in r.stdout, r.stdout
+
+
 def test_js_declutter_suite_passes():
     r = subprocess.run([node, str(ROOT / "viz" / "test_declutter.js")], capture_output=True, text=True, env=node_env(), timeout=300)
     assert r.returncode == 0, r.stdout + r.stderr

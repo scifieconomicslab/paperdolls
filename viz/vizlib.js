@@ -926,6 +926,10 @@
   // At most SPRITE_BUILDS_PER_FRAME sprites are rebuilt at the exact scale in one frame, so a settled view sharpens over a few frames
   // instead of stalling on one.
   const SPRITE_BUILDS_PER_FRAME = 60;
+  // A building whose colours or overlays change gets a new asset (vector parts, about 0.2 ms each) and then a new sprite. Drawing buildings one by one, at most RESTYLES_PER_FRAME of them are
+  // restyled in a frame (sim.opts.restyleBudget); the rest keep their last picture until a later frame, so a month that recolours 400 buildings is a sweep over a few frames, not one 120 ms frame (paperdolls#18).
+  const RESTYLES_PER_FRAME = 64;
+  let restyleLeft = Infinity;                          // the restyles left in this frame; Infinity outside the one-by-one draw (the far layer paints exactly)
   const BUILD_MS_PER_FRAME = 8;                      // wall time a frame may spend building sprites (at least one is always built)
   const PREWARM_MS = 4;                              // and pre-rendering neighbouring levels while the view is still
   const PREWARM_STILL_FRAMES = 8;                    // frames the view must not have moved before neighbouring levels are pre-rendered
@@ -942,7 +946,7 @@
     const ps = finish && A.sprites.factory && o.pixel > 1 ? o.pixel : 1;
     A.sprites.posterize = ps > 1 && o.posterize > 1 ? o.posterize : 0;
     A.sprites.grain = ps === 1; A.sprites.minDetail = ps > 1 ? 1.25 : 2.5;
-    A.sprites.builds = 0; A.sprites.maxBuilds = SPRITE_BUILDS_PER_FRAME; A.sprites.maxZoomBuilds = ZOOM_BUILDS_PER_FRAME;
+    A.sprites.frame++; A.sprites.builds = 0; A.sprites.maxBuilds = SPRITE_BUILDS_PER_FRAME; A.sprites.maxZoomBuilds = ZOOM_BUILDS_PER_FRAME;
     A.sprites.frameStart = clockNow(); A.sprites.maxBuildMs = sim.opts.buildMs === undefined ? BUILD_MS_PER_FRAME : sim.opts.buildMs;
     try {
       if (ps === 1) renderFrameInner(ctx, sim, view, layers);
@@ -1016,7 +1020,7 @@
       }
     };
     const drawStatic = (c, v) => { for (const _ of drawStaticSteps(c, v)); };
-    const F = A.sprites.factory, gkey = [view.w, view.h, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings, detail, A.sprites.ink, A.sprites.posterize].join('|');
+    const F = A.sprites.factory, gkey = [view.w, view.h, A.sprites.dpr || 1, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings, detail, A.sprites.ink, A.sprites.posterize].join('|');
     const settled = zs.stillView >= 3, zooming = zs.still < 2;
     if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg, drawStaticSteps, view.scale < 1.0, (c, v) => groundCoarse(c, v, sim, pal));      // far out (below 1 px/m) a missing ground is first painted flat, then exactly in slices
     else drawStatic(ctx, view);
@@ -1059,6 +1063,9 @@
       else drawAgent(target, v, reg, shadow, sim, it.o, it.pose, layers);
     };
     const drawItems = (target, list, v) => { for (const it of list) drawItem(target, it, v); };
+    // What is painted into a cached layer stays there, so it is drawn with exact sprites whatever this frame's build budget is (the layer's own slice time bounds the work). Over the budget a
+    // sprite would otherwise be replaced by a scaled neighbour, and the layer would keep it for good (paperdolls#19).
+    const drawLayerItem = (target, it, v) => { const S = A.sprites; S.unbudgeted = true; try { drawItem(target, it, v); } finally { S.unbudgeted = false; } };
     const byDepth = (p, q) => p.d - q.d;
     // Zoomed far out nothing in the buildings and trees changes from frame to frame, so they are drawn once into a world-anchored layer
     // and blitted; only vehicles (dots at this zoom) are drawn on top. The layer is redrawn when the scale, the theme or any building's
@@ -1081,14 +1088,14 @@
       const sigOf = versioned ? (e => sim.buildingStyle(e)) : (e => (e.state ? e.state.charCodeAt(0) : 0) * 2 + (e.investor ? 1 : 0));
       // painted in slices (a yield every 16 items); until it is ready the picture is the coarse one (or the buildings are drawn directly). The sprite exact flag is not part of the
       // key: it flipped when the view settled and repainted the whole layer a second time for nothing. The generator returns what it painted (items, signatures, layer view).
-      const farSteps = function* (c, v) {
-        c.lineJoin = 'round'; let n = 0; const items = collectStatic(v, []).sort(byDepth), sigs = new Array(sim.buildings.length);
-        for (const it of items) { drawItem(c, it, v); if (it.kind === 'b') sigs[it.i] = sigOf(it.o); if ((++n & 15) === 0) yield; }
+      const farSteps = function* (c, v, direct) {                  // direct: painted in one go (no slices to bound the work), so the frame's sprite budget applies
+        const put = direct ? drawItem : drawLayerItem; c.lineJoin = 'round'; let n = 0; const items = collectStatic(v, []).sort(byDepth), sigs = new Array(sim.buildings.length);
+        for (const it of items) { put(c, it, v); if (it.kind === 'b') sigs[it.i] = sigOf(it.o); if ((++n & 15) === 0) yield; }
         return { items, sigs, v };
       };
-      const farOnce = (c, v) => { const g = farSteps(c, v); for (;;) { const r = g.next(); if (r.done) return r.value; } };
+      const farOnce = (c, v) => { const g = farSteps(c, v, true); for (;;) { const r = g.next(); if (r.done) return r.value; } };
       const coarse = (c, v) => farCoarse(c, v, sim, pal, reg, A.REG[pal.reg] || A.REG.colorfigures, layers);
-      if (incremental) farPatch(sim, view, skey, h, sigOf, drawItem, sim.opts.layerMs === undefined ? LAYER_MS : sim.opts.layerMs);
+      if (incremental) farPatch(sim, view, skey, h, sigOf, drawLayerItem, sim.opts.layerMs === undefined ? LAYER_MS : sim.opts.layerMs);
       const drew = worldLayer(ctx, sim, '_far', view, skey, settled, zooming, farOnce, null, farSteps, true, coarse);
       if (drew) {
         const agents = collectAgents([]).sort(byDepth);
@@ -1102,7 +1109,9 @@
     // than the draws it saves (see viz/README.md), so it is opt-in.
     if (sim.opts.occlusion === true && A.sprites.exact && F && items.length >= (sim.opts.occlusionMin || OCCLUSION_MIN_ITEMS)) items = cullHidden(items, sim, view, layers, pal);
     else sim.occlusionStats = null;
-    drawItems(ctx, items, view);
+    restyleLeft = sim.opts.restyleBudget === undefined ? RESTYLES_PER_FRAME : sim.opts.restyleBudget;
+    A.sprites.staleOk = true;
+    try { drawItems(ctx, items, view); } finally { restyleLeft = Infinity; A.sprites.staleOk = false; }
   }
 
   // A layer that is cached in a canvas bigger than the screen (LAYER_MARGIN of the view on every side) and anchored to the world.
@@ -1165,7 +1174,10 @@
     // painted a slice per frame into a second canvas while the old one, scaled, keeps the picture on screen, and is swapped in when it is whole.
     // (Painting it in one go cost 35 to 50 ms for the ground, and 275 ms for the far layer, in a browser.) The old layer stands in only within
     // LAYER_STAND_IN. Otherwise, and for a pan past the margin, it is painted at once as before.
-    const outOfDate = L && (L.rough || (L.skey === skey && L.sc !== sc) || (L.skey !== skey && L.sc === sc));
+    // The far layer holds sprites. One painted while the view was younger than two frames used octave-bucket sprites, scaled; when the view has settled and the exact sprites would
+    // differ (not a power of two device px per metre, above 1), it is painted again once, so the settled picture does not depend on when the layer was first painted (paperdolls#19).
+    const sbx = Math.max(1, view.scale * q), staleSprites = slot === '_far' && L && L.exact === false && A.sprites.exact && Math.abs(sbx - Math.max(1, Math.pow(2, Math.ceil(Math.log2(sbx))))) > 1e-6;
+    const outOfDate = L && (L.rough || staleSprites || (L.skey === skey && L.sc !== sc) || (L.skey !== skey && L.sc === sc));
     if (steps && sim.opts.sliceLayers !== false && !sim[slot + 'C'] && (outOfDate || (!L && softStart))) {      // (not while the rough picture is still being completed: it gets the frame's time first)
       const r = L ? view.scale / L.scale : 1;
       if (!L || (r > LAYER_STAND_IN[0] && r < LAYER_STAND_IN[1])) {
@@ -1177,11 +1189,11 @@
           p = sim[slot + 'P'] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh, gen: steps(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh }), done: false };
         }
         const budget = sim.opts.layerMs === undefined ? LAYER_MS : sim.opts.layerMs, t0 = layerClock();
-        do { const r = p.gen.next(); if (r.done) { p.done = true; p.info = r.value || null; break; } } while (layerClock() - t0 < budget);
+        do { p.exact = p.exact !== false && A.sprites.exact; const r = p.gen.next(); if (r.done) { p.done = true; p.info = r.value || null; break; } } while (layerClock() - t0 < budget);
         if (p.done) {
           if (A.sprites.posterize) A.quantise(p.cv, A.sprites.posterize);
           if (L && L.cv !== p.cv) sim[slot + 'Spare'] = L.cv;
-          L = sim[slot] = { skey, sc, scale: p.scale, cv: p.cv, ox: p.ox, oy: p.oy, mw: p.mw, mh: p.mh, info: p.info, ver: null }; sim[slot + 'P'] = null;
+          L = sim[slot] = { skey, sc, scale: p.scale, cv: p.cv, ox: p.ox, oy: p.oy, mw: p.mw, mh: p.mh, info: p.info, ver: null, exact: p.exact !== false && A.sprites.exact }; sim[slot + 'P'] = null;
           sim.layerRepaints = (sim.layerRepaints || 0) + 1;
         } else if (L) { blitScaled(ctx, view, L, q, bg); return true; }
         else return false;
@@ -1408,31 +1420,48 @@
     }
   }
 
+  // Ground height at a world point, as the ground layer draws it (terrain times relief; 0 on a flat scene). Tint and marks are cut from the ground, so they stand at this height.
+  const groundZ = (sim, x, y) => sim.terrain ? sim.terrain.at(x, y) * sim.relief : 0;
   // Ground tint (model packs): sim.groundTint = { cells(version) -> [{ x0, y0, x1, y1, colour }] (world metres), opacity, version() }. The cells are painted opaque into a
   // canvas the size of the view (so neighbours leave no seams) and blitted once with the opacity. The canvas is repainted only when the version or the view changes, so a still
-  // frame costs one blit; the ground layer is cached on its own key and is not repainted for a new version.
+  // frame costs one blit; the ground layer is cached on its own key and is not repainted for a new version. Each corner of a cell is at the terrain height there (paperdolls#14).
   function drawGroundTint(ctx, sim, view) {
     const T = sim.groundTint, A = A_(), ver = T.version ? T.version() : 0, cells = T.cells(ver); if (!cells.length) return;
-    const q = A.sprites.dpr || 1, w = Math.ceil(view.w * q), h = Math.ceil(view.h * q), key = ver + '|' + view.scale + '|' + view.ox + '|' + view.oy + '|' + w + 'x' + h + '|' + cells.length;
-    if (!A.sprites.factory) { ctx.save(); ctx.globalAlpha = T.opacity; for (const c of cells) tintCell(ctx, view, c); ctx.restore(); return; }
+    const q = A.sprites.dpr || 1, w = Math.ceil(view.w * q), h = Math.ceil(view.h * q), key = ver + '|' + view.scale + '|' + view.ox + '|' + view.oy + '|' + w + 'x' + h + '|' + cells.length + '|' + sim.relief;
+    if (!A.sprites.factory) { ctx.save(); ctx.globalAlpha = T.opacity; for (const c of cells) tintCell(ctx, sim, view, c); ctx.restore(); return; }
     let C = sim._tint;
-    if (!C || C.cv.width !== w || C.cv.height !== h) C = sim._tint = { cv: A.sprites.factory(w, h), key: null };
+    if (!C || C.cv.width !== w || C.cv.height !== h) C = sim._tint = { cv: (A.sprites.screenFactory || A.sprites.factory)(w, h), key: null };
     if (C.key !== key) {
       const c = C.cv.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); c.scale(q, q); c.lineJoin = 'round';
-      for (const cell of cells) tintCell(c, view, cell);
+      for (const cell of cells) tintCell(c, sim, view, cell);
       C.key = key; sim.tintPaints = (sim.tintPaints || 0) + 1;
     }
     ctx.save(); ctx.globalAlpha = T.opacity; ctx.drawImage(C.cv, 0, 0, w, h, 0, 0, view.w, view.h); ctx.restore();
   }
   // Ground marks (model packs, the far-zoom form of outline and halo): sim.groundMarks = { cells(version, view) -> [{ kind, x0, y0, x1, y1, share, colour }], version() }.
   // A cell is hatched in the flag colour with diagonal lines whose weight and opacity grow with the share of its buildings that are flagged (outline: one way, halo:
-  // the other). It is drawn on the ground, under the buildings, so it can never cover a roof or wall colour; each cell is clipped to its parallelogram.
+  // the other). It is drawn on the ground, under the buildings, so it can never cover a roof or wall colour; each cell is clipped to its quad (corners at the terrain height there).
+  // The hatch is a clip and a few dozen strokes per cell, so it is painted into a canvas of the view's size and that is blitted: a settled frame costs one blit, whatever the number
+  // of cells (paperdolls#17; uncached it was 6.6 to 8 times a plain frame). The key is the frame version, the cells' count (the marks shown depend on the scale), the view and the relief;
+  // `version()` must change whenever the cells do, as it must for the tint. Without a canvas factory the marks are drawn straight onto ctx, as before.
   function drawGroundMarks(ctx, sim, view) {
-    const cells = sim.groundMarks.cells(sim.groundMarks.version ? sim.groundMarks.version() : 0, view); if (!cells.length) return;
+    const M = sim.groundMarks, A = A_(), ver = M.version ? M.version() : 0, cells = M.cells(ver, view); if (!cells.length) return;
+    if (!A.sprites.factory || sim.opts.cacheMarks === false) { paintGroundMarks(ctx, sim, view, cells); return; }       // cacheMarks: false draws straight onto the frame (the pixel reference for the tests)
+    const q = A.sprites.dpr || 1, w = Math.ceil(view.w * q), h = Math.ceil(view.h * q), key = ver + '|' + view.scale + '|' + view.ox + '|' + view.oy + '|' + w + 'x' + h + '|' + cells.length + '|' + sim.relief;
+    let C = sim._marks;
+    if (!C || C.cv.width !== w || C.cv.height !== h) C = sim._marks = { cv: (A.sprites.screenFactory || A.sprites.factory)(w, h), key: null };
+    if (C.key !== key) {
+      const c = C.cv.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); c.scale(q, q);
+      paintGroundMarks(c, sim, view, cells);
+      C.key = key; sim.marksPaints = (sim.marksPaints || 0) + 1;
+    }
+    ctx.drawImage(C.cv, 0, 0, w, h, 0, 0, view.w, view.h);
+  }
+  function paintGroundMarks(ctx, sim, view, cells) {
     ctx.save(); ctx.lineCap = 'butt';
     for (const cell of cells) {
       if (!(cell.share > 0.02)) continue;
-      const a = proj(view, cell.x0, cell.y0, 0), b = proj(view, cell.x1, cell.y0, 0), d = proj(view, cell.x1, cell.y1, 0), e = proj(view, cell.x0, cell.y1, 0);
+      const a = proj(view, cell.x0, cell.y0, groundZ(sim, cell.x0, cell.y0)), b = proj(view, cell.x1, cell.y0, groundZ(sim, cell.x1, cell.y0)), d = proj(view, cell.x1, cell.y1, groundZ(sim, cell.x1, cell.y1)), e = proj(view, cell.x0, cell.y1, groundZ(sim, cell.x0, cell.y1));
       const x0 = Math.min(a[0], b[0], d[0], e[0]), x1 = Math.max(a[0], b[0], d[0], e[0]), y0 = Math.min(a[1], b[1], d[1], e[1]), y1 = Math.max(a[1], b[1], d[1], e[1]);
       if (x1 < 0 || x0 > view.w || y1 < 0 || y0 > view.h) continue;
       const s = Math.min(1, cell.share), cellPx = Math.max(x1 - x0, 1) / 1.7, gap = Math.max(2.5, Math.min(8 - 3 * s, cellPx / 4)), dir = cell.kind === 'halo' ? -1 : 1;
@@ -1444,8 +1473,8 @@
     }
     ctx.restore();
   }
-  function tintCell(c, view, cell) {
-    const a = proj(view, cell.x0, cell.y0, 0), b = proj(view, cell.x1, cell.y0, 0), d = proj(view, cell.x1, cell.y1, 0), e = proj(view, cell.x0, cell.y1, 0);
+  function tintCell(c, sim, view, cell) {
+    const a = proj(view, cell.x0, cell.y0, groundZ(sim, cell.x0, cell.y0)), b = proj(view, cell.x1, cell.y0, groundZ(sim, cell.x1, cell.y0)), d = proj(view, cell.x1, cell.y1, groundZ(sim, cell.x1, cell.y1)), e = proj(view, cell.x0, cell.y1, groundZ(sim, cell.x0, cell.y1));
     if (Math.max(a[0], b[0], d[0], e[0]) < 0 || Math.min(a[0], b[0], d[0], e[0]) > view.w || Math.max(a[1], b[1], d[1], e[1]) < 0 || Math.min(a[1], b[1], d[1], e[1]) > view.h) return;
     c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.lineTo(d[0], d[1]); c.lineTo(e[0], e[1]); c.closePath();
     c.fillStyle = cell.colour; c.fill(); c.strokeStyle = cell.colour; c.lineWidth = 1; c.stroke();            // the stroke closes the antialiased seam between neighbours
@@ -1481,6 +1510,8 @@
     if (!e.params) { e._fv = ver; e._th = pal; e._asset = null; e._fdata = data || wall; e._froof = roof; drawExtruded(ctx, view, reg, pal, e, shadowCol, data || wall, roof); return; }
     const ov = style.overlays || [], key = pal.famId + '/' + pal.lookId + '/' + pal.reg + '|' + wall + '|' + data + '|' + roof + '|' + ov.join(',') + (seg ? '|' + seg[0] + ':' + seg[1] + ':' + style.seg.done + ':' + (style.seg.todo || '') : '');
     if (e._ck !== key) {
+      if (e._asset && restyleLeft <= 0) { drawBuildingSprite(ctx, view, A, areg, e); return; }       // over the frame's restyle budget: the last picture stays and is restyled on a later frame
+      restyleLeft--;
       e._cols = A.buildingColours(areg, pal, { wall, data, roof, seed: e.seed, seg: seg ? style.seg : null });
       e._asset = A.getAsset('buildings', e.kind, e.fit.heading, A.buildingExtra(e.params, ov, seg));
       e._ck = key;
@@ -1495,7 +1526,7 @@
   }
   function drawBuildingSprite(ctx, view, A, areg, e) {
     const p = proj(view, e.fit.cx, e.fit.cy, e.z);
-    A.drawSprite(ctx, e._asset, e._cols, areg, p[0], p[1], view.scale);
+    A.drawSprite(ctx, e._asset, e._cols, areg, p[0], p[1], view.scale, e);
   }
 
   // A tree: a cached asset sprite, coloured from the look, with a ground shadow. A binding can recolour the foliage.

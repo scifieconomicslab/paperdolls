@@ -116,8 +116,9 @@
 <script>
 (function () {
   const V = window.VizLib, A = window.AssetLib;
-  A.sprites.factory = (w, hh) => { const c = document.createElement('canvas'); c.width = w; c.height = hh; return c; };
-  A.sprites.dpr = window.devicePixelRatio || 1;
+  A.sprites.screenFactory = A.canvasFactory(document, { soft: false });       // the tint and the marks are repainted per frame version and blitted whole: on the GPU
+  A.sprites.factory = A.canvasFactory(document);          // memory-backed offscreen canvases: see canvasFactory (paperdolls#3)
+  A.sprites.dpr = window.devicePixelRatio || 1;       // kept current by A.watchDpr below (browser zoom, another monitor)
   const FAMS = /*__PALETTES__*/;
   const canvas = document.getElementById('stage');
   const canvas2 = document.getElementById('stage2'), ctx = canvas.getContext('2d'), ctx2 = canvas2.getContext('2d'), ctxOf = new Map([[canvas, ctx], [canvas2, ctx2]]);
@@ -169,7 +170,7 @@
   document.getElementById('sceneFile').onchange = e => { const f = e.target.files && e.target.files[0]; if (f) { const r = new FileReader(); r.onload = () => loadScene(r.result); r.readAsText(f); } };
   document.getElementById('scenePlaceholder').onclick = () => { scene = V.makePlaceholderScene(7); rebuild(); focusScene(); showScene(); };
   function resize() {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = window.devicePixelRatio || 1; A.sprites.dpr = dpr;
     for (const [c, x] of ctxOf) { c.width = canvas.clientWidth * dpr; c.height = canvas.clientHeight * dpr; x.setTransform(dpr, 0, 0, dpr, 0, 0); }
     rf.reset(); rf.anchor(canvas.clientWidth / 2, canvas.clientHeight / 2); cam.resize(canvas.clientWidth || 1200, canvas.clientHeight || 700); syncZoom();
   }
@@ -291,6 +292,7 @@
   document.getElementById('play').onclick = e => { state.playing = !state.playing; e.target.textContent = state.playing ? 'Pause' : 'Play'; e.target.classList.toggle('on', state.playing); };
   document.getElementById('reseed').onclick = () => { state.seed = (Math.random() * 1e6) | 0; rebuild(); };
   window.addEventListener('resize', resize);
+  A.watchDpr(window, () => resize());                  // a new device pixel ratio resizes the canvases at it; layers and sprites follow (they are keyed on it)
   regSel.value = state.region; fillLooks(); document.getElementById('drive').value = INITIAL.drive || 'auto'; setBtn();
   focusScene(); showScene();
   rebuild();

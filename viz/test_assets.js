@@ -384,7 +384,8 @@ test('buildings render from assets, take data bindings and style overrides, and 
   assert(ent.every(e => e._cols.data === '#123456' && e._asset.prims.some(p => p.role === 'marker')), 'a style override should win');
   A.sprites.cache.clear(); A.sprites.pixels = 0; A.sprites.maxPixels = 2e5;               // a tiny budget: new sprites must evict old ones
   V.renderFrame(ctx, s, view, { buildings: true, vehicles: false, people: false });
-  assert(A.sprites.cache.size >= 1 && A.sprites.cache.size < 12, 'the pixel budget should force evictions, cache holds ' + A.sprites.cache.size);
+  // the cap is far below what the frame draws: eviction frees everything the frame has not drawn, but never a sprite it has (paperdolls#18), so the cache holds the frame's sprites and the cap is exceeded for the frame
+  assert(A.sprites.cache.size >= 1 && [...A.sprites.cache.values()].every(sp => sp.used === A.sprites.frame), 'the pixel budget should force evictions of everything not drawn this frame, cache holds ' + A.sprites.cache.size);
   A.sprites.maxPixels = 90e6;
 });
 
