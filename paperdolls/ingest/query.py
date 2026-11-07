@@ -5,6 +5,9 @@ LANDUSE = "grass|meadow|forest|orchard|cemetery|recreation_ground|village_green|
 NATURAL = "water|wood|scrub|grassland|heath|tree_row"
 
 
+QUERY_VERSION = 1       # bump when the query text changes in a way that makes an extract saved for the same area out of date (place keys its cache on this)
+
+
 def overpass_query(relation=None, bbox=None, timeout=300):
     """relation: an OSM relation id (for example 58258 for Jette); bbox: (south, west, north, east). Either, or both."""
     if relation is None and bbox is None:
@@ -13,8 +16,12 @@ def overpass_query(relation=None, bbox=None, timeout=300):
         area, head = "(area.a)", f"rel({int(relation)});\nmap_to_area->.a;\n"
     else:
         area, head = "", ""
+    if bbox is not None and (len(bbox) != 4 or not all(isinstance(v, (int, float)) and v == v and abs(v) != float("inf") for v in bbox)):
+        raise ValueError("the bounding box needs four finite numbers: south, west, north, east")
+    if bbox is not None and not (-90 <= bbox[0] < bbox[2] <= 90 and -180 <= bbox[1] < bbox[3] <= 180):
+        raise ValueError("the bounding box needs south below north and west below east")
     box = "" if bbox is None else "({:.6f},{:.6f},{:.6f},{:.6f})".format(*bbox)
-    flt = area if relation is not None else box
+    flt = area + box                    # with both, an element must be inside the relation's area and inside the box
     st = []
     if relation is not None:
         st.append(f"  rel({int(relation)});                         // the boundary itself, so the ingest can clip to it")

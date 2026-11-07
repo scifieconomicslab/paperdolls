@@ -176,3 +176,32 @@ def resample_line(pts, spacing):
         out.append((pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t))
         d += spacing
     return out
+
+
+def _orient(ax, ay, bx, by, cx, cy):
+    return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+
+
+def ring_self_crossings(ring):
+    """How many pairs of edges of a closed ring cross each other properly (an X, not a shared corner or a touch). 0 for a simple polygon.
+    Edges that share a vertex are skipped; collinear overlaps and touches are not counted, so only a clear bowtie or figure of eight is reported."""
+    n = len(ring)
+    if n < 4:
+        return 0
+    edges = [(ring[i], ring[(i + 1) % n]) for i in range(n)]
+    boxes = [(min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1])) for a, b in edges]
+    count = 0
+    for i in range(n):
+        a, b = edges[i]
+        for j in range(i + 2, n):
+            if i == 0 and j == n - 1:
+                continue
+            bi, bj = boxes[i], boxes[j]
+            if bi[2] < bj[0] or bj[2] < bi[0] or bi[3] < bj[1] or bj[3] < bi[1]:
+                continue
+            c, d = edges[j]
+            d1, d2 = _orient(*c, *d, *a), _orient(*c, *d, *b)
+            d3, d4 = _orient(*a, *b, *c), _orient(*a, *b, *d)
+            if d1 != 0 and d2 != 0 and d3 != 0 and d4 != 0 and (d1 > 0) != (d2 > 0) and (d3 > 0) != (d4 > 0):
+                count += 1
+    return count

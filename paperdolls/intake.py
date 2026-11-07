@@ -13,6 +13,7 @@ every default is listed in the decision table. Any change to an answer withdraws
 be built.
 """
 import difflib
+import functools
 import hashlib
 import json
 from pathlib import Path
@@ -20,6 +21,7 @@ from pathlib import Path
 import yaml
 
 from . import model_loader
+from .fsutil import YamlFileError, file_lock, read_yaml_mapping, write_atomic
 from .render import palettes
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,30 +76,55 @@ def _matches(want, have):
     return have in want if isinstance(want, list) else have == want
 
 
+def _transaction(fn):
+    """Run a method that changes the file as one read-modify-write: take the file lock, read the file as it is NOW (not as it was when this object was
+    made), run, release. Two overlapping `intake answer` commands, in one process or two, then each see the other's answer. Re-entrant (answer calls confirm)."""
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if self._held:
+            return fn(self, *args, **kwargs)
+        with file_lock(self.path):
+            self._held = True
+            try:
+                self.data = self._read()
+                return fn(self, *args, **kwargs)
+            finally:
+                self._held = False
+    return wrapper
+
+
 class Intake:
+    _held = False
+
     def __init__(self, path):
         self.path = Path(path)
         self.base = self.path.resolve().parent
         self.bank = load_bank()
         self.questions = self.bank["questions"]
         self.by_id = {q["id"]: q for q in self.questions}
-        self.data = yaml.safe_load(self.path.read_text(encoding="utf-8")) if self.path.exists() else None
-        self.data = self.data or {}
+        self.data = self._read()
         self.families = palettes.load_families()
 
     # ---------- file ----------
+    def _read(self):
+        """The file as a mapping. A half-written, empty or non-mapping file is an error that names it: it must never read as 'no answers yet'."""
+        try:
+            return read_yaml_mapping(self.path, allow_missing=True)
+        except YamlFileError as e:
+            raise IntakeError(str(e))
+
     @classmethod
     def init(cls, path, force=False):
         p = Path(path)
         if p.exists() and not force:
             raise IntakeError(f"{p} already exists. Use --force to start over, or continue with 'intake next'.")
-        p.write_text(yaml.safe_dump({"intake": {"version": 1}}, sort_keys=False), encoding="utf-8")
+        write_atomic(p, yaml.safe_dump({"intake": {"version": 1}}, sort_keys=False))
         return cls(p)
 
     def save(self):
         d = {k: v for k, v in self.data.items() if k != "intake"}
         d["intake"] = self.data.get("intake", {"version": 1})
-        self.path.write_text(yaml.safe_dump(d, sort_keys=False, allow_unicode=True, width=100), encoding="utf-8")
+        write_atomic(self.path, yaml.safe_dump(d, sort_keys=False, allow_unicode=True, width=100))
 
     @property
     def meta(self):
@@ -256,6 +283,7 @@ class Intake:
         return out
 
     # ---------- recording an answer ----------
+    @_transaction
     def answer(self, qid, raw):
         if qid == "confirmed":
             return self.confirm(raw)
@@ -305,6 +333,11 @@ class Intake:
             other = ["place", "look.look", "look.drive"] if value == "model_replay" else ["model", "replay"]
             for key in other:
                 del_path(self.data, key)
+            # ...and so is the bookkeeping about them, or a question would still count as answered or defaulted after its answer is gone
+            self.meta["defaults"] = [d for d in self.meta.get("defaults", []) if not any(d == k or d.startswith(k + ".") for k in other)]
+            if "model" in other:
+                self.meta.pop("override_keys", None)
+                self.meta.pop("overrides_answered", None)
         if qid == "model.source":
             keep = {k: get_path(self.data, f"model.params.{k}") for k in ("n", "run_time", "seed") if get_path(self.data, f"model.params.{k}") is not None}
             self.data.setdefault("model", {})["params"] = {}
@@ -337,6 +370,7 @@ class Intake:
         self.meta.pop("confirmed", None)
         self.meta.pop("shown", None)
 
+    @_transaction
     def confirm(self, raw):
         word = str(raw).strip().lower()
         if self.meta.get("shown") != self.answers_hash():
@@ -391,6 +425,7 @@ class Intake:
             out["suggested"] = self.default(q)
         return out
 
+    @_transaction
     def next(self):
         applicable = [q for q in self.questions if self.applicable(q)]
         answered = 0
@@ -449,6 +484,7 @@ class Intake:
         return rows
 
     # ---------- the decision table ----------
+    @_transaction
     def show(self):
         rows = self.status()
         if any(r["state"] in ("missing", "invalid") for r in rows):

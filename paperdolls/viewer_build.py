@@ -3,6 +3,7 @@
 A page is one HTML file with every script inlined, so it opens by double-click and needs no server or network.
 """
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,14 +21,26 @@ def _json_for_script(obj):
     return json.dumps(obj, separators=(",", ":")).replace("</", "<\\/").replace("<!--", "<\\!--")
 
 
+_PLACEHOLDER = re.compile(r"/\*__([A-Z0-9]+)__\*/")
+
+
 def _fill(template, **extra):
-    out = template
-    for key, filename in LIBS.items():
-        out = out.replace(f"/*__{key}__*/", _read(filename))
-    out = out.replace("/*__PALETTES__*/", _json_for_script(json.loads((ROOT / "assets" / "palettes.json").read_text(encoding="utf-8"))))
-    for key, value in extra.items():
-        out = out.replace(f"/*__{key}__*/", value)
-    return out
+    """Replace the /*__KEY__*/ markers of a template in ONE pass. What is put in (a library, the palettes, a manifest, a scene, a runtime) is never scanned
+    again, so a marker that appears inside it (a banner mentioning /*__SCENE__*/, a library's own comment) stays text."""
+    values = {key: None for key in LIBS}                     # libraries and palettes are read only when the template has their marker
+    values["PALETTES"] = None
+    values.update(extra)
+
+    def sub(match):
+        key = match.group(1)
+        if key not in values:
+            return match.group(0)
+        v = values[key]
+        if v is None:
+            v = _json_for_script(json.loads((ROOT / "assets" / "palettes.json").read_text(encoding="utf-8"))) if key == "PALETTES" else _read(LIBS[key])
+            values[key] = v
+        return v
+    return _PLACEHOLDER.sub(sub, template)
 
 
 def build_viewer(scene=None, initial=None, title="Paperdolls viewer", replay=None):

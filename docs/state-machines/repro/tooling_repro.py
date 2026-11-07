@@ -39,6 +39,30 @@ def tmp():
     return Path(tempfile.mkdtemp(prefix="pdrepro-"))
 
 
+def _block_outside_network():
+    """Safety net: a repro must never reach a real server (Overpass). Any connect to a non-loopback address fails."""
+    real = socket.socket.connect
+
+    def guarded(self, address):
+        host = address[0] if isinstance(address, tuple) else address
+        if isinstance(host, str) and not (host.startswith("127.") or host in ("::1", "localhost")) and self.family != getattr(socket, "AF_UNIX", -1):
+            raise OSError(f"repro network guard: refusing to connect to {host}")
+        return real(self, address)
+    socket.socket.connect = guarded
+
+
+_block_outside_network()
+
+
+def fake_fetch(calls, elements):
+    """A stand-in for place.fetch_overpass: counts the call and writes a canned extract. Never touches the network."""
+    def fetch(query, out_path, *a, **k):
+        calls.append(query)
+        extract(out_path, elements)
+        return len(elements)
+    return fetch
+
+
 # ---------------------------------------------------------------- fixtures
 
 def way(i, pts, tags):
@@ -189,12 +213,13 @@ def t05_place_reuses_a_cached_extract_for_a_different_area():
     from paperdolls.ingest import fetch as fetchmod
     d = tmp()
     spec = place_spec(d, [50.00, 4.00, 50.01, 4.01])
-    out = d / "out"; out.mkdir()
-    extract(out / "extract.json", [bld(1, square(50.001, 4.001)), bld(2, square(50.002, 4.002)), ROAD])            # fetched earlier for the small bbox
     calls = []
     real = placemod.fetch_overpass
-    placemod.fetch_overpass = lambda *a, **k: calls.append(1) or real(*a, **k)
+    placemod.fetch_overpass = fake_fetch(calls, [bld(1, square(50.001, 4.001)), bld(2, square(50.002, 4.002)), ROAD])        # the first run: fetched for the small bbox
     try:
+        placemod.run(spec)
+        calls.clear()
+        placemod.fetch_overpass = fake_fetch(calls, [bld(i, square(50.0 + i * 0.01, 4.0)) for i in range(1, 6)] + [ROAD])  # what the server answers for the larger bbox
         spec = place_spec(d, [49.90, 3.90, 50.10, 4.10])                                                         # the user enlarges the area (intake answer place.bbox)
         r = placemod.run(spec)
     finally:
@@ -210,13 +235,24 @@ def t06_place_truncated_cache_fails_forever_without_a_hint():
     spec = place_spec(d, [50.0, 4.0, 50.01, 4.01])
     out = d / "out"; out.mkdir()
     (out / "extract.json").write_text('{"elements": [{"type": "way", "id": 1, "geometry": [{"lat": 50.0', encoding="utf-8")
-    msgs = []
-    for _ in range(2):
-        try:
-            placemod.run(spec)
-        except placemod.PlaceError as e:
-            msgs.append(str(e))
-    return (len(msgs) == 2 and "refetch" not in msgs[0].lower()), f"same failure twice={msgs[0] == msgs[1]}; message={msgs[0][:110]!r}"
+    msgs, calls = [], []
+    real = placemod.fetch_overpass
+    placemod.fetch_overpass = fake_fetch(calls, [bld(1, square(50.0, 4.0)), ROAD])
+    try:
+        for _ in range(2):
+            try:
+                placemod.run(spec)
+            except placemod.PlaceError as e:
+                msgs.append(str(e))
+    finally:
+        placemod.fetch_overpass = real
+    (out / "extract.json").write_text('{"elements": [{"type": "way", "id": 1, "geometry": [{"lat": 50.0', encoding="utf-8")
+    try:
+        placemod.run(spec, fetch=False)                                   # with --no-fetch the damaged file cannot be replaced: the message must say what to do
+        nofetch = "no error"
+    except placemod.PlaceError as e:
+        nofetch = str(e)
+    return (len(msgs) == 2 and "refetch" not in msgs[0].lower()), f"errors with fetching allowed={len(msgs)}; refetched {len(calls)} time(s); with --no-fetch: {nofetch[:150]!r}"
 
 
 @repro("T07")
@@ -284,7 +320,11 @@ def t11_ingest_duplicate_ids_pass_through():
 def t12_ingest_negative_max_buildings():
     """--max-buildings -1: `if max_buildings and len(bld) > max_buildings` is true for any negative value; bld[:-1] drops the last one and the report counts len+1 as skipped."""
     els = [bld(i, square(50.0 + i * 0.001, 4.0)) for i in range(1, 4)] + [ROAD]
-    sc, rep = ingest(els, max_buildings=-1)
+    from paperdolls.ingest.build import IngestError
+    try:
+        sc, rep = ingest(els, max_buildings=-1)
+    except IngestError as e:
+        return False, f"refused: {e}"
     skipped = {k: v for k, v in rep["skipped"].items() if "max-buildings" in k}
     return (len(sc["buildings"]) == 2 and list(skipped.values()) == [4]), f"3 buildings in, {len(sc['buildings'])} out, skipped reported={skipped}"
 
@@ -347,21 +387,24 @@ def t16_build_validates_one_read_of_the_manifest_and_builds_from_another():
     import yaml
     from paperdolls import pack
     d = toy_copy()
-    real = pack.check
+    real, reads = pack.load, []
 
-    def check_then_edit(path):
-        r = real(path)
-        m = yaml.safe_load((d / "pack.yaml").read_text())
-        m["id"] = "BAD ID"                                                   # invalid: check() would refuse this
-        (d / "pack.yaml").write_text(yaml.safe_dump(m, sort_keys=False))
-        return r
-    pack.check = check_then_edit
+    def load_then_edit(path):
+        m = real(path)
+        reads.append(1)
+        if len(reads) == 1:                                                  # the first read is the one that gets validated; an editor saves right after it
+            bad = yaml.safe_load((d / "pack.yaml").read_text())
+            bad["id"] = "BAD ID"                                             # invalid: check() would refuse this
+            (d / "pack.yaml").write_text(yaml.safe_dump(bad, sort_keys=False))
+        return m
+    pack.load = load_then_edit
     try:
         html, info = pack.build(d)
     finally:
-        pack.check = real
-    errors_now, _ = real(d)
-    return (bool(errors_now) and '"id":"BAD ID"' in html), f"build returned a page ({info['bytes']} bytes) embedding id 'BAD ID'; check() on the same folder now says {errors_now[:1]}"
+        pack.load = real
+    real_check = pack.check
+    errors_now, _ = real_check(d)
+    return (bool(errors_now) and '"id":"BAD ID"' in html), f"build read the manifest {len(reads)} time(s) and returned a page ({info['bytes']} bytes) {'embedding' if '\"id\":\"BAD ID\"' in html else 'not embedding'} id 'BAD ID'; check() on the folder now says {errors_now[:1]}"
 
 
 @repro("T17")
@@ -376,8 +419,12 @@ def t17_runtime_entry_outside_the_pack_is_accepted():
     m["runtime"] = {"type": "js", "entry": str(outside), "seed": 7, "on_params": "rerun"}
     (d / "pack.yaml").write_text(yaml.safe_dump(m, sort_keys=False))
     errors, _ = pack.check(d)
-    html, _ = pack.build(d)
-    return (not errors and "window.OUTSIDE" in html), f"check errors={errors}; outside file inlined={'window.OUTSIDE' in html}"
+    try:
+        html, _ = pack.build(d)
+    except pack.PackError as e:
+        html = ""
+        errors = errors + ["build: " + str(e)[:80]]
+    return (not errors and "window.OUTSIDE" in html), f"check/build errors={errors}; outside file inlined={'window.OUTSIDE' in html}"
 
 
 @repro("T18")
@@ -394,7 +441,8 @@ def t18_pack_build_not_atomic_and_unprotected_against_a_second_process():
             with contextlib.suppress(OSError):
                 sizes.add(out.stat().st_size)
     t = threading.Thread(target=reader); t.start()
-    out.write_text(big, encoding="utf-8")                                      # exactly the call cmd_pack makes
+    from paperdolls.fsutil import write_atomic
+    write_atomic(out, big)                                                     # exactly the call cmd_pack makes (it was Path.write_text)
     stop.set(); t.join()
     partial = sorted(s for s in sizes if 0 < s < len(big))
     return bool(partial) or 0 in sizes, f"final={len(big)} bytes; sizes seen by a concurrent reader={sorted(sizes)[:6]}"
@@ -494,11 +542,12 @@ def t22_export_out_without_npz_suffix_writes_a_different_file():
     d = tmp()
     spec = d / "render.yaml"
     import yaml
-    spec.write_text(yaml.safe_dump({"name": "t", "model": {"path": str(ROOT / "tests" / "toy_model.py"), "params": {"n": 12, "run_time": 6}}, "replay": {"weeks": [0, 5], "palettes": ["ce"]}}))
+    spec.write_text(yaml.safe_dump({"name": "t", "model": {"path": str(ROOT / "tests" / "toy_model.py"), "params": {"n": 12, "run_time": 6}}, "replay": {"weeks": [0, 5], "palettes": ["ce"], "registers": ["formal"]}}))
     rc, out, err = run_cli("export", str(spec), "--out", str(d / "traj"))
     exists = (d / "traj").exists()
+    printed = Path(out.strip().split("wrote ", 1)[-1])
     rc2, out2, err2 = run_cli("frames", str(spec), str(d / "traj"), "--out", str(d / "f"))
-    return (rc == 0 and not exists and rc2 != 0), f"export exit={rc} printed '{out.strip()}'; file 'traj' exists={exists}; files={sorted(p.name for p in d.iterdir())}; next command exit={rc2}: {tail(err2, 1)[:100]}"
+    return (rc == 0 and (not printed.exists() or rc2 != 0)), f"export exit={rc} printed '{out.strip()}'; file 'traj' exists={exists}; files={sorted(p.name for p in d.iterdir())}; printed path exists={printed.exists()}; next command exit={rc2}: {tail(err2 or out2, 1)[:100]}"
 
 
 # ---------------------------------------------------------------- intake / spec

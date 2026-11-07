@@ -1,6 +1,8 @@
 """Command-line entry points. Every stage is runnable without Claude."""
-import argparse, importlib, json, sys, tempfile
+import argparse, importlib, io, json, os, sys, tempfile
 from pathlib import Path
+
+from .fsutil import write_atomic, write_atomic_group
 
 
 class _Lazy:
@@ -48,7 +50,7 @@ def cmd_validate(a):
 def cmd_export(a):
     sp = _replay_spec(a)
     out = Path(a.out or Path(a.spec).with_name("trajectory.npz"))
-    export.run_and_export(_params(sp), out, _model_path(sp, a.spec), variables=specmod.mapping_variables(sp))
+    out = export.run_and_export(_params(sp), out, _model_path(sp, a.spec), variables=specmod.mapping_variables(sp))      # the real path: numpy needs the .npz suffix
     print(f"wrote {out}")
 
 def cmd_check(a):
@@ -90,7 +92,8 @@ def cmd_frames(a):
                 codes = export.codes_for_week(traj, w)
                 inv = export.codes_for_week(traj, w, "investor")
                 img = R.frame(fams[pid], reg, codes, f"Week {w}", investor=inv, legend=specmod.legend_for(sp), extras=specmod.retrofit_extras(sp))
-                img.save(out / f"{pid}_{reg}_w{w}.png")
+                png = io.BytesIO(); img.save(png, format="PNG")
+                write_atomic(out / f"{pid}_{reg}_w{w}.png", png.getvalue())
     print(f"wrote frames to {out}")
 
 def cmd_build(a):
@@ -101,7 +104,7 @@ def cmd_build(a):
     from .render.html import build_page
     L = block.Layout(n); R = block.Renderer(L, seed=int(_params(sp).get("seed", 0)))
     html = build_page(sp, traj, fams, L, R, export.codes_for_week)
-    Path(a.out).write_text(html, encoding="utf-8")
+    write_atomic(a.out, html)
     print(f"wrote {a.out} ({Path(a.out).stat().st_size // 1024} KB)")
 
 
@@ -119,7 +122,7 @@ def cmd_replay(a):
     if scene is not None and len(scene.get("buildings", [])) < n_model:
         raise SystemExit(f"cannot continue: model has {n_model} buildings, scene has {len(scene.get('buildings', []))}. Use a scene with at least as many buildings.")
     html = build_page(sp, traj, scene)
-    Path(a.out).write_text(html, encoding="utf-8")
+    write_atomic(a.out, html)
     print(f"wrote {a.out} ({Path(a.out).stat().st_size // 1024} KB)")
 
 
@@ -189,7 +192,7 @@ def cmd_intake(a):
         if a.icmd == "docs":
             text = render_docs()
             if a.out:
-                Path(a.out).write_text(text, encoding="utf-8"); print(f"wrote {a.out}")
+                write_atomic(a.out, text); print(f"wrote {a.out}")
             else:
                 print(text)
             return
@@ -252,7 +255,7 @@ def cmd_place(a):
     try:
         sp = specmod.load(a.spec, goal="place_scene")
         specmod.require_confirmed(a.spec)
-        r = placemod.run(a.spec, refetch=a.refetch, fetch=not a.no_fetch)
+        r = placemod.run(a.spec, refetch=a.refetch, fetch=not a.no_fetch, endpoint=a.endpoint)
     except (specmod.SpecError, placemod.PlaceError) as e:
         raise SystemExit(f"cannot continue: {e}")
     for k, v in r.items():
@@ -277,7 +280,7 @@ def cmd_viewer(a):
     initial = {k: v for k, v in {"region": look.get("region"), "look": look.get("look"), "reg": look.get("register"), "drive": look.get("drive")}.items() if v}
     html = build_viewer(scene, initial, title=sp["name"])
     path = out / f"{_slug(sp['name'])}-viewer.html"
-    path.write_text(html, encoding="utf-8")
+    write_atomic(path, html)
     print(f"wrote {path} ({path.stat().st_size // 1024} KB)")
     print("Open it in a browser. Drag or A and D pan; the wheel or W and S zoom. The Fit button shows the whole scene.")
 
@@ -307,7 +310,7 @@ def cmd_pack(a):
         html, info = packmod.build(a.path, scene, include, max_bytes=int(a.max_mb * 1048576), trim=_trim_list(a.trim))
     except packmod.PackError as e:
         raise SystemExit(f"cannot continue: {e}")
-    Path(a.out).write_text(html, encoding="utf-8")
+    write_atomic(a.out, html)
     msg = f"wrote {a.out} ({info['bytes'] / 1048576:.2f} MB"
     if scene is not None:
         msg += f"; scene {info['buildings']} buildings, {info['scene_bytes'] / 1048576:.2f} MB"
@@ -322,9 +325,10 @@ def _trim_list(text):
 
 def cmd_ingest(a):
     from .ingest import build, report as rpt
-    bbox = tuple(float(x) for x in a.bbox.split(",")) if a.bbox else None
-    if bbox and len(bbox) != 4:
-        raise SystemExit("--bbox needs south,west,north,east")
+    try:
+        bbox = build.check_bbox(tuple(float(x) for x in a.bbox.split(","))) if a.bbox else None
+    except (ValueError, build.IngestError) as e:
+        raise SystemExit(f"--bbox needs south,west,north,east as numbers ({e})")
     rot = a.rotation if a.rotation in ("auto", "none") else float(a.rotation)
     try:
         scene, rep = build.ingest(a.input, rotation=rot, bbox=bbox, boundary_relation=a.boundary_relation, name=a.name,
@@ -332,10 +336,10 @@ def cmd_ingest(a):
     except (build.IngestError, ValueError) as e:
         raise SystemExit(f"ingest failed: {e}")
     out = Path(a.out)
-    out.write_text(json.dumps(scene, separators=(",", ":")), encoding="utf-8")
     md = out.with_name(out.stem + "_report.md")
-    md.write_text(rpt.report_markdown(scene, rep), encoding="utf-8")
-    out.with_name(out.stem + "_report.json").write_text(json.dumps(rep, indent=1), encoding="utf-8")
+    # reports first, the scene last: whoever finds the new scene finds the reports that describe it; nothing is replaced unless every file could be staged
+    write_atomic_group([(md, rpt.report_markdown(scene, rep)), (out.with_name(out.stem + "_report.json"), json.dumps(rep, indent=1, allow_nan=False)),
+                        (out, json.dumps(scene, separators=(",", ":"), allow_nan=False))])
     c = rep["counts"]
     print(f"wrote {out} ({out.stat().st_size // 1024} KB): {c['buildings']} buildings, {c['roads']} roads, {c['landuse']} landuse, {c['trees']} trees")
     print(f"frame rotated {rep['frame']['rotation_deg']} degrees; estimated asset share {round(rep['estimated_asset_share']['rotated'] * 100)}% (unrotated {round(rep['estimated_asset_share']['unrotated'] * 100)}%)")
@@ -348,7 +352,7 @@ def cmd_osm_query(a):
     bbox = tuple(float(x) for x in a.bbox.split(",")) if a.bbox else None
     q = overpass_query(relation=a.relation, bbox=bbox)
     if a.out:
-        Path(a.out).write_text(q, encoding="utf-8")
+        write_atomic(a.out, q)
         print(f"wrote {a.out}. Run it at https://overpass-turbo.eu (Export, raw OSM data, JSON) or: curl -d @{a.out} https://overpass-api.de/api/interpreter -o extract.json")
     else:
         print(q)
@@ -365,6 +369,7 @@ def cmd_osm_fetch(a):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="paperdolls")
+    ap.add_argument("--debug", action="store_true", help="show the traceback of an unexpected error (or set PAPERDOLLS_DEBUG=1)")
     sub = ap.add_subparsers(required=True)
     s = sub.add_parser("validate"); s.add_argument("spec"); s.set_defaults(f=cmd_validate)
     s = sub.add_parser("export"); s.add_argument("spec"); s.add_argument("--out"); s.set_defaults(f=cmd_export)
@@ -396,7 +401,8 @@ def main(argv=None):
     i = isub.add_parser("docs"); i.add_argument("--out")
     s.set_defaults(f=cmd_intake)
     s = sub.add_parser("place", help="get the OSM extract, ingest it, and write the scene and its report (place_scene projects)")
-    s.add_argument("spec"); s.add_argument("--refetch", action="store_true"); s.add_argument("--no-fetch", action="store_true"); s.set_defaults(f=cmd_place)
+    s.add_argument("spec"); s.add_argument("--refetch", action="store_true"); s.add_argument("--no-fetch", action="store_true")
+    s.add_argument("--endpoint", help="an Overpass endpoint other than the public one"); s.set_defaults(f=cmd_place)
     s = sub.add_parser("viewer", help="write a one-file viewer page for the project's place"); s.add_argument("spec"); s.set_defaults(f=cmd_viewer)
     s = sub.add_parser("pack", help="model packs: check, build, or serve a pack with hot reload"); psub = s.add_subparsers(dest="pcmd", required=True)
     def _pack_args(i, scene_help):
@@ -420,7 +426,49 @@ def main(argv=None):
     i.add_argument("--port", type=int, default=8765); i.add_argument("--max-mb", type=float, default=16); i.add_argument("--trim", help="trim stages (see pack build)")
     s.set_defaults(f=cmd_pack)
     a = ap.parse_args(argv)
-    a.f(a)
+    _run(a)
+
+
+def _known_errors():
+    """The exception types that mean 'the input or the environment is wrong', each with a one-line message. Imported on use: doctor must run without them."""
+    import http.client, zipfile
+    kinds = [OSError, ValueError, http.client.HTTPException, zipfile.BadZipFile, EOFError]    # ValueError covers JSON/YAML decode and the SpecError/IngestError/FetchError family
+    for mod, name in ((".ingest.fetch", "FetchError"), (".place", "PlaceError"), (".ingest.build", "IngestError"), (".spec", "SpecError"),
+                      (".pack", "PackError"), (".intake", "IntakeError")):
+        try:
+            kinds.append(getattr(importlib.import_module(mod, __package__), name))
+        except ImportError:
+            pass
+    try:
+        import yaml
+        kinds.append(yaml.YAMLError)
+    except ImportError:
+        pass
+    return tuple(kinds)
+
+
+def _one_line(e):
+    if isinstance(e, OSError) and e.filename:
+        return f"{e.strerror or type(e).__name__}: {e.filename}"
+    text = " ".join(str(e).split()) or type(e).__name__
+    return text
+
+
+def _run(a):
+    """The error boundary: a known failure is one line on stderr and exit 1; anything else is reported as a bug (traceback with --debug)."""
+    debug = getattr(a, "debug", False) or bool(os.environ.get("PAPERDOLLS_DEBUG"))
+    try:
+        a.f(a)
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except Exception as e:
+        if debug:
+            raise
+        if isinstance(e, _known_errors()):
+            raise SystemExit(f"error: {_one_line(e)}")
+        raise SystemExit(f"internal error: {type(e).__name__}: {_one_line(e)}. This is a bug in paperdolls; re-run with --debug for the traceback.")
 
 if __name__ == "__main__":
     main()

@@ -111,7 +111,7 @@ class DevState:
                 if self._scene is None or scene_sig != self._scene_sig:
                     self._scene, self._scene_sig = packmod.load_scene(self.scene_path), scene_sig
                 scene = self._scene
-            errors, warnings = packmod.check(self.path)
+            errors, warnings = packmod.check(self.path, self.include)
             if not errors:
                 html, info = packmod.build(self.path, scene, self.include, self.max_bytes, self.trim)
                 if info["trimmed"]:
@@ -246,7 +246,11 @@ def serve(path, scene_path=None, port=8765, include=(), max_bytes=packmod.DEFAUL
     """Run until interrupted. Returns nothing."""
     state = DevState(path, scene_path, include, max_bytes, trim)
     srv = DevServer(state, port, verbose)
-    print(f"pack dev: {path}" + (f" with scene {scene_path}" if scene_path else "") + f"\n  open {srv.url}\n  watching: " + ", ".join(Path(f).name for f in packmod.watched_files(path, include, scene_path)) + "\n  Ctrl-C to stop")
+    try:
+        watched = packmod.watched_files(path, include, scene_path)
+    except packmod.PackError:                                # a manifest that does not parse yet: watch it (and the scene) so the first fix reloads the page
+        watched = [packmod.manifest_path(path)] + ([Path(scene_path)] if scene_path else [])
+    print(f"pack dev: {path}" + (f" with scene {scene_path}" if scene_path else "") + f"\n  open {srv.url}\n  watching: " + ", ".join(Path(f).name for f in watched) + "\n  Ctrl-C to stop")
     if not state.ok:
         print(f"  the pack does not build yet: {state.errors[0]}")
     srv._watcher.start()

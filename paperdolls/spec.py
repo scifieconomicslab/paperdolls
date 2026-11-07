@@ -9,6 +9,7 @@ from pathlib import Path
 
 import yaml
 
+from .fsutil import YamlFileError, read_yaml_mapping
 from .render import palettes
 
 REGISTERS = {"colorfigures", "formal"}
@@ -38,15 +39,61 @@ def normalise(data):
     return data
 
 
+def _read(path):
+    try:
+        return read_yaml_mapping(path)
+    except YamlFileError as e:
+        raise SpecError(str(e))
+
+
 def load(path, goal=None):
     """Read and validate a project file. goal: the kind of project the calling command needs."""
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    data = _read(path)
     normalise(data)
     validate(data)
     if goal and goal_of(data) != goal:
         want = {"model_replay": "a model replay", "place_scene": "a place scene"}
         raise SpecError(f"this project is {want[goal_of(data)]}, and this command needs {want[goal]}.")
     return data
+
+
+def _finite(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf")
+
+
+def _validate_place(data):
+    """What `place` indexes later, checked here so a hand-written file is a SpecError and not a KeyError or IndexError."""
+    place, kind = data["place"], data["place"]["kind"]
+    if kind == "osm_relation":
+        r = place.get("relation")
+        if isinstance(r, bool) or not isinstance(r, int) or r <= 0:
+            raise SpecError("place.relation must be an OSM relation id (a positive whole number) for place.kind osm_relation")
+    elif kind == "bbox":
+        b = place.get("bbox")
+        if not (isinstance(b, list) and len(b) == 4 and all(_finite(v) for v in b)):
+            raise SpecError("place.bbox must be four numbers: south, west, north, east")
+        if not (-90 <= b[0] < b[2] <= 90 and -180 <= b[1] < b[3] <= 180):
+            raise SpecError("place.bbox must have south below north and west below east, within -90..90 and -180..180")
+    elif kind in ("extract_file", "scene_file"):
+        key = "extract_path" if kind == "extract_file" else "scene_path"
+        if not isinstance(place.get(key), str) or not place[key].strip():
+            raise SpecError(f"place.{key} must be the path of a file for place.kind {kind}")
+    mb = place.get("max_buildings")
+    if mb is not None and (isinstance(mb, bool) or not isinstance(mb, int) or mb <= 0):
+        raise SpecError("place.max_buildings must be a positive whole number (leave it out for no limit)")
+    out = (data.get("output") or {}).get("dir") if isinstance(data.get("output"), dict) else None
+    if out is not None and not isinstance(out, str):
+        raise SpecError("output.dir must be a folder name")
+
+
+def _num(params, key):
+    try:
+        v = params[key]
+        if isinstance(v, bool):
+            raise TypeError
+        return int(v)
+    except (TypeError, ValueError, OverflowError):
+        raise SpecError(f"model.params.{key} must be a whole number, not {params.get(key)!r}")
 
 
 def _need(data, key, typ):
@@ -71,18 +118,20 @@ def validate(data):
             raise SpecError(f"place.kind must be one of {sorted(PLACE_KINDS)}")
         if data["look"].get("region") not in families:
             raise SpecError(f"look.region must be one of {sorted(families)}")
+        _validate_place(data)
         return True
     _need(data, "model", dict)
     _need(data, "replay", dict)
     params = data["model"].get("params", {})
     if not isinstance(params, dict) or "n" not in params or "run_time" not in params:
         raise SpecError("model.params must include n and run_time")
-    if int(params["n"]) <= 0 or int(params["run_time"]) <= 0:
+    n, run_time = _num(params, "n"), _num(params, "run_time")
+    if n <= 0 or run_time <= 0:
         raise SpecError("n and run_time must be positive")
     rep = data["replay"]
     weeks = rep.get("weeks", [])
-    if not weeks or any((not isinstance(w, int)) or w < 0 or w >= int(params["run_time"]) for w in weeks):
-        raise SpecError(f"replay.weeks must be integers within 0..{int(params['run_time'])-1}")
+    if not isinstance(weeks, list) or not weeks or any((not isinstance(w, int)) or w < 0 or w >= run_time for w in weeks):
+        raise SpecError(f"replay.weeks must be integers within 0..{run_time-1}")
     if rep.get("mapping") is not None:
         _validate_mapping(rep["mapping"])
     leg = rep.get("legend")
@@ -182,7 +231,7 @@ def retrofit_extras(data):
 def require_confirmed(path):
     """A project made through the intake may be built only after the user said yes to the decision table they were shown.
     A project file written by hand, with no intake section, is not held to this."""
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    data = _read(path)
     if "intake" not in data:
         return
     from .intake import Intake

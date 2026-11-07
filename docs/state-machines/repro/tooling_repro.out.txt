@@ -1,5 +1,5 @@
 ----------------------------------------
-Exception occurred during processing of request from ('127.0.0.1', 48702)
+Exception occurred during processing of request from ('127.0.0.1', 52750)
 Traceback (most recent call last):
   File "/usr/lib/python3.12/socketserver.py", line 692, in process_request_thread
     self.finish_request(request, client_address)
@@ -17,63 +17,63 @@ Traceback (most recent call last):
            ^^^^^^^^^^^^^^^^^^^^^^^
 ConnectionResetError: [Errno 104] Connection reset by peer
 ----------------------------------------
-T01 REPRODUCED: A response cut off mid-body raises http.client.IncompleteRead, which fetch_overpass does not catch (only HTTPE
-      evidence: IncompleteRead escaped (not FetchError): IncompleteRead(28 bytes read, 99972 more expected); out file exists=False
-T02 REPRODUCED: Same drop through the real command: `paperdolls osm-fetch --endpoint` exits with a traceback instead of 'fetch
-      evidence: exit=1; stderr tail:   File "/usr/lib/python3.12/http/client.py", line 650, in _safe_read |     raise IncompleteRead(data, amt - len(data)) | http.client.IncompleteRead: IncompleteRead(28 bytes read, 99972 more expected)
-T03 REPRODUCED: 200 with valid JSON that is not an object (a list): data.get raises AttributeError, not FetchError.
-      evidence: AttributeError: 'list' object has no attribute 'get'
+T01 REFUTED: A response cut off mid-body raises http.client.IncompleteRead, which fetch_overpass does not catch (only HTTPE
+      evidence: FetchError (handled): the download from http://127.0.0.1:34545/api/interpreter was cut off (IncompleteRead: IncompleteRead(28 bytes read, 99972 more expected)). Nothing was saved. Try again, use a smaller area, or run the query yourself at overpass-turbo.eu and pass the exported file to 'ingest'.
+T02 REFUTED: Same drop through the real command: `paperdolls osm-fetch --endpoint` exits with a traceback instead of 'fetch
+      evidence: exit=1; stderr tail: fetch failed: the download from http://127.0.0.1:35069/api/interpreter was cut off (IncompleteRead: IncompleteRead(28 bytes read, 99972 more expected)). Nothing was saved. Try again, use a smaller area, or run the query yourself at overpass-turbo.eu and pass the exported file to 'ingest'.
+T03 REFUTED: 200 with valid JSON that is not an object (a list): data.get raises AttributeError, not FetchError.
+      evidence: FetchError: the answer was JSON but not an Overpass result (an object with an 'elements' list; got list). Check the endpoint.
 T04 REFUTED: An HTML error page (200) or a 429 must not leave extract.json behind, and must not overwrite a good one.
       evidence: good extract untouched=True; fresh.json written=False; leftovers=['extract.json', 'extract.json.raw', 'fresh.json.raw']; ["html: FetchError 'the answer was not JSON (kept as extract.json.raw). It is us'", "429: FetchError 'Overpass answered HTTP 429 Too Many Requests. the server is '"]
-T05 REPRODUCED: out/extract.json is a cache keyed by nothing. Change place.bbox to a larger area, run `place` again: no refetc
-      evidence: fetch calls=0; buildings=2 for the NEW (larger) bbox; warnings=[]
-T06 REPRODUCED: A half-written extract.json (killed fetch, disk full, hand-saved bad export) is reused on every run; the messa
-      evidence: same failure twice=True; message="the ingest failed: Expecting ',' delimiter: line 1 column 65 (char 64)"
-T07 REPRODUCED: validate() checks place.kind and look.region only. A bbox place with no/short bbox or an osm_relation with no 
-      evidence: osm_relation: exit=1 ValueError: give a relation id, a bounding box, or both; bbox: exit=1 IndexError: Replacement index 3 out of range for positional args tuple; extract_file: exit=1 KeyError: 'extract_path'
-T08 REPRODUCED: An element without "type", or a node without lat, raises KeyError. cmd_ingest and place catch IngestError and 
-      evidence: no type: exit=1 KeyError: 'type'; node without lat: exit=1 KeyError: 'lat'
-T09 REPRODUCED: Every building degenerate (a line, a bowtie of zero area) but one road: ingest succeeds with 0 buildings and t
-      evidence: buildings=0; warnings=[]; skipped={'building smaller than 8 m2': 1}
-T10 REPRODUCED: One building with lon=Infinity (Python's json accepts it) is enough to make the origin Infinity: every point p
-      evidence: exit=0; scene has Infinity=True; buildings=0; origin={'lat': 50.05, 'lon': inf}; stdout=frame rotated nan degrees; estimated asset share 0% (unrotated 0%) | report: /tmp/pdrepro-sfyqehur/scene_report.md | WARNING: No roads in the extract: nothing f
-T11 REPRODUCED: Two elements with the same way id (two extracts concatenated by hand) give two scene buildings with the same i
-      evidence: ids=['w1', 'w1']; warnings=[]
-T12 REPRODUCED: --max-buildings -1: `if max_buildings and len(bld) > max_buildings` is true for any negative value; bld[:-1] d
-      evidence: 3 buildings in, 2 out, skipped reported={'buildings beyond --max-buildings -1 (kept the nearest to the centre)': 4}
-T13 REPRODUCED: A figure-8 footprint with unequal lobes has a non-zero signed area, so it passes the 8 m2 test and goes into t
-      evidence: buildings=1; footprint=[[-8.16, 65.59], [11.26, 6.93], [30.5, 47.03], [-17.78, 45.54]]; self-crossings=1
-T14 REPRODUCED: cmd_ingest writes scene.json, then the .md report, then the .json report, each with write_text (no temp file, 
-      evidence: exit=1; scene.json written=True; scene_report.json written=False; IsADirectoryError: [Errno 21] Is a directory: '/tmp/pdrepro-29yah56a/scene_report.md'
-T15 REPRODUCED: viewer_build._fill replaces /*__TITLE__*/, /*__PACK__*/, /*__SCENE__*/ in that order over the WHOLE page, mani
-      evidence: MANIFEST literal no longer parses (Expecting ',' delimiter: line 1 column 5530 (char 5529)); the scene id w1 appears inside it: True
-T16 REPRODUCED: pack.build() validates with check() (read 1), then reads the manifest again for the page (read 2) and a third 
-      evidence: build returned a page (485099 bytes) embedding id 'BAD ID'; check() on the same folder now says ['id: required: lower-case letters, digits and hyphens, starting with a letter']
-T17 REPRODUCED: runtime.files entries must be inside the pack (norm_file); runtime.entry used alone is joined with `/` and not
-      evidence: check errors=[]; outside file inlined=True
-T18 REPRODUCED: cmd_pack writes the page with Path.write_text straight onto --out. Two processes building to the same --out in
-      evidence: final=20971520 bytes; sizes seen by a concurrent reader=[0, 2097152, 4194304, 6291456, 8388608, 10485760]
-T19 REPRODUCED: `pack dev` on a pack.yaml that is not valid YAML: DevState copes (error page), but serve() then calls packmod.
-      evidence: exit=1; stderr tail:            ^
+T05 REFUTED: out/extract.json is a cache keyed by nothing. Change place.bbox to a larger area, run `place` again: no refetc
+      evidence: fetch calls=1; buildings=5 for the NEW (larger) bbox; warnings=['fetched a new extract: extract.json was fetched for bbox [50.0, 4.0, 50.01, 4.01], not for bbox [49.9, 3.9, 50.1, 4.1]']
+T06 REFUTED: A half-written extract.json (killed fetch, disk full, hand-saved bad export) is reused on every run; the messa
+      evidence: errors with fetching allowed=0; refetched 1 time(s); with --no-fetch: "no usable extract at /tmp/pdrepro-q5wkaj9e/out/extract.json (extract.json cannot be read (Expecting ',' delimiter: line 1 column 65 (char 64))). The q"
+T07 REFUTED: validate() checks place.kind and look.region only. A bbox place with no/short bbox or an osm_relation with no 
+      evidence: osm_relation: exit=1 cannot continue: place.relation must be an OSM relation id (a positive whole number) for p; bbox: exit=1 cannot continue: place.bbox must be four numbers: south, west, north, east; extract_file: exit=1 cannot continue: place.extract_path must be the path of a file for place.kind extract_file
+T08 REFUTED: An element without "type", or a node without lat, raises KeyError. cmd_ingest and place catch IngestError and 
+      evidence: no type: exit=1 ingest failed: e.json: malformed element (missing key 'type'). Check that every element has 'type', and every node 'lat' and 'lon'; node without lat: exit=1 ingest failed: e.json: malformed element (missing key 'lat'). Check that every element has 'type', and every node 'lat' and 'lon'
+T09 REFUTED: Every building degenerate (a line, a bowtie of zero area) but one road: ingest succeeds with 0 buildings and t
+      evidence: buildings=0; warnings=["The scene has NO buildings (1 building feature(s) after clipping; building smaller than 8 m2: 1). A model pack that binds to the scene's buildings has nothing to bind."]; skipped={'building smaller than 8 m2': 1}
+T10 REFUTED: One building with lon=Infinity (Python's json accepts it) is enough to make the origin Infinity: every point p
+      evidence: exit=0; scene has Infinity=False; buildings=1; origin={'lat': 50.0005, 'lon': 4.0005}; stdout=frame rotated -0.0 degrees; estimated asset share 100% (unrotated 100%) | report: /tmp/pdrepro-nu8yo88n/scene_report.md | WARNING: 1 feature(s) had a coordinate
+T11 REFUTED: Two elements with the same way id (two extracts concatenated by hand) give two scene buildings with the same i
+      evidence: ids=['w1']; warnings=['1 building(s) left out: building with an id already used (kept the first).']
+T12 REFUTED: --max-buildings -1: `if max_buildings and len(bld) > max_buildings` is true for any negative value; bld[:-1] d
+      evidence: refused: --max-buildings must be a whole number of at least 1, not -1 (leave it out for no limit)
+T13 REFUTED: A figure-8 footprint with unequal lobes has a non-zero signed area, so it passes the 8 m2 test and goes into t
+      evidence: buildings=0; footprint=[]; self-crossings=0
+T14 REFUTED: cmd_ingest writes scene.json, then the .md report, then the .json report, each with write_text (no temp file, 
+      evidence: exit=1; scene.json written=False; scene_report.json written=False; error: is a directory, not a file: /tmp/pdrepro-lqqfv1ku/scene_report.md
+T15 REFUTED: viewer_build._fill replaces /*__TITLE__*/, /*__PACK__*/, /*__SCENE__*/ in that order over the WHOLE page, mani
+      evidence: MANIFEST literal still parses
+T16 REFUTED: pack.build() validates with check() (read 1), then reads the manifest again for the page (read 2) and a third 
+      evidence: build read the manifest 1 time(s) and returned a page (518436 bytes) not embedding id 'BAD ID'; check() on the folder now says ['id: required: lower-case letters, digits and hyphens, starting with a letter']
+T17 REFUTED: runtime.files entries must be inside the pack (norm_file); runtime.entry used alone is joined with `/` and not
+      evidence: check/build errors=['runtime.entry: must be a relative path inside the pack folder (no leading / and no ..)', 'build: the pack does not validate: runtime.entry: must be a relative path inside the pa']; outside file inlined=False
+T18 REFUTED: cmd_pack writes the page with Path.write_text straight onto --out. Two processes building to the same --out in
+      evidence: final=20971520 bytes; sizes seen by a concurrent reader=[20971520]
+T19 REFUTED: `pack dev` on a pack.yaml that is not valid YAML: DevState copes (error page), but serve() then calls packmod.
+      evidence: server kept running: 
 T20 REFUTED: The state machine under normal and rough use: error -> fix -> ok; atomic rename save; truncated scene mid-writ
-      evidence: start ok=True v=1; after break ok=False v=2 err=['spec: must be 1']; after atomic fix ok=True v=3; half scene ok=False; completed ok=True v=5; events per tab=[5, 5]; after tab closed ok=True v=6; port in use -> SystemExit('cannot start the server on port 53439: [Errno 98] '); stop took 0.01s
+      evidence: start ok=True v=1; after break ok=False v=2 err=['spec: must be 1']; after atomic fix ok=True v=3; half scene ok=False; completed ok=True v=6; events per tab=[6, 6]; after tab closed ok=True v=7; port in use -> SystemExit('cannot start the server on port 42901: [Errno 98] '); stop took 0.02s
 T21 REFUTED: Each saved change (even a `touch`) rebuilds the full page under one lock and bumps the version, so every conne
-      evidence: 20 saves in 2.9s -> 5 rebuilds (watcher polls every 0.25s, coalescing saves inside one tick); final ok=True
-T22 REPRODUCED: np.savez_compressed appends .npz when the path lacks it. cmd_export prints `wrote <out>` with the name the use
-      evidence: export exit=0 printed 'wrote /tmp/pdrepro-_2zfdxby/traj'; file 'traj' exists=False; files=['render.yaml', 'traj.npz']; next command exit=1: FileNotFoundError: [Errno 2] No such file or directory: '/tmp/pdrepro-_2zfdxby/traj'
-T23 REPRODUCED: Intake loads the file in __init__ and rewrites the whole file in save(); there is no lock and no merge. Two `i
-      evidence: after both answers: goal=None name='my project' (a's answer is gone; both commands printed OK)
-T24 REPRODUCED: render.yaml written with write_text: a kill mid-write leaves a prefix. (a) truncated inside a flow sequence ->
-      evidence: (a) exit=1                            ^; (b) exit=0 status=ask progress={'answered': 0, 'of': 6} (earlier answers: goal, name)
-T25 REPRODUCED: Changing goal deletes the other branch's answers but not the bookkeeping in `intake:` (defaults, override_keys
-      evidence: overrides_answered after goal flip and a new model.source answer=True; question state=answered; model.params has 37 keys, rebuilt from the preset
+      evidence: 20 saves in 2.8s -> 7 rebuilds (watcher polls every 0.25s, coalescing saves inside one tick); final ok=True
+T22 REFUTED: np.savez_compressed appends .npz when the path lacks it. cmd_export prints `wrote <out>` with the name the use
+      evidence: export exit=0 printed 'wrote /tmp/pdrepro-mq72o_c8/traj.npz'; file 'traj' exists=False; files=['f', 'render.yaml', 'traj.npz']; printed path exists=True; next command exit=0: wrote frames to /tmp/pdrepro-mq72o_c8/f
+T23 REFUTED: Intake loads the file in __init__ and rewrites the whole file in save(); there is no lock and no merge. Two `i
+      evidence: after both answers: goal='model_replay' name='my project' (a's answer is gone; both commands printed OK)
+T24 REFUTED: render.yaml written with write_text: a kill mid-write leaves a prefix. (a) truncated inside a flow sequence ->
+      evidence: (a) exit=3 REJECTED: /tmp/pdrepro-lqxgipy4/render.yaml is not valid YAML (while parsing a flow node). Fix it by; (b) exit=3 status=None progress=None (earlier answers: goal, name)
+T25 REFUTED: Changing goal deletes the other branch's answers but not the bookkeeping in `intake:` (defaults, override_keys
+      evidence: overrides_answered after goal flip and a new model.source answer=None; question state=missing; model.params has 37 keys, rebuilt from the preset
 T26 REFUTED: Expect REFUTED. (1) an answer after confirmation withdraws it; (2) a hand edit of render.yaml after `show` inv
       evidence: (3) refused; status before show=confirm; confirmed=True; (1) after a new answer confirmed=False; (4) same answer twice ok; (2) after hand edit confirmed=False
-T27 REPRODUCED: validate() does int(params['n']); a string or null gives ValueError/TypeError, but cmd_validate/_replay_spec c
-      evidence: n='abc': exit=1 ValueError: invalid literal for int() with base 10: 'abc'; n=None: exit=1 TypeError: int() argument must be a string, a bytes-like object or a r; n=[1]: exit=1 TypeError: int() argument must be a string, a bytes-like object or a r
-T28 REPRODUCED: pack.validate() raises TypeError (str.join on a non-string) for two kinds of already-invalid manifest that viz
-      evidence: a: TypeError: sequence item 1: expected str instance, float found; b: TypeError: sequence item 0: expected str instance, int found; cli pack check: exit=1 TypeError: sequence item 4: expected str instance, float found
-T29 REPRODUCED: overpass_query(relation, bbox) documents "either, or both" and `osm-fetch --relation R --bbox ...` accepts bot
-      evidence: bbox values in query=False; filter used=True
-T30 REPRODUCED: `--include prng.js` is documented as the way to load a shared helper. undeclared_scripts(path, include) honour
-      evidence: undeclared_scripts(include)=[]; build refused: the pack does not validate: runtime.js refers to ./prng.js, a file of the pack that is not inlined into the pa
+T27 REFUTED: validate() does int(params['n']); a string or null gives ValueError/TypeError, but cmd_validate/_replay_spec c
+      evidence: n='abc': exit=1 invalid: model.params.n must be a whole number, not 'abc'; n=None: exit=1 invalid: model.params.n must be a whole number, not None; n=[1]: exit=1 invalid: model.params.n must be a whole number, not [1]
+T28 REFUTED: pack.validate() raises TypeError (str.join on a non-string) for two kinds of already-invalid manifest that viz
+      evidence: a: no crash; b: no crash; cli pack check: exit=1 
+T29 REFUTED: overpass_query(relation, bbox) documents "either, or both" and `osm-fetch --relation R --bbox ...` accepts bot
+      evidence: bbox values in query=True; filter used=True
+T30 REFUTED: `--include prng.js` is documented as the way to load a shared helper. undeclared_scripts(path, include) honour
+      evidence: undeclared_scripts(include)=[]; built
