@@ -1,4 +1,4 @@
-/* R07: an exception in the run's onFrames callback (store.pushFrames refusing an out-of-order chunk) is thrown from the transport's message handler, not
+/* [FIXED aa30227] R07: an exception in the run's onFrames callback (store.pushFrames refusing an out-of-order chunk) is thrown from the transport's message handler, not
  * through the run's promise: the controller never sees it. With one chunk lost the run "succeeds" with a truncated timeline and no error anywhere.
  * (postMessage does not lose messages; this injects the fault to show what the controller does with ANY exception thrown by pushFrames during a stream.)
  * Run: node docs/state-machines/repro/r07-dropped-chunk-silent-truncation.js */

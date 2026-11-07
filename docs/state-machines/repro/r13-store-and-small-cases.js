@@ -1,4 +1,4 @@
-/* R13: smaller cases, each printed on its own line.
+/* [FIXED aa30227 (a2, b), 4eadbf1 (c, d, e)] R13: smaller cases, each printed on its own line.
  *  (a) a runtime that throws the empty string is taken for a success (packworker.js:96 tests m.error for truthiness); an Error with an empty message is not
  *  (b) pushFrames(replace) that throws half way leaves the store half replaced with no event and a stale bound view (packstore.js:140-144)
  *  (c) switching compare off leaves B's worker running and still re-running (packdash.js:89 never disposes)
@@ -17,7 +17,7 @@ const H = require('./_harness'), { G } = H;
     global.THROW_PRIMITIVE = true;
     const impl = H.makeImpl(); const orig = impl.step; impl.step = (h, n) => { if (n > 0) throw ''; return orig(h, n); };
     const { env, store, ctl } = H.makePage({ impl, chunk: 8 }); const p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
-    console.log('(a2) runtime threw the empty string: ctl.error=' + JSON.stringify(ctl.error) + ' frames=' + store.length() + ' ctl.runs=' + ctl.runs + ' (error "" is falsy, so the client takes the failure for a success)');
+    console.log('(a2) runtime threw the empty string: ctl.error=' + JSON.stringify(ctl.error) + ' frames=' + store.length() + ' ctl.runs=' + ctl.runs + ' (FIXED: the server never sends an empty message, the client tests `error !== undefined`)');
     global.THROW_PRIMITIVE = false;
   }
   { // (b)
@@ -25,20 +25,20 @@ const H = require('./_harness'), { G } = H;
     s.bindScene('thing', { count: 5, index: [0, 1, 2, 3, 4] }); s.pushFrames([fr(0), fr(1), fr(2)], { replace: true }); s.setTime(2); const first = s.bound('thing').fields.load[0];
     const ev = []; s.subscribe('*', e => ev.push(e.topic));
     let err = null; try { s.pushFrames([fr(0), fr(1), fr(5)], { replace: true }); } catch (e) { err = e.message; }
-    console.log('(b) pushFrames threw "' + err + '": length=' + s.length() + ' (was 3), events=' + JSON.stringify(ev) + ', time.t=' + s.time().t + ', frame() is ' + (s.frame() ? 'present' : 'null') + ', bound load[0]=' + s.bound('thing').fields.load[0] + ' (stale value from the replaced run: ' + first + ')');
+    console.log('(b) pushFrames threw "' + err + '": length=' + s.length() + ' (was 3), events=' + JSON.stringify(ev) + ', time.t=' + s.time().t + ', frame() is ' + (s.frame() ? 'present' : 'null') + ', bound load[0]=' + s.bound('thing').fields.load[0] + ' (FIXED: pushFrames is all or nothing; unchanged: ' + first + ')');
   }
   { // (c)
     const env = H.makeEnv(); const A = G.PackStore.create(env.manifest), ctlA = G.PackHost.createController({ manifest: env.manifest, runtime: env.worker(), store: A });
     let p = ctlA.start(); await env.drain(); await env.yieldAll(); await p;
     const cmp = G.PackDash.createCompare({ manifest: env.manifest, store: A, createRuntime: () => env.worker(), schedule() {} });
     cmp.enable(true); await env.drain(); await env.yieldAll(); cmp.enable(false);
-    const runsBefore = cmp.ctlB.runs; cmp.B.setParam('rate', 0.35); cmp.flush(); await env.drain(); await env.yieldAll();
-    console.log('(c) compare off: B worker dead=' + env.workers[1].dead + ', B re-ran anyway after enable(false): ' + (cmp.ctlB.runs - runsBefore) + ' run(s)');
+    cmp.B.setParam('rate', 0.35); const ran = cmp.flush(); await env.drain(); await env.yieldAll();
+    console.log('(c) compare off: B worker dead=' + env.workers[1].dead + ', ctlB=' + cmp.ctlB + ', flush() re-ran B: ' + ran + ', workers made: ' + env.workers.length);
   }
   { // (d)
     const m = H.MANIFEST(); m.presets.push({ id: 'odd', label: 'Odd', params: { rate: 0.22 } });
     const v = G.PackSpec.validate(m); const s = G.PackStore.create(m); s.applyPreset('odd');
-    console.log('(d) validator ok=' + v.ok + ' (errors: ' + JSON.stringify(v.errors) + '); after applyPreset("odd") rate=' + s.param('rate') + ' isPreset("odd")=' + s.isPreset('odd'));
+    console.log('(d) validator ok=' + v.ok + ' (errors: ' + JSON.stringify(v.errors) + '); after applyPreset("odd") rate=' + s.param('rate') + ' isPreset("odd")=' + s.isPreset('odd') + ' (the preset is compared as the store holds it)');
   }
   { // (e)
     const { env, store, ctl } = H.makePage({ chunk: 8 }); const p = ctl.start(); await env.drain();
