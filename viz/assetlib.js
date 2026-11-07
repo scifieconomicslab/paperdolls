@@ -313,13 +313,27 @@
 
   // Sprite cache: an asset at a given scale and colouring is painted once into an offscreen canvas, then blitted.
   // Set AssetLib.sprites.factory = (w, h) => canvas (browser: document.createElement; node: createCanvas).
-  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false, ink: false, grain: true, minDetail: 2.5, posterize: 0, maxZoomBuilds: Infinity, maxBuildMs: Infinity, frameStart: 0, zooming: false, collect: null, index: new Map(), shapes: new Map(), frame: 0, evictions: 0, staleOk: false };       // staleOk: the caller draws to the screen, so a sprite in other colours may stand in for one over the budget (never into a cached layer)
+  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false, ink: false, grain: true, minDetail: 2.5, posterize: 0, maxZoomBuilds: Infinity, maxBuildMs: Infinity, frameStart: 0, zooming: false, collect: null, index: new Map(), shapes: new Map(), frame: 0, evictions: 0, staleOk: false, unbudgeted: false };       // staleOk: the caller draws to the screen, so a sprite in other colours may stand in for one over the budget (never into a cached layer)
   // The canvas factory for browser pages. Every offscreen canvas the renderer makes (sprites, the ground and far layers, the patch scratch, the tint) is a cache that is written with
   // thousands of small drawImage / fill calls and only ever read by a drawImage. Chromium backs a plain canvas with the GPU and runs those calls as GPU work: 9,900 sprite canvases
   // and two 3x-view layers made the whole-commune view of Jette run at 0.8 fps on a real GPU (paperdolls#3; 40-60 fps with the canvases in memory, 20 fps while the layer was repainting).
   // A canvas opened with { willReadFrequently: true } is backed by memory, and drawing it to the (GPU) stage is a single upload of the window that is shown. The options of
   // getContext are fixed by its first call, so the factory makes that call itself; later getContext('2d') calls return the same context. The stage canvases stay on the GPU.
   // soft: false gives the plain canvases back (a page can pick for a measurement); node-canvas ignores the option.
+  // Device pixel ratio changes after load (browser zoom, a window dragged to another monitor): `resize` fires for the first, a resolution media query for both. Sprites, layers and the stage
+  // are sized from sprites.dpr, so it is set here before the callback resizes the canvases. Returns a function that stops watching. win: window (or a stand-in with devicePixelRatio and matchMedia).
+  function watchDpr(win, onChange) {
+    let cur = win.devicePixelRatio || 1, mq = null, off = null;
+    const check = () => { const d = win.devicePixelRatio || 1; if (d !== cur) { cur = d; sprites.dpr = d; onChange(d); } arm(); };
+    function arm() {
+      if (off) { off(); off = null; }
+      if (!win.matchMedia) return;
+      mq = win.matchMedia('(resolution: ' + cur + 'dppx)');
+      if (mq.addEventListener) { mq.addEventListener('change', check); off = () => mq.removeEventListener('change', check); }
+    }
+    sprites.dpr = cur; arm(); if (win.addEventListener) win.addEventListener('resize', check);
+    return () => { if (off) off(); if (win.removeEventListener) win.removeEventListener('resize', check); };
+  }
   function canvasFactory(doc, o) {
     const soft = !(o && o.soft === false);
     return function (w, h) { const c = doc.createElement('canvas'); c.width = w; c.height = h; if (soft) c.getContext('2d', { willReadFrequently: true }); return c; };
@@ -367,7 +381,7 @@
     const detail = sprites.detail && asset.group === 'buildings' && sb >= sprites.minDetail;                 // baked detail only where it can be seen
     const ink = sprites.ink && (asset.group === 'buildings' || asset.group === 'trees') && sb >= sprites.minDetail;   // heavy ink on the silhouette only, hairlines inside
     const pz = sprites.posterize ? '|p' + sprites.posterize : '', base = asset.id + '|' + asset.heading + '|' + reg.id;
-    return { detail, ink, key: base + '|' + sb + '|' + ck + (detail ? (sprites.grain ? '|d' : '|D') : '') + (ink ? '|i' : '') + pz, ikey: base + '|' + ck + pz, skey: base + pz };       // skey: the shape alone, any colours
+    return { detail, ink, key: base + '|' + sb + '|' + ck + ((sprites.dpr || 1) !== 1 ? '|q' + sprites.dpr : '') + (detail ? (sprites.grain ? '|d' : '|D') : '') + (ink ? '|i' : '') + pz, ikey: base + '|' + ck + pz, skey: base + pz };       // skey: the shape alone, any colours
   }
   // Paint one sprite into the cache. scale is the css scale the ink width follows.
   function buildSprite(asset, colours, reg, sb, scale, kk) {
@@ -426,18 +440,18 @@
     // build budget is spent (maxZoomBuilds). Rebuilding every visible sprite at each new bucket stalled a zoom for 150 to 500 ms at a time. The
     // scaled blit is soft; the view sharpens (exact sprites, 150 builds a frame) once it stops. With nothing held to scale, a building or tree is
     // built, and decoration (people, vehicles) is left out for a few frames.
-    if (!sp && sprites.zooming && (sprites.builds >= sprites.maxZoomBuilds || timeUp())) {
+    if (!sp && sprites.zooming && !sprites.unbudgeted && (sprites.builds >= sprites.maxZoomBuilds || timeUp())) {
       const best = nearestHeld(sprites.index.get(kk.ikey), sb) || (sprites.staleOk ? lastOf(holder, sb) || nearestHeld(sprites.shapes.get(kk.skey), sb) : null);          // same colours first, else what this object drew last, else the same shape in other colours (paperdolls#18)
       if (best) { sp = best; sbUse = best.sb; }
       else if (asset.group === 'people' || asset.group === 'vehicles') return;
     }
-    if (!sp && sprites.exact && (sprites.builds >= sprites.maxBuilds || timeUp())) {      // over this frame's budget: show a sprite already held and sharpen on a later frame
+    if (!sp && sprites.exact && !sprites.unbudgeted && (sprites.builds >= sprites.maxBuilds || timeUp())) {      // over this frame's budget: show a sprite already held and sharpen on a later frame
       // A colour change on a settled view has no sprite held under the new colours: the same shape in the old colours (or at the nearest scale) stands in until the exact one is built, a few
       // frames later, so the builds of a frame never exceed the budget (paperdolls#18; one model month that recoloured 400 buildings built 362 sprites in one frame).
       const stale = nearestHeld(sprites.index.get(kk.ikey), sb) || (sprites.staleOk ? lastOf(holder, sb) || nearestHeld(sprites.shapes.get(kk.skey), sb) : null);
       if (stale) { sp = stale; sbUse = stale.sb; }
     }
-    if (!sp && sprites.exact && (sprites.builds >= sprites.maxBuilds || timeUp())) {      // nothing of this shape is held at all: the bucketed sprite is built, scaled from a neighbour if one appears
+    if (!sp && sprites.exact && !sprites.unbudgeted && (sprites.builds >= sprites.maxBuilds || timeUp())) {      // nothing of this shape is held at all: the bucketed sprite is built, scaled from a neighbour if one appears
       const z = sprites.zooming; sprites.exact = false; sprites.zooming = true;       // scaled from a sprite already held, not built: the octave sprite is not there yet
       drawSprite(ctx, asset, colours, reg, px, py, scale, holder); sprites.exact = true; sprites.zooming = z; return;
     }
@@ -493,7 +507,7 @@
     const q = sprites.dpr || 1; if (scale * q < 1) return null;
     const sb = Math.max(1, scale * q), ck = colours._sk;
     if (ck === undefined) return null;                                   // never drawn yet
-    const sp = sprites.cache.get(asset.id + '|' + asset.heading + '|' + reg.id + '|' + sb + '|' + ck);
+    const sp = sprites.cache.get(asset.id + '|' + asset.heading + '|' + reg.id + '|' + sb + '|' + ck + (q !== 1 ? '|q' + q : ''));
     if (!sp) return null;
     return { mask: sp.mask || (sp.mask = buildSpriteMask(sp)), x: Math.round(px * q - sp.ox), y: Math.round(py * q - sp.oy) };
   }
@@ -888,7 +902,7 @@
     }
   };
 
-  root.AssetLib = { canvasFactory, quantise, prewarm, PREWARM_MAX_PX, DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, spritePlacement, sprites, buildAsset,
+  root.AssetLib = { canvasFactory, watchDpr, quantise, prewarm, PREWARM_MAX_PX, DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, spritePlacement, sprites, buildAsset,
                     makeOutfit, vehicleTint, pickFleet, pickPerson, vehicleColours, personColours, flagsOf, scales, mix, shade, hash, hashStr, isData, faceOf,
                     registerGroup, baseColours, pickWeighted,
                     CARBON, theme, asTheme, resolveLook, snapTo, toGray };

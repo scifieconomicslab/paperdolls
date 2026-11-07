@@ -144,4 +144,43 @@ test('#18 eviction is incremental and never drops a sprite the current frame dre
   } finally { A.sprites.dpr = 1; }
 });
 
+// ---- #19: the device pixel ratio can change after load; the far layer does not depend on when it was first painted ----
+test('#19 far layer: a layer first painted in the first two frames (octave sprites) is repainted exactly, so the settled picture equals one painted exact from frame 0 (r32)', () => {
+  const base = V.makePlaceholderScene(7), w = 900, h = 600;
+  for (const [dpr, k] of [[2, 0.8], [2, 0.47]]) {
+    const run = force => { R.resetSprites(); A.sprites.dpr = dpr; R.clock.set(0.25);
+      const s = R.mkSim(JSON.parse(JSON.stringify(base)), { layerMs: 6, prewarm: false }), c = R.ctx2d(w * dpr, h * dpr); c.scale(dpr, dpr); const v = R.viewAt(base, k, w, h);
+      if (force) s._zoom = { scale: k, still: 10 };
+      for (let n = 0; n < 3000; n++) { V.renderFrame(c, s, v, {}); if (n > 3 && whole(s)) break; } for (let i = 0; i < 8; i++) V.renderFrame(c, s, v, {});
+      return px(c); };
+    try { const d = maxDiff(run(false), run(true)); assert.strictEqual(d.n, 0, 'DPR ' + dpr + ' at ' + k + ' px/m: cold start vs exact from frame 0 differ in ' + d.n + ' bytes (max ' + d.max + ')'); } finally { A.sprites.dpr = 1; }
+  }
+});
+test('#19 device pixel ratio: a change after load re-sizes layers and sprites; the picture equals one drawn at the new ratio from the start (r35c)', () => {
+  const sc = V.makePlaceholderScene(7), v = R.viewAt(sc, 0.35, W, H);
+  const draw = (q, then) => { R.resetSprites(); A.sprites.dpr = q; const sim = R.mkSim(JSON.parse(JSON.stringify(sc)), { layerMs: 1e9 }); let c = R.ctx2d(W * q, H * q); c.setTransform(q, 0, 0, q, 0, 0); for (let i = 0; i < 6; i++) V.renderFrame(c, sim, v, {});
+    if (then) { A.sprites.dpr = then; c = R.ctx2d(W * then, H * then); c.setTransform(then, 0, 0, then, 0, 0); for (let i = 0; i < 8; i++) V.renderFrame(c, sim, v, {}); }
+    return { px: px(c), layer: sim._far.cv.width }; };
+  try {
+    const fresh = draw(2), moved = draw(1, 2);                                         // loaded at 1, then the window moved to a 2x screen
+    assert.strictEqual(moved.layer, fresh.layer, 'the far layer is at the new ratio: ' + moved.layer + ' vs ' + fresh.layer + ' px wide');
+    const d = maxDiff(moved.px, fresh.px); assert.strictEqual(d.n, 0, 'the picture after the change equals the one drawn at 2x from the start: ' + d.n + ' bytes differ');
+  } finally { A.sprites.dpr = 1; }
+});
+test('#19 AssetLib.watchDpr: sets sprites.dpr, and a resolution media query or a resize with a new ratio calls back once with it', () => {
+  assert.strictEqual(typeof A.watchDpr, 'function', 'AssetLib.watchDpr exists');
+  const mqs = [], win = { devicePixelRatio: 1, listeners: {}, matchMedia(q) { const m = { q, ls: [], addEventListener(t, f) { m.ls.push(f); }, removeEventListener(t, f) { m.ls = m.ls.filter(x => x !== f); } }; mqs.push(m); return m; },
+    addEventListener(t, f) { (win.listeners[t] = win.listeners[t] || []).push(f); }, removeEventListener(t, f) { win.listeners[t] = (win.listeners[t] || []).filter(x => x !== f); } };
+  const got = []; const stop = A.watchDpr(win, d => got.push([d, A.sprites.dpr]));
+  try {
+    assert.strictEqual(A.sprites.dpr, 1); assert.strictEqual(mqs[0].q, '(resolution: 1dppx)');
+    win.devicePixelRatio = 2; mqs[0].ls.forEach(f => f({}));                                         // moved to another monitor: the query stops matching
+    assert.strictEqual(JSON.stringify(got), JSON.stringify([[2, 2]])); assert.strictEqual(mqs[mqs.length - 1].q, '(resolution: 2dppx)', 'the query is re-armed at the new ratio');
+    win.devicePixelRatio = 1.5; win.listeners.resize.forEach(f => f({}));                            // browser zoom: resize fires
+    assert.strictEqual(JSON.stringify(got), JSON.stringify([[2, 2], [1.5, 1.5]]));
+    win.listeners.resize.forEach(f => f({})); assert.strictEqual(got.length, 2, 'no change, no callback');
+  } finally { stop(); A.sprites.dpr = 1; }
+  for (const page of ['viewer.html', 'packhost.html']) { const src = fs.readFileSync(path.join(R.VIZ, page), 'utf8'); assert(/A\.watchDpr\(window,/.test(src), page + ' watches the ratio'); assert(/A\.sprites\.dpr = dpr;/.test(src), page + ': resize() sets the ratio before sizing the canvases'); }
+});
+
 console.log(failed ? passed + ' passed, ' + failed + ' FAILED' : 'all passed (' + passed + ')');

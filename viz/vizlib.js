@@ -912,7 +912,7 @@
       }
     };
     const drawStatic = (c, v) => { for (const _ of drawStaticSteps(c, v)); };
-    const F = A.sprites.factory, gkey = [view.w, view.h, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings, detail, A.sprites.ink, A.sprites.posterize].join('|');
+    const F = A.sprites.factory, gkey = [view.w, view.h, A.sprites.dpr || 1, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings, detail, A.sprites.ink, A.sprites.posterize].join('|');
     const settled = zs.stillView >= 3, zooming = zs.still < 2;
     if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg, drawStaticSteps, view.scale < 1.0, (c, v) => groundCoarse(c, v, sim, pal));      // far out (below 1 px/m) a missing ground is first painted flat, then exactly in slices
     else drawStatic(ctx, view);
@@ -955,6 +955,9 @@
       else drawAgent(target, v, reg, shadow, sim, it.o, it.pose, layers);
     };
     const drawItems = (target, list, v) => { for (const it of list) drawItem(target, it, v); };
+    // What is painted into a cached layer stays there, so it is drawn with exact sprites whatever this frame's build budget is (the layer's own slice time bounds the work). Over the budget a
+    // sprite would otherwise be replaced by a scaled neighbour, and the layer would keep it for good (paperdolls#19).
+    const drawLayerItem = (target, it, v) => { const S = A.sprites; S.unbudgeted = true; try { drawItem(target, it, v); } finally { S.unbudgeted = false; } };
     const byDepth = (p, q) => p.d - q.d;
     // Zoomed far out nothing in the buildings and trees changes from frame to frame, so they are drawn once into a world-anchored layer
     // and blitted; only vehicles (dots at this zoom) are drawn on top. The layer is redrawn when the scale, the theme or any building's
@@ -977,14 +980,14 @@
       const sigOf = versioned ? (e => sim.buildingStyle(e)) : (e => (e.state ? e.state.charCodeAt(0) : 0) * 2 + (e.investor ? 1 : 0));
       // painted in slices (a yield every 16 items); until it is ready the picture is the coarse one (or the buildings are drawn directly). The sprite exact flag is not part of the
       // key: it flipped when the view settled and repainted the whole layer a second time for nothing. The generator returns what it painted (items, signatures, layer view).
-      const farSteps = function* (c, v) {
-        c.lineJoin = 'round'; let n = 0; const items = collectStatic(v, []).sort(byDepth), sigs = new Array(sim.buildings.length);
-        for (const it of items) { drawItem(c, it, v); if (it.kind === 'b') sigs[it.i] = sigOf(it.o); if ((++n & 15) === 0) yield; }
+      const farSteps = function* (c, v, direct) {                  // direct: painted in one go (no slices to bound the work), so the frame's sprite budget applies
+        const put = direct ? drawItem : drawLayerItem; c.lineJoin = 'round'; let n = 0; const items = collectStatic(v, []).sort(byDepth), sigs = new Array(sim.buildings.length);
+        for (const it of items) { put(c, it, v); if (it.kind === 'b') sigs[it.i] = sigOf(it.o); if ((++n & 15) === 0) yield; }
         return { items, sigs, v };
       };
-      const farOnce = (c, v) => { const g = farSteps(c, v); for (;;) { const r = g.next(); if (r.done) return r.value; } };
+      const farOnce = (c, v) => { const g = farSteps(c, v, true); for (;;) { const r = g.next(); if (r.done) return r.value; } };
       const coarse = (c, v) => farCoarse(c, v, sim, pal, reg, A.REG[pal.reg] || A.REG.colorfigures, layers);
-      if (incremental) farPatch(sim, view, skey, h, sigOf, drawItem, sim.opts.layerMs === undefined ? LAYER_MS : sim.opts.layerMs);
+      if (incremental) farPatch(sim, view, skey, h, sigOf, drawLayerItem, sim.opts.layerMs === undefined ? LAYER_MS : sim.opts.layerMs);
       const drew = worldLayer(ctx, sim, '_far', view, skey, settled, zooming, farOnce, null, farSteps, true, coarse);
       if (drew) {
         const agents = collectAgents([]).sort(byDepth);
@@ -1063,7 +1066,10 @@
     // painted a slice per frame into a second canvas while the old one, scaled, keeps the picture on screen, and is swapped in when it is whole.
     // (Painting it in one go cost 35 to 50 ms for the ground, and 275 ms for the far layer, in a browser.) The old layer stands in only within
     // LAYER_STAND_IN. Otherwise, and for a pan past the margin, it is painted at once as before.
-    const outOfDate = L && (L.rough || (L.skey === skey && L.sc !== sc) || (L.skey !== skey && L.sc === sc));
+    // The far layer holds sprites. One painted while the view was younger than two frames used octave-bucket sprites, scaled; when the view has settled and the exact sprites would
+    // differ (not a power of two device px per metre, above 1), it is painted again once, so the settled picture does not depend on when the layer was first painted (paperdolls#19).
+    const sbx = Math.max(1, view.scale * q), staleSprites = slot === '_far' && L && L.exact === false && A.sprites.exact && Math.abs(sbx - Math.max(1, Math.pow(2, Math.ceil(Math.log2(sbx))))) > 1e-6;
+    const outOfDate = L && (L.rough || staleSprites || (L.skey === skey && L.sc !== sc) || (L.skey !== skey && L.sc === sc));
     if (steps && sim.opts.sliceLayers !== false && !sim[slot + 'C'] && (outOfDate || (!L && softStart))) {      // (not while the rough picture is still being completed: it gets the frame's time first)
       const r = L ? view.scale / L.scale : 1;
       if (!L || (r > LAYER_STAND_IN[0] && r < LAYER_STAND_IN[1])) {
@@ -1075,11 +1081,11 @@
           p = sim[slot + 'P'] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh, gen: steps(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh }), done: false };
         }
         const budget = sim.opts.layerMs === undefined ? LAYER_MS : sim.opts.layerMs, t0 = layerClock();
-        do { const r = p.gen.next(); if (r.done) { p.done = true; p.info = r.value || null; break; } } while (layerClock() - t0 < budget);
+        do { p.exact = p.exact !== false && A.sprites.exact; const r = p.gen.next(); if (r.done) { p.done = true; p.info = r.value || null; break; } } while (layerClock() - t0 < budget);
         if (p.done) {
           if (A.sprites.posterize) A.quantise(p.cv, A.sprites.posterize);
           if (L && L.cv !== p.cv) sim[slot + 'Spare'] = L.cv;
-          L = sim[slot] = { skey, sc, scale: p.scale, cv: p.cv, ox: p.ox, oy: p.oy, mw: p.mw, mh: p.mh, info: p.info, ver: null }; sim[slot + 'P'] = null;
+          L = sim[slot] = { skey, sc, scale: p.scale, cv: p.cv, ox: p.ox, oy: p.oy, mw: p.mw, mh: p.mh, info: p.info, ver: null, exact: p.exact !== false && A.sprites.exact }; sim[slot + 'P'] = null;
           sim.layerRepaints = (sim.layerRepaints || 0) + 1;
         } else if (L) { blitScaled(ctx, view, L, q, bg); return true; }
         else return false;
