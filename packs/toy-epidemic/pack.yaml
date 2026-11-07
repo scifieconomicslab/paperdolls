@@ -89,6 +89,7 @@ mappings:
   - entity: building
     field: vulnerable
     channel: outline
+    lod: {min_scale: 1.2, far: aggregate, cell: 100}   # zoomed out: a hatch per 100 m cell, not an outline on every building
     scale:
       type: categorical
       label: Vulnerable

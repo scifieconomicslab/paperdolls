@@ -19,6 +19,7 @@ CHANNELS = ["wall", "overlay", "segments", "outline", "halo", "groundtint"]
 PLANNED_CHANNELS = ["height", "ground"]
 AGGREGATES = ["mean", "sum", "min", "max"]
 COLOUR_ON = ["wall", "roof", "wall+roof"]
+LOD_FAR = ["aggregate", "hide", "show"]
 OVERLAYS = ["scaffold", "solar", "band", "marker", "insulation", "community"]
 SEG_MAX = 12
 REGIONS = ["left", "right", "bottom"]
@@ -306,13 +307,32 @@ def validate(m):
             err(at, "must be a mapping")
             continue
         for k in mp:
-            if k not in ("entity", "field", "channel", "scale", "total", "max", "group", "aggregate", "opacity", "colour"):
+            if k not in ("entity", "field", "channel", "scale", "total", "max", "group", "aggregate", "opacity", "colour", "lod"):
                 err(f"{at}.{k}", "unknown key")
         if "colour" in mp:  # which surfaces of the building a wall mapping paints
             if mp.get("channel") != "wall":
                 err(f"{at}.colour", "only a wall mapping chooses its surfaces (wall, roof or wall+roof)")
             elif mp["colour"] not in COLOUR_ON:
                 err(f"{at}.colour", "must be one of " + ", ".join(COLOUR_ON))
+        if "lod" in mp:  # level of detail of an outline or halo: from which scale a building is highlighted on its own, and what is drawn below it
+            lod = mp["lod"]
+            if mp.get("channel") not in ("outline", "halo"):
+                err(f"{at}.lod", "only an outline or halo mapping has a level of detail")
+            elif not _obj(lod):
+                err(f"{at}.lod", "must be a mapping {min_scale, far, cell}")
+            else:
+                for k in lod:
+                    if k not in ("min_scale", "far", "cell"):
+                        err(f"{at}.lod.{k}", "unknown key")
+                num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+                if "min_scale" in lod and not (num(lod["min_scale"]) and 0 <= lod["min_scale"] <= 20):
+                    err(f"{at}.lod.min_scale", "must be a scale in pixels per metre from 0 to 20")
+                if "far" in lod and lod["far"] not in LOD_FAR:
+                    err(f"{at}.lod.far", "must be one of " + ", ".join(LOD_FAR))
+                if "cell" in lod and not (num(lod["cell"]) and 20 <= lod["cell"] <= 1000):
+                    err(f"{at}.lod.cell", "must be a cell size in metres from 20 to 1000")
+                if lod.get("far") == "show" and "min_scale" in lod:
+                    warn(f"{at}.lod.min_scale", "ignored: far: show draws the highlight at every zoom")
         if mp.get("channel") in PLANNED_CHANNELS:
             warn(f"{at}.channel", f"{mp['channel']} is a planned channel and is ignored for now")
             continue

@@ -2448,6 +2448,7 @@
     if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg, drawStaticSteps);
     else drawStatic(ctx, view);
     if (sim.groundTint) drawGroundTint(ctx, sim, view);                    // under the buildings and agents, over the ground and shadows
+    if (sim.groundMarks) drawGroundMarks(ctx, sim, view);                  // the zoomed-out form of the outline and halo channels: a hatch on the ground
     // What can be seen at a view: buildings and trees (and the fountain) that reach it, and the agents. Anything whose screen bounds
     // miss the canvas is skipped (viewport culling).
     const collectStatic = (v, out) => {
@@ -2616,6 +2617,26 @@
     }
     ctx.save(); ctx.globalAlpha = T.opacity; ctx.drawImage(C.cv, 0, 0, w, h, 0, 0, view.w, view.h); ctx.restore();
   }
+  // Ground marks (model packs, the far-zoom form of outline and halo): sim.groundMarks = { cells(version, view) -> [{ kind, x0, y0, x1, y1, share, colour }], version() }.
+  // A cell is hatched in the flag colour with diagonal lines whose weight and opacity grow with the share of its buildings that are flagged (outline: one way, halo:
+  // the other). It is drawn on the ground, under the buildings, so it can never cover a roof or wall colour; each cell is clipped to its parallelogram.
+  function drawGroundMarks(ctx, sim, view) {
+    const cells = sim.groundMarks.cells(sim.groundMarks.version ? sim.groundMarks.version() : 0, view); if (!cells.length) return;
+    ctx.save(); ctx.lineCap = 'butt';
+    for (const cell of cells) {
+      if (!(cell.share > 0.02)) continue;
+      const a = proj(view, cell.x0, cell.y0, 0), b = proj(view, cell.x1, cell.y0, 0), d = proj(view, cell.x1, cell.y1, 0), e = proj(view, cell.x0, cell.y1, 0);
+      const x0 = Math.min(a[0], b[0], d[0], e[0]), x1 = Math.max(a[0], b[0], d[0], e[0]), y0 = Math.min(a[1], b[1], d[1], e[1]), y1 = Math.max(a[1], b[1], d[1], e[1]);
+      if (x1 < 0 || x0 > view.w || y1 < 0 || y0 > view.h) continue;
+      const s = Math.min(1, cell.share), cellPx = Math.max(x1 - x0, 1) / 1.7, gap = Math.max(2.5, Math.min(8 - 3 * s, cellPx / 4)), dir = cell.kind === 'halo' ? -1 : 1;
+      ctx.save(); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(d[0], d[1]); ctx.lineTo(e[0], e[1]); ctx.closePath(); ctx.clip();
+      ctx.strokeStyle = cell.colour; ctx.globalAlpha = 0.4 + 0.5 * s; ctx.lineWidth = 1 + 1.1 * s; ctx.beginPath();
+      const h = y1 - y0;
+      for (let x = x0 - h; x <= x1 + h; x += gap) { if (dir > 0) { ctx.moveTo(x, y1); ctx.lineTo(x + h, y0); } else { ctx.moveTo(x, y0); ctx.lineTo(x + h, y1); } }
+      ctx.stroke(); ctx.restore();
+    }
+    ctx.restore();
+  }
   function tintCell(c, view, cell) {
     const a = proj(view, cell.x0, cell.y0, 0), b = proj(view, cell.x1, cell.y0, 0), d = proj(view, cell.x1, cell.y1, 0), e = proj(view, cell.x0, cell.y1, 0);
     if (Math.max(a[0], b[0], d[0], e[0]) < 0 || Math.min(a[0], b[0], d[0], e[0]) > view.w || Math.max(a[1], b[1], d[1], e[1]) < 0 || Math.min(a[1], b[1], d[1], e[1]) > view.h) return;
@@ -2647,7 +2668,7 @@
     for (const b of sim.bindings) if (b.match(e)) { data = b.scale.colour(b.value(e)); break; }   // a data binding wins over the style
     if (style.seg) {
       seg = A.segmentsFor(style.seg.n, style.seg.k);
-      if (seg && !(segOn && e.params)) { const mixk = 0.85 * style.seg.k / style.seg.n; data = A.mix(data || wall, style.seg.done, mixk); if (roof) roof = A.mix(roof, style.seg.done, mixk); seg = null; }
+      if (seg && !(segOn && e.params)) { const mixk = (style.data || style.roof ? 0.3 : 0.85) * style.seg.k / style.seg.n; data = A.mix(data || wall, style.seg.done, mixk); if (roof) roof = A.mix(roof, style.seg.done, mixk); seg = null; }   // far away: only a hint of the sections' colour when a mapping paints the state colour, so that stays readable (at most 0.3 of the way)
     }
     e._seg = !!style.seg; e._sm = segOn;
     if (!e.params) { e._fv = ver; e._th = pal; e._asset = null; e._fdata = data || wall; e._froof = roof; drawExtruded(ctx, view, reg, pal, e, shadowCol, data || wall, roof); return; }

@@ -44,7 +44,9 @@
       }
       if (m.channel === 'outline' || m.channel === 'halo') {          // one entry per value that is highlighted; values with no colour are not drawn and not listed
         const f2 = fieldOf(manifest, m.entity, m.field), names = f2 && f2.type === 'category' ? f2.values : Object.keys(m.scale.values);
-        return { title, kind: 'swatches', items: names.filter(k => m.scale.values[k] && m.scale.values[k].colour).map(k => ({ label: m.scale.values[k].label, colour: m.scale.values[k].colour, mode: m.channel })) };
+        const lod = lodOf(m, m.channel), note = lod && lod.far === 'aggregate' ? 'Zoomed out, a hatch on the ground shows the share of buildings marked per ' + lod.cell + ' m cell (denser = more)' : lod && lod.far === 'hide' ? 'Drawn per building only when zoomed in' : null;
+        const sec = { title, kind: 'swatches', items: names.filter(k => m.scale.values[k] && m.scale.values[k].colour).map(k => ({ label: m.scale.values[k].label, colour: m.scale.values[k].colour, mode: m.channel })) };
+        if (note) sec.note = note; return sec;
       }
       if (m.channel === 'segments') return { title, kind: 'swatches', items: [{ label: 'Done: the first units of the building, drawn as sections of its walls', colour: m.scale.colour }, { label: 'Not yet', colour: m.scale.todo || null }] };
       if (m.scale.type === 'sequential') return { title, kind: 'ramp', colours: m.scale.colours.slice(), domain: m.scale.domain.slice(), noData: NO_DATA };
@@ -170,6 +172,14 @@
     return { field: m.field, at: cat ? (v => (v >= 0 && v < lut.length ? lut[v] : null)) : (v => (v === v ? lut[v ? 1 : 0] : null)) };
   }
 
+  // Level of detail of an outline or halo mapping: `lod: {min_scale, far, cell}`. Below min_scale (px per metre) a building is no longer outlined on its own: far says what is
+  // drawn instead (aggregate: the share flagged per ground cell, hide: nothing, show: the outline at every zoom).
+  const LOD_MIN_SCALE = 1.2, LOD_CELL = 200;
+  function lodOf(m, channel) {
+    if (!m) return null;
+    const l = m.lod || {}, far = l.far || 'aggregate';
+    return { far, minScale: far === 'show' ? 0 : (typeof l.min_scale === 'number' ? l.min_scale : LOD_MIN_SCALE), cell: typeof l.cell === 'number' ? l.cell : LOD_CELL, channel };
+  }
   const OVERLAYS = ['scaffold', 'solar', 'band', 'marker', 'insulation', 'community'];       // the bit of an overlay in a style's mask is its position here: only ever append
   const NEUTRAL_ROOF = '#d4d9dd';                           // the roof of a building outside the model while a mapping paints roofs
   const LEVELS = 128;                                       // a sequential scale is read in this many steps: a table of colours, not a string per building
@@ -239,10 +249,25 @@
     sync();
     // outline and halo: per frame version the buildings to highlight are gathered by colour; a draw strokes one path per colour and kind (the canvas above the map)
     const hlMaps = ['halo', 'outline'].map(ch => (manifest.mappings || []).filter(m => m.channel === ch && m.entity === en).map(m => highlightReader(manifest, m)));
-    const HL = { ver: NaN, halo: [], outline: [], builds: 0 };
+    const HL = { ver: NaN, halo: [], outline: [], builds: 0, marks: [] };
+    // level of detail: the first mapping of each kind says from which scale (pixels per metre) a building is drawn on its own (lod.min_scale) and what is drawn below it
+    // (lod.far: aggregate, hide or show). 'aggregate' puts the share of flagged buildings per ground cell (lod.cell metres) on the ground, under the buildings.
+    const lods = ['halo', 'outline'].map(ch => lodOf((manifest.mappings || []).find(m => m.channel === ch && m.entity === en), ch));
+    const sceneBox = () => root.VizLib.sceneBounds(sim.scene);                 // marks stay on the ground: a cell is cut at the scene's edge
+    const cellGrids = new Map();                                              // cell size -> { of: Int32Array scene building -> cell, cells: [{x0, y0, x1, y1, n}] }
+    const gridOf = size => {
+      let g = cellGrids.get(size); if (g) return g;
+      const of = new Int32Array(nScene).fill(-1), cells = [], at = new Map();
+      for (let i = 0; i < nScene; i++) {
+        if (modelOf[i] < 0) continue; const e = sim.buildings[i], ix = Math.floor(e.fit.cx / size), iy = Math.floor(e.fit.cy / size), key = ix + ',' + iy; let c = at.get(key);
+        if (c === undefined) { c = cells.length; at.set(key, c); cells.push({ x0: ix * size, y0: iy * size, x1: (ix + 1) * size, y1: (iy + 1) * size, n: 0 }); }
+        of[i] = c; cells[c].n++;
+      }
+      cellGrids.set(size, g = { of, cells }); return g;
+    };
     function refreshHL() {
       if (HL.ver === sim.frameVersion) return;
-      HL.ver = sim.frameVersion; HL.builds++;
+      HL.ver = sim.frameVersion; HL.builds++; HL.marks = [];
       ['halo', 'outline'].forEach((kind, ci) => {
         const by = new Map();
         if (live && hlMaps[ci].length) for (let i = 0; i < nScene; i++) {
@@ -251,24 +276,43 @@
           if (col) { let a = by.get(col); if (!a) by.set(col, a = []); a.push(i); }
         }
         HL[kind] = [...by].map(([colour, idx]) => ({ colour, idx: Int32Array.from(idx) }));
+        const lod = lods[ci];
+        if (lod && lod.far === 'aggregate' && lod.minScale > 0 && HL[kind].length) {             // per ground cell: the share flagged, in the colour most of the flagged ones have
+          const gd = gridOf(lod.cell), tally = new Map();
+          for (const g of HL[kind]) for (const i of g.idx) { const c = gd.of[i]; if (c < 0) continue; let t = tally.get(c); if (!t) tally.set(c, t = new Map()); t.set(g.colour, (t.get(g.colour) || 0) + 1); }
+          for (const [c, t] of tally) { let best = null, bn = 0, tot = 0; for (const [col, n] of t) { tot += n; if (n > bn) { best = col; bn = n; } } const cell = gd.cells[c], bd = sceneBox(); HL.marks.push({ kind, x0: Math.max(cell.x0, bd[0]), y0: Math.max(cell.y0, bd[1]), x1: Math.min(cell.x1, bd[2]), y1: Math.min(cell.y1, bd[3]), share: tot / cell.n, flagged: tot, colour: best, minScale: lod.minScale }); }
+        }
       });
     }
     function drawChannels(ctx, view) {
       if (!hlMaps[0].length && !hlMaps[1].length) return 0;
       refreshHL();
       const V = root.VizLib, sc = view.scale, pad = 14 * sc + 20; let drawn = 0;
+      const solo = ci => !lods[ci] || sc >= lods[ci].minScale;                              // zoomed out past min_scale a kind is not drawn per building (see the ground marks)
       const vis = e => { const p = V.proj(view, e.fit.cx, e.fit.cy, 0), h = V.entityHeight(e) * sc; return p[0] > -pad && p[0] < view.w + pad && p[1] > -pad && p[1] - h < view.h + pad; };
       ctx.save(); ctx.lineJoin = 'round';
-      for (const g of HL.halo) for (const [w, a] of [[9, 0.18], [4.5, 0.36]]) {           // a soft glow: two translucent strokes of a ring a little outside the footprint
+      if (solo(0)) for (const g of HL.halo) for (const [w, a] of [[9, 0.18], [4.5, 0.36]]) {           // a soft glow: two translucent strokes of a ring a little outside the footprint
         ctx.strokeStyle = g.colour; ctx.lineWidth = w; ctx.globalAlpha = a; ctx.beginPath();
         for (let j = 0; j < g.idx.length; j++) { const e = sim.buildings[g.idx[j]]; if (vis(e)) { ringPath(ctx, V, view, e.src.footprint, 1.6, 0); if (a > 0.3) drawn++; } }
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
-      for (const g of HL.outline) {
+      if (solo(1)) for (const g of HL.outline) {
         ctx.strokeStyle = g.colour; ctx.lineWidth = sc < 0.8 ? 1.6 : 2.4; ctx.beginPath();
         for (let j = 0; j < g.idx.length; j++) { const e = sim.buildings[g.idx[j]]; if (vis(e)) { outlinePath(ctx, V, view, e.src.footprint, V.entityHeight(e), sc >= 0.8); drawn++; } }
         ctx.stroke();
+      }
+      // below min_scale with aggregate: besides the hatch on the ground (VizLib.drawGroundMarks, hidden wherever buildings stand close), a thin ring on the cell, as large as the share of
+      // flagged buildings in it. A hairline ring covers a few pixels of any roof, so the dense parts show where the flag is without hiding the state colour.
+      if (HL.marks.length) {
+        ctx.lineWidth = 1.4; ctx.globalAlpha = 0.95;
+        for (const mk of HL.marks) {
+          if (sc >= mk.minScale || !(mk.share >= 0.05)) continue;
+          const cx = (mk.x0 + mk.x1) / 2, cy = (mk.y0 + mk.y1) / 2, r = Math.max(3 / sc, 0.5 * Math.min(mk.x1 - mk.x0, mk.y1 - mk.y0) * Math.sqrt(Math.min(1, mk.share)) * 0.7);
+          const a = V.proj(view, cx - r, cy - r, 0), b = V.proj(view, cx + r, cy - r, 0), c = V.proj(view, cx + r, cy + r, 0), d = V.proj(view, cx - r, cy + r, 0);
+          if (Math.max(a[0], b[0], c[0], d[0]) < 0 || Math.min(a[0], b[0], c[0], d[0]) > view.w || Math.max(a[1], b[1], c[1], d[1]) < 0 || Math.min(a[1], b[1], c[1], d[1]) > view.h) continue;
+          ctx.strokeStyle = mk.colour; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.stroke(); drawn++;
+        }
       }
       ctx.restore(); return drawn;
     }
@@ -309,6 +353,8 @@
       };
       sim.groundTint = { cells: () => GT.refresh(), opacity: tm.opacity === undefined ? 0.5 : tm.opacity, version: () => sim.frameVersion };
     }
+    // the aggregate marks of outline and halo: ground cells (world metres) with the share flagged, drawn by VizLib.drawGroundMarks only while the view is below the kind's min_scale
+    if (lods.some(l => l && l.far === 'aggregate' && l.minScale > 0)) sim.groundMarks = { cells: (ver, view) => { refreshHL(); return HL.marks.filter(c => view.scale < c.minScale); }, version: () => sim.frameVersion };
     const offs = ['time', 'frames', 'view'].map(t => store.subscribe(t, sync));
     const entityOf = bound ? (k => (index[k] >= 0 ? sim.buildings[index[k]] : null)) : (k => sim.buildings[placement.order[k]]);
     // What the real building under model entity k is: the scene's own fields, and whatever the pack passed as the entity's attrs (bindScene). Published on the binding
@@ -320,8 +366,8 @@
       return { id: b.id, area: b.area, levels: b.levels, assumed: !!b.levels_assumed, residential: b.residential, attrs };
     } };
     store.sceneInfo = sceneInfo;
-    return { ok: true, bound: !!bound, placement, sceneInfo, entityOf, count, placed, warnings: bound ? bound.warnings : [], entity: en, index, modelOf, nScene, sync, drawChannels, highlights: () => { refreshHL(); return { halo: HL.halo, outline: HL.outline, builds: HL.builds }; }, tint: tm ? () => { GT.refresh(); return { cells: GT.cells, builds: GT.builds, info: GT.info }; } : null,
-             styleCount: () => table.size, dispose() { offs.forEach(f => f()); sim.buildingStyle = null; sim.frameVersion = undefined; sim.groundTint = null; } };
+    return { ok: true, bound: !!bound, placement, sceneInfo, entityOf, count, placed, warnings: bound ? bound.warnings : [], entity: en, index, modelOf, nScene, sync, drawChannels, highlights: () => { refreshHL(); return { halo: HL.halo, outline: HL.outline, marks: HL.marks, builds: HL.builds }; }, lod: () => ({ halo: lods[0], outline: lods[1] }), tint: tm ? () => { GT.refresh(); return { cells: GT.cells, builds: GT.builds, info: GT.info }; } : null,
+             styleCount: () => table.size, dispose() { offs.forEach(f => f()); sim.buildingStyle = null; sim.frameVersion = undefined; sim.groundTint = null; sim.groundMarks = null; } };
   }
 
   // ---- what one entity looks like at the time shown: the frame's own values, labelled the way the legend labels them ----
@@ -444,6 +490,7 @@
             const row = el('div', { class: 'pk-legrow', 'data-channel': sec.channel }, el('b', { text: sec.heading }));
             if (sec.kind === 'ramp') { row.appendChild(el('span', { class: 'pk-ramp' }, String(sec.domain[0]), el('i', { style: 'background:linear-gradient(90deg,' + sec.colours.join(',') + ')' }), String(sec.domain[1]))); row.appendChild(sw(sec.noData, sec.noDataLabel || 'No data')); if (sec.note) row.appendChild(el('small', { text: sec.note })); }
             else for (const it of sec.items) row.appendChild(it.overlay !== undefined ? el('span', { text: (it.overlay ? it.overlay + ' on the building' : 'no marking') + ' = ' + it.label }) : sw(it.colour, it.label, it.mode));
+            if (sec.kind === 'swatches' && sec.note) row.appendChild(el('small', { text: sec.note }));
             body.appendChild(row);
           }
         };

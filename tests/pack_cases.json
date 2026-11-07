@@ -1350,6 +1350,69 @@
    "schema": "fail"
   },
   {
+   "name": "an outline may have a level of detail",
+   "patch": {
+    "mappings.4.lod": {
+     "min_scale": 1.5,
+     "far": "aggregate",
+     "cell": 80
+    }
+   },
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "name": "an outline lod far must be aggregate, hide or show",
+   "patch": {
+    "mappings.4.lod": {
+     "far": "blur"
+    }
+   },
+   "errors": [
+    "mappings[4].lod.far: must be one of aggregate, hide, show"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "an outline lod min_scale is a scale from 0 to 20",
+   "patch": {
+    "mappings.4.lod": {
+     "min_scale": -1
+    }
+   },
+   "errors": [
+    "mappings[4].lod.min_scale: must be a scale in pixels per metre from 0 to 20"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "an outline lod has no other keys",
+   "patch": {
+    "mappings.4.lod": {
+     "zoom": 1
+    }
+   },
+   "errors": [
+    "mappings[4].lod.zoom: unknown key"
+   ],
+   "warnings": [],
+   "schema": "fail"
+  },
+  {
+   "name": "a wall mapping has no lod",
+   "patch": {
+    "mappings.0.lod": {
+     "far": "hide"
+    }
+   },
+   "errors": [
+    "mappings[0].lod: only an outline or halo mapping has a level of detail"
+   ],
+   "warnings": []
+  },
+  {
    "name": "a halo cannot be sequential",
    "patch": {
     "mappings.5.scale": {

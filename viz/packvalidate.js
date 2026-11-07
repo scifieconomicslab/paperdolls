@@ -14,7 +14,7 @@
   const FIELD_TYPES = ['category', 'number', 'int', 'boolean'];
   const CHANNELS = ['wall', 'overlay', 'segments', 'outline', 'halo', 'groundtint'], PLANNED_CHANNELS = ['height', 'ground'];
   const AGGREGATES = ['mean', 'sum', 'min', 'max'];
-  const COLOUR_ON = ['wall', 'roof', 'wall+roof'];
+  const COLOUR_ON = ['wall', 'roof', 'wall+roof'], LOD_FAR = ['aggregate', 'hide', 'show'];
   const OVERLAYS = ['scaffold', 'solar', 'band', 'marker', 'insulation', 'community'];
   const SEG_MAX = 12;
   const REGIONS = ['left', 'right', 'bottom'];
@@ -175,10 +175,22 @@
     maps.forEach((mp, i) => {
       const at = 'mappings[' + i + ']';
       if (!isObj(mp)) { err(at, 'must be a mapping'); return; }
-      for (const k of Object.keys(mp)) if (!['entity', 'field', 'channel', 'scale', 'total', 'max', 'group', 'aggregate', 'opacity', 'colour'].includes(k)) err(at + '.' + k, 'unknown key');
+      for (const k of Object.keys(mp)) if (!['entity', 'field', 'channel', 'scale', 'total', 'max', 'group', 'aggregate', 'opacity', 'colour', 'lod'].includes(k)) err(at + '.' + k, 'unknown key');
       if (mp.colour !== undefined) {                       // which surfaces of the building a wall mapping paints
         if (mp.channel !== 'wall') err(at + '.colour', 'only a wall mapping chooses its surfaces (wall, roof or wall+roof)');
         else if (!COLOUR_ON.includes(mp.colour)) err(at + '.colour', 'must be one of ' + COLOUR_ON.join(', '));
+      }
+      if (mp.lod !== undefined) {                          // level of detail of an outline or halo: from which scale a building is highlighted on its own, and what is drawn below it
+        const l = mp.lod;
+        if (mp.channel !== 'outline' && mp.channel !== 'halo') err(at + '.lod', 'only an outline or halo mapping has a level of detail');
+        else if (!isObj(l)) err(at + '.lod', 'must be a mapping {min_scale, far, cell}');
+        else {
+          for (const k of Object.keys(l)) if (!['min_scale', 'far', 'cell'].includes(k)) err(at + '.lod.' + k, 'unknown key');
+          if (l.min_scale !== undefined && !(isNum(l.min_scale) && l.min_scale >= 0 && l.min_scale <= 20)) err(at + '.lod.min_scale', 'must be a scale in pixels per metre from 0 to 20');
+          if (l.far !== undefined && !LOD_FAR.includes(l.far)) err(at + '.lod.far', 'must be one of ' + LOD_FAR.join(', '));
+          if (l.cell !== undefined && !(isNum(l.cell) && l.cell >= 20 && l.cell <= 1000)) err(at + '.lod.cell', 'must be a cell size in metres from 20 to 1000');
+          if (l.far === 'show' && l.min_scale !== undefined) warn(at + '.lod.min_scale', 'ignored: far: show draws the highlight at every zoom');
+        }
       }
       if (PLANNED_CHANNELS.includes(mp.channel)) { warn(at + '.channel', mp.channel + ' is a planned channel and is ignored for now'); return; }
       if (!CHANNELS.includes(mp.channel)) { err(at + '.channel', 'must be one of ' + CHANNELS.join(', ')); return; }
