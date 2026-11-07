@@ -62,3 +62,5 @@ const cam3 = LabCamera.create({ bounds: [0, 0, 800, 600], width: 1200, height: 7
 handlers.wheel({ preventDefault() {}, deltaY: 1e6, deltaMode: 0, clientX: 300, clientY: 200 });
 for (let i = 0; i < 50; i++) ctl3.tick(1 / 60);
 console.log('I6 synthetic wheel deltaY=1e6 (smoothZoom): pendingZoom=' + ctl3.pendingZoom() + ', camera scale=' + cam3.scale + ' -> ' + (isFinite(cam3.scale) ? 'finite' : 'NaN: every later frame renders at scale NaN'));
+// Camera limits ratchet: computeFit only ever RAISES maxScale (camera.js:24); loading a big scene after a tiny one keeps the tiny scene's maximum.
+{ const cam = LabCamera.create({ bounds: [0, 0, 10, 10], width: 1200, height: 700 }); const a = cam.maxScale; cam.setBounds([0, 0, 5000, 5000]); console.log('camera: maxScale on a 10 m scene ' + a.toFixed(1) + ', after setBounds to a 5 km scene ' + cam.maxScale.toFixed(1) + ' (a fresh camera on the 5 km scene has ' + LabCamera.create({ bounds: [0, 0, 5000, 5000], width: 1200, height: 700 }).maxScale + ')'); }

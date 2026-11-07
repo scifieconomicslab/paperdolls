@@ -1,0 +1,10 @@
+A theme change in the middle of a patch pass                      same   leftover _farPatch=null
+B zoom in and back in the middle of a patch pass                  same   leftover _farPatch=null
+C resize in the middle of a patch pass                            same   leftover _farPatch=null
+D pan past the margin in the middle of a patch pass               same   leftover _farPatch=null
+E a second change set while the first pass paints                 same   leftover _farPatch=null
+F a change during the sliced repaint that follows a zoom          same   leftover _farPatch=null
+G trees switched off, then on                                     same   leftover _farPatch=null
+H versioned style with segments + overlays: patched twice (A -> B -> A)same   leftover _farPatch=null
+I elevation (terrain grid + raised buildings) with a patch        same   leftover _farPatch=null
+all scenarios equal the from-scratch picture

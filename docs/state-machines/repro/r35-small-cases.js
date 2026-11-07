@@ -5,6 +5,7 @@
  *  d  createSim keeps the scene's own objects: state written through a sim (Replay.paintStates) is still there in the next sim made from the same scene
  *  e  AssetLib.theme() caches by (family.id || 'x', look.id, register): two families without an id are the same theme
  *  f  an extruded (non-asset) building with huge `levels` passes validateScene and costs time per storey, per frame
+ *  g  what renderFrame does with a NaN, zero, negative or infinite scale and with a zero-size view (the camera clamps these out, but clamp(NaN) is NaN)
  * Run: PAPERDOLLS_NODE_MODULES=<node_modules> node docs/state-machines/repro/r35-small-cases.js */
 const R = require('./_render'), { A, V, g } = R;
 const W = 900, H = 600;
@@ -56,4 +57,12 @@ const W = 900, H = 600;
   for (const lv of [4, 20000, 200000]) { const sc = mk(lv), chk = V.validateScene(sc), sim = R.mkSim(sc, {}); const e = sim.buildings[0]; const c = R.ctx2d(W, H); const p = V.proj(R.viewAt(sc, 4, W, H), e.fit.cx, e.fit.cy, 0), v = R.viewAt(sc, 4, W, H);
     v.ox += 450 - p[0]; v.oy += 300 - p[1]; R.clock.set(0.25); const t0 = process.hrtime.bigint(); V.renderFrame(c, sim, v, { buildings: true, trees: false, vehicles: false, people: false }); times[lv] = { ok: chk.ok, extruded: !e.params, ms: Number(process.hrtime.bigint() - t0) / 1e6 }; }
   console.log('f  levels -> validateScene ok / drawn as extrusion / first-frame ms: ' + Object.entries(times).map(([k, t]) => k + ' -> ' + t.ok + ' / ' + t.extruded + ' / ' + t.ms.toFixed(0)).join('; '));
+}
+// ---- g
+{
+  const out = [];
+  for (const k of [NaN, 0, -1, Infinity]) { const s = R.mkSim(V.makePlaceholderScene(7)); const c = R.ctx2d(W, H); R.resetSprites(); try { const t0 = Date.now(); V.renderFrame(c, s, { w: W, h: H, scale: k, ox: 300, oy: 200 }, {}); out.push('scale ' + k + ': no error, ' + A.sprites.cache.size + ' sprites built'); } catch (e) { out.push('scale ' + k + ': THROWS ' + String(e.message).slice(0, 60)); } }
+  for (const [w, h] of [[0, 0], [0, 300], [300, 0]]) { const s = R.mkSim(V.makePlaceholderScene(7)); const c = R.ctx2d(Math.max(1, w), Math.max(1, h)); try { V.renderFrame(c, s, { w, h, scale: 0.5, ox: 0, oy: 0 }, {}); out.push('view ' + w + 'x' + h + ': no error'); } catch (e) { out.push('view ' + w + 'x' + h + ': THROWS ' + String(e.message).slice(0, 60)); } }
+  const cam = g.LabCamera.create({ bounds: [0, 0, 800, 600], width: 1200, height: 700 }); cam.zoomAt(NaN);
+  console.log('g  ' + out.join('; ') + '. camera.zoomAt(NaN) leaves scale = ' + cam.scale + ' (clamp does not catch NaN, camera.js:zoomAt); every later view is NaN.');
 }

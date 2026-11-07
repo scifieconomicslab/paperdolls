@@ -1,0 +1,7 @@
+settled: builds in the last frame 0, 2028 sprites cached, 445 buildings on screen; budget per frame: maxBuilds Infinity (during a frame it is 60), 8 ms
+frame after the change +0: sprites built 362   <-- budget is 60, wall 370 ms
+frame after the change +1: sprites built 32, wall 72 ms
+frame after the change +2: sprites built 32, wall 59 ms
+frame after the change +3: sprites built 32, wall 56 ms
+frame after the change +4: sprites built 32, wall 50 ms
+frame after the change +5: sprites built 32, wall 47 ms
