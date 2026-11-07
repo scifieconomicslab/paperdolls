@@ -1,4 +1,4 @@
-/* Regression tests for the rendering-engine fixes of part 30 (docs/state-machines/parts/30-rendering.md): GPU canvas backing (#3), ground marks (#17), ground height (#14),
+/* Regression tests for the rendering-engine fixes of part 30 (docs/state-machines.md (Part 30)): GPU canvas backing (#3), ground marks (#17), ground height (#14),
  * the sprite budget and eviction (#18), device pixel ratio and the far layer's exact flag (#19). Each ports a repro (docs/state-machines/repro/rNN-*.js) and fails on the code it was written against.
  * Run: node viz/test_render.js (node-canvas on NODE_PATH / PAPERDOLLS_NODE_MODULES). Prints PASS/FAIL and exits non-zero on failure. */
 const fs = require('fs'), path = require('path'), assert = require('assert');

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Deterministic repros for docs/state-machines/parts/20-tooling-data.md (tooling and data pipeline layer).
+"""Deterministic repros for docs/state-machines.md (Part 20) (tooling and data pipeline layer).
 
 Run all:      /data/ScifiEconomicsLab/TheGreatRetrofit/.venv/bin/python docs/state-machines/repro/tooling_repro.py
 Run some:     ... tooling_repro.py T01 T04

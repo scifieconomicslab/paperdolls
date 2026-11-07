@@ -1,4 +1,4 @@
-"""Regression tests for the tooling and data-pipeline findings of docs/state-machines/parts/20-tooling-data.md (GitHub issues #8 to #13).
+"""Regression tests for the tooling and data-pipeline findings of docs/state-machines.md (Part 20) (GitHub issues #8 to #13).
 
 Each test is the port of a repro (T01 to T30) from docs/state-machines/repro/tooling_repro.py: it failed on main (aa2d936) and passes now.
 No test reaches a real server: Overpass is a local fake bound to 127.0.0.1 (tests/conftest.py also refuses any other connection).

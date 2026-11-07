@@ -1,5 +1,5 @@
 """The pack runtime layer (store, worker client, run controller, play clock, A/B compare, inspector): the regression tests of the state-machine analysis
-(docs/state-machines/parts/10-pack-runtime.md), a node suite with a pytest wrapper in the style of tests/test_pack_dashboard.py. Skipped when node is not installed."""
+(docs/state-machines.md (Part 10)), a node suite with a pytest wrapper in the style of tests/test_pack_dashboard.py. Skipped when node is not installed."""
 import shutil
 import subprocess
 from pathlib import Path
