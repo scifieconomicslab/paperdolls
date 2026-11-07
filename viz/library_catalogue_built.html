@@ -375,6 +375,16 @@
   // Sprite cache: an asset at a given scale and colouring is painted once into an offscreen canvas, then blitted.
   // Set AssetLib.sprites.factory = (w, h) => canvas (browser: document.createElement; node: createCanvas).
   const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false, ink: false, grain: true, minDetail: 2.5, posterize: 0, maxZoomBuilds: Infinity, maxBuildMs: Infinity, frameStart: 0, zooming: false, collect: null, index: new Map() };
+  // The canvas factory for browser pages. Every offscreen canvas the renderer makes (sprites, the ground and far layers, the patch scratch, the tint) is a cache that is written with
+  // thousands of small drawImage / fill calls and only ever read by a drawImage. Chromium backs a plain canvas with the GPU and runs those calls as GPU work: 9,900 sprite canvases
+  // and two 3x-view layers made the whole-commune view of Jette run at 0.8 fps on a real GPU (paperdolls#3; 40-60 fps with the canvases in memory, 20 fps while the layer was repainting).
+  // A canvas opened with { willReadFrequently: true } is backed by memory, and drawing it to the (GPU) stage is a single upload of the window that is shown. The options of
+  // getContext are fixed by its first call, so the factory makes that call itself; later getContext('2d') calls return the same context. The stage canvases stay on the GPU.
+  // soft: false gives the plain canvases back (a page can pick for a measurement); node-canvas ignores the option.
+  function canvasFactory(doc, o) {
+    const soft = !(o && o.soft === false);
+    return function (w, h) { const c = doc.createElement('canvas'); c.width = w; c.height = h; if (soft) c.getContext('2d', { willReadFrequently: true }); return c; };
+  }
   // round each colour channel of a canvas to a multiple of step (alpha untouched). Used once per sprite and per cached layer, never per frame.
   function quantise(cv, step) {
     const c = cv.getContext('2d'), d = c.getImageData(0, 0, cv.width, cv.height), a = d.data, k = 1 / step;
@@ -912,7 +922,7 @@
     }
   };
 
-  root.AssetLib = { quantise, prewarm, PREWARM_MAX_PX, DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, spritePlacement, sprites, buildAsset,
+  root.AssetLib = { canvasFactory, quantise, prewarm, PREWARM_MAX_PX, DEFS, REG, STYLE, REGIONS, PEOPLE_MIX, getAsset, snapHeading, toSVG, paint, drawSprite, spritePlacement, sprites, buildAsset,
                     makeOutfit, vehicleTint, pickFleet, pickPerson, vehicleColours, personColours, flagsOf, scales, mix, shade, hash, hashStr, isData, faceOf,
                     registerGroup, baseColours, pickWeighted,
                     CARBON, theme, asTheme, resolveLook, snapTo, toGray };

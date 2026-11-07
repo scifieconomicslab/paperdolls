@@ -116,7 +116,7 @@
 <script>
 (function () {
   const V = window.VizLib, A = window.AssetLib;
-  A.sprites.factory = (w, hh) => { const c = document.createElement('canvas'); c.width = w; c.height = hh; return c; };
+  A.sprites.factory = A.canvasFactory(document);          // memory-backed offscreen canvases: see canvasFactory (paperdolls#3)
   A.sprites.dpr = window.devicePixelRatio || 1;
   const FAMS = /*__PALETTES__*/;
   const canvas = document.getElementById('stage');

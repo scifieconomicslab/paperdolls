@@ -29,6 +29,7 @@ Found during the audit of v0.1.0 and kept up to date. Severity is in brackets.
 
 ## Fixed
 
+- The whole-commune view no longer runs at about 1 fps on a GPU-backed canvas (paperdolls#3): offscreen canvases are memory-backed (`AssetLib.canvasFactory`). Far zoom on an RTX 4080 SUPER (`GPU=egl`, ANGLE): idle 56 to 61 fps and playing 39 to 45 fps at DPR 1 and 2, plain and enriched pages; software numbers are not worse (table in `viz/README.md`). Not measured: the RTX 3080, a physical monitor, other GPUs.
 - Zooming no longer stalls for 150 to 500 ms at every sprite-scale step (see the changelog).
 - `paperdolls doctor` no longer crashes without numpy, pillow or pyyaml; it prints the install command.
 - Replay frames no longer carry the retrofit legend or co-op vans for another model; `replay.legend` names the states.
