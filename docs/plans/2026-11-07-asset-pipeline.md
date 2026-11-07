@@ -1,6 +1,6 @@
 # Asset pipeline: image-model art for paperdolls asset packs
 
-Status: process proposal, 2026-11-07, part of the rework (paperdolls#23). It is written so that an LLM agent can follow it step by step. A developer supplies an image-model API. Every number marked *(initial)* is a starting value to be fixed after the Phase 0 graphics work, and the asset-pack format (section 9) is fixed then too.
+Status: process proposal, 2026-11-07, part of the rework (paperdolls#23); it is the inside of the `art` module ([rework plan](2026-11-07-paperdolls-rework.md), section 3.3). The runtime renderer is PixiJS v8. Control renders are made offline by the art tool with three.js in headless Chromium, which gives colour, depth, role and id passes at any angle. It is written so that an LLM agent can follow it step by step. A developer supplies an image-model API. Every number marked *(initial)* is a starting value to be fixed after the Phase 0 graphics work, and the asset-pack format (section 9) is fixed then too.
 
 The target look is the one in Yadong Xie's [How Pixel Singapore was made](https://www.yadongxie.com/blog/how-pixel-singapore-was-made): an image model redraws exact geometry renders as detailed isometric pixel art. Two lessons carry over directly:
 
@@ -15,10 +15,10 @@ paperdolls differs from Pixel Singapore in one way that shapes everything below:
 
 | Product | What it is | When to use it |
 |---|---|---|
-| **A. Sprite kit** (default) | One painted sprite per (archetype, variant, heading), with role masks, plus overlay sprites (scaffold, solar, insulation, flags, banners). States are made at runtime by palette swap and overlays, **never by generating a sprite per state**. | Every asset pack. Required for any model whose geometry changes (buildings built, destroyed, upgraded), for agents, and for invented worlds. |
-| **B. Painted base map** (optional) | A Pixel Singapore-style painting of a whole real place, with an aligned entity-id pass and height pass. State is shown by id-masked tints and overlay sprites. | Real places where the model never changes geometry (the Great Retrofit on Jette). A painted ground layer under a sprite kit is also allowed. |
+| **A. Sprite kit** (invented worlds) | One painted sprite per (archetype, variant, heading), with role masks, plus overlay sprites (scaffold, solar, insulation, flags, banners). States are made at runtime by palette swap and overlays, **never by generating a sprite per state**. | Invented worlds (grid, hex, graph, procedural), any model whose geometry changes (buildings built, destroyed, upgraded), and the overlays used on painted maps. |
+| **B. Painted base map** (real places) | A Pixel Singapore-style painting of a whole real place, with an aligned entity-id pass and height pass. State is shown by id-masked tints and overlay sprites. | Real places where the model never changes geometry (the Great Retrofit on Jette). A painted ground layer under a sprite kit is also allowed. |
 
-Agents (people, vehicles, carts, ships) are **always** rendered from part lists by the engine (section 7), optionally polished by the model at large size and then reduced. They are never generated per frame or per heading by the image model.
+Agents (people, vehicles, carts, ships) are **always** rendered from part lists by the engine (section 11), optionally polished by the model at large size and then reduced. They are never generated per frame or per heading by the image model.
 
 ---
 
@@ -100,7 +100,7 @@ references: [art/refs/ref1.png, art/refs/ref2.png, art/refs/ref3.png]   # 3 to 5
 
 ## 5. Step 3: control renders (deterministic, no image model)
 
-**Command:** `paperdolls art control <archetype> --variants N --headings 4`. The engine renders each asset from its kit part list (`box`, `prism`, `roof`, ...) with the bible's projection, at **4× the target resolution** *(initial)* on a canvas with a margin.
+**Command:** `paperdolls art control <archetype> --variants N --headings 4`. The art tool renders each asset from its kit part list (`box`, `prism`, `roof`, ...) with the bible's projection, at **4× the target resolution** *(initial)* on a canvas with a margin.
 
 **Outputs per (archetype, variant, heading):**
 
@@ -192,7 +192,7 @@ This keeps 10,000 agents consistent across headings and frames, which an image m
 
 Use only for a model that does not change geometry. Steps:
 
-1. **Control render of the whole world** from the engine (OSM footprints extruded in 3D, terrain, roads, trees) through the bible camera at the bible `px_per_m` *(initial: 4, which is 0.25 m per pixel as in Pixel Singapore)*: colour, height (16-bit), **entity-id** (one id per scene building), and role passes, cut into a fixed grid of square shots that align to the pixel.
+1. **Control render of the whole world** by the art tool (the `World`'s OSM footprints extruded in 3D at their real angles, terrain, roads, trees) through the bible camera at the bible `px_per_m` *(initial: 4, which is 0.25 m per pixel as in Pixel Singapore)*: colour, height (16-bit), **entity-id** (one id per scene building), and role passes, cut into a fixed grid of square shots that align to the pixel.
 2. **Generate tiles.**
    - With `sampler_access: yes` (local weights, as Pixel Singapore had): MultiDiffusion over overlapping windows, with a shifted grid on alternate steps, and RePaint-style inpainting of each new block from finished neighbours.
    - With an API only (the usual case): generate tiles in a fixed spiral from the centre. Each new tile is sent as `mask_inpaint` with an overlap band (a quarter of a tile *(initial)*) filled with finished neighbour pixels and pinned, so seams are generated in context. If `mask_inpaint` is `no`, product B is not possible with this API: stop.
