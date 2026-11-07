@@ -5,8 +5,9 @@ import random
 from collections import Counter
 
 from . import __version__, adjacency, classify, elevation, readers
+from .validate import validate_scene
 from .geo import (DEG, LocalFrame, axis_deviation_deg, dominant_angle, min_rect, point_in_ring, resample_line, ring_area,
-                  ring_centroid, simplify_ring)
+                  ring_centroid, ring_self_crossings, simplify_ring)
 
 ATTRIBUTION = "© OpenStreetMap contributors (ODbL)"
 FIT = {"max_dev_deg": 12.0, "min_rectangularity": 0.82, "min_side": 3.0}      # mirrors AssetLib.FIT in buildinglib.js
@@ -18,6 +19,27 @@ LAND_ORDER = {"park": 0, "garden": 1, "water": 2, "square": 3}
 
 class IngestError(ValueError):
     pass
+
+
+def check_bbox(bbox):
+    """A clip box as (south, west, north, east), or None. Raises IngestError for anything else."""
+    if bbox is None:
+        return None
+    try:
+        b = tuple(float(v) for v in bbox)
+    except (TypeError, ValueError):
+        raise IngestError("the bounding box needs four numbers: south,west,north,east")
+    if len(b) != 4 or not all(math.isfinite(v) for v in b):
+        raise IngestError("the bounding box needs four finite numbers: south,west,north,east")
+    if not (-90 <= b[0] < b[2] <= 90 and -180 <= b[1] < b[3] <= 180):
+        raise IngestError("the bounding box needs south below north and west below east (south,west,north,east, in degrees)")
+    return b
+
+
+def _finite_coords(f):
+    """True when every coordinate of a feature is a finite, plausible latitude and longitude."""
+    pts = [f.coords] if f.kind == "point" else list(f.coords) + [p for h in (f.holes or []) for p in h]
+    return all(len(p) >= 2 and math.isfinite(p[0]) and math.isfinite(p[1]) and abs(p[0]) <= 90 and abs(p[1]) <= 180 for p in pts)
 
 
 def _segments(ring, closed=True):
@@ -82,8 +104,16 @@ def ingest(path, rotation="auto", bbox=None, boundary_relation=None, name=None, 
 
     elevation_file: a local GeoTIFF, Esri ASCII grid or XYZ/CSV file (see ingest/elevation.py). The scene then gets a terrain grid (terrain_cell metres) and z on
     buildings, road points and trees. Without it nothing changes."""
+    bbox = check_bbox(bbox)
+    if max_buildings is not None and (isinstance(max_buildings, bool) or not isinstance(max_buildings, int) or max_buildings < 1):
+        raise IngestError(f"--max-buildings must be a whole number of at least 1, not {max_buildings!r} (leave it out for no limit)")
     feats, notes, fmt = readers.read_file(path)
     assume, skipped, warnings = classify.Assumptions(), Counter(), []
+    n_all = len(feats)
+    feats = [f for f in feats if _finite_coords(f)]
+    if len(feats) != n_all:
+        skipped["features with a non-finite or out-of-range coordinate"] += n_all - len(feats)
+        warnings.append(f"{n_all - len(feats)} feature(s) had a coordinate that is not a finite latitude/longitude (NaN, Infinity or out of range) and were left out.")
 
     # ---- clip polygon: a boundary relation, a bounding box, or both ----
     clip_ring, clip_name = None, None
@@ -150,7 +180,7 @@ def ingest(path, rotation="auto", bbox=None, boundary_relation=None, name=None, 
     lat0 = (min(p[0] for p in base) + max(p[0] for p in base)) / 2
     lon0 = (min(p[1] for p in base) + max(p[1] for p in base)) / 2
     f0 = LocalFrame(lat0, lon0, 0.0)
-    if max_buildings and len(bld) > max_buildings:
+    if max_buildings is not None and len(bld) > max_buildings:
         bld.sort(key=lambda f: math.hypot(*f0.xy(*centre_ll(f.coords))))
         skipped[f"buildings beyond --max-buildings {max_buildings} (kept the nearest to the centre)"] += len(bld) - max_buildings
         bld = bld[:max_buildings]
@@ -243,12 +273,19 @@ def ingest(path, rotation="auto", bbox=None, boundary_relation=None, name=None, 
     assume.add("tram", f"{standalone} tram line(s) with no road alongside: drawn as their own track", standalone) if standalone else None
 
     # ---- buildings ----
-    bld_out, holes_ignored, rotated_info = [], 0, {}
+    bld_out, holes_ignored, rotated_info, seen_ids = [], 0, {}, set()
     for f in bld:
         ring = simplify_ring([xy(*p) for p in f.coords], 0.05)
         if len(ring) < 3 or ring_area(ring) < MIN_BUILDING_M2:
             skipped[f"building smaller than {MIN_BUILDING_M2:.0f} m2"] += 1
             continue
+        if ring_self_crossings(ring):
+            skipped["building footprint crosses itself"] += 1
+            continue
+        if f.id in seen_ids:
+            skipped["building with an id already used (kept the first)"] += 1
+            continue
+        seen_ids.add(f.id)
         if f.holes:
             holes_ignored += 1
         levels, src = classify.building_levels(f.tags, assume)
@@ -373,6 +410,15 @@ def ingest(path, rotation="auto", bbox=None, boundary_relation=None, name=None, 
         warnings.append(f"{notes['unresolved_ways']} way(s) had no geometry and were dropped (Overpass JSON needs 'out geom;').")
     if not road_out:
         warnings.append("No roads in the extract: nothing for vehicles and people to move on.")
+    if not bld_out:
+        why = "; ".join(f"{k}: {v}" for k, v in skipped.items() if v and ("building" in k)) or "the extract has no building features"
+        warnings.append(f"The scene has NO buildings ({len(bld)} building feature(s) after clipping; {why}). A model pack that binds to the scene's buildings has nothing to bind.")
+    for k in ("building footprint crosses itself", "building with an id already used (kept the first)"):
+        if skipped.get(k):
+            warnings.append(f"{skipped[k]} building(s) left out: {k}.")
+    problems, _ = validate_scene(scene)
+    if problems:
+        raise IngestError("the scene would not be valid, so nothing was written: " + "; ".join(problems[:5]) + (f" (and {len(problems) - 5} more)" if len(problems) > 5 else ""))
     report = {
         "input": {"file": str(path), "format": fmt, "features": dict(Counter(f.kind for f in feats))},
         "clip": {"boundary_relation": boundary_relation, "boundary_name": clip_name, "bbox": list(bbox) if bbox else None},

@@ -325,9 +325,10 @@ def _trim_list(text):
 
 def cmd_ingest(a):
     from .ingest import build, report as rpt
-    bbox = tuple(float(x) for x in a.bbox.split(",")) if a.bbox else None
-    if bbox and len(bbox) != 4:
-        raise SystemExit("--bbox needs south,west,north,east")
+    try:
+        bbox = build.check_bbox(tuple(float(x) for x in a.bbox.split(","))) if a.bbox else None
+    except (ValueError, build.IngestError) as e:
+        raise SystemExit(f"--bbox needs south,west,north,east as numbers ({e})")
     rot = a.rotation if a.rotation in ("auto", "none") else float(a.rotation)
     try:
         scene, rep = build.ingest(a.input, rotation=rot, bbox=bbox, boundary_relation=a.boundary_relation, name=a.name,
@@ -337,8 +338,8 @@ def cmd_ingest(a):
     out = Path(a.out)
     md = out.with_name(out.stem + "_report.md")
     # reports first, the scene last: whoever finds the new scene finds the reports that describe it; nothing is replaced unless every file could be staged
-    write_atomic_group([(md, rpt.report_markdown(scene, rep)), (out.with_name(out.stem + "_report.json"), json.dumps(rep, indent=1)),
-                        (out, json.dumps(scene, separators=(",", ":")))])
+    write_atomic_group([(md, rpt.report_markdown(scene, rep)), (out.with_name(out.stem + "_report.json"), json.dumps(rep, indent=1, allow_nan=False)),
+                        (out, json.dumps(scene, separators=(",", ":"), allow_nan=False))])
     c = rep["counts"]
     print(f"wrote {out} ({out.stat().st_size // 1024} KB): {c['buildings']} buildings, {c['roads']} roads, {c['landuse']} landuse, {c['trees']} trees")
     print(f"frame rotated {rep['frame']['rotation_deg']} degrees; estimated asset share {round(rep['estimated_asset_share']['rotated'] * 100)}% (unrotated {round(rep['estimated_asset_share']['unrotated'] * 100)}%)")

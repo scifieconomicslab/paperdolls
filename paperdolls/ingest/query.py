@@ -18,6 +18,8 @@ def overpass_query(relation=None, bbox=None, timeout=300):
         area, head = "", ""
     if bbox is not None and (len(bbox) != 4 or not all(isinstance(v, (int, float)) and v == v and abs(v) != float("inf") for v in bbox)):
         raise ValueError("the bounding box needs four finite numbers: south, west, north, east")
+    if bbox is not None and not (-90 <= bbox[0] < bbox[2] <= 90 and -180 <= bbox[1] < bbox[3] <= 180):
+        raise ValueError("the bounding box needs south below north and west below east")
     box = "" if bbox is None else "({:.6f},{:.6f},{:.6f},{:.6f})".format(*bbox)
     flt = area + box                    # with both, an element must be inside the relation's area and inside the box
     st = []

@@ -533,3 +533,121 @@ def test_t25_the_same_goal_again_changes_nothing(tmp_path):                     
     Intake(p).answer("goal", "model_replay")
     after = yaml.safe_load(p.read_text())
     assert after["model"] == before["model"] and after["intake"]["overrides_answered"] is True
+
+
+# ================================================================ #12 ingest output is validated: T09-T13, T29
+
+def ingest_elements(tmp_path, elements, **kw):
+    from paperdolls.ingest import build
+    f = tmp_path / "e.json"
+    write_extract(f, elements)
+    return build.ingest(f, **kw)
+
+
+def test_t09_a_scene_with_no_buildings_says_so_with_counts(tmp_path):                                # T09
+    bowtie = bld(2, [(50.0, 4.0), (50.0002, 4.0002), (50.0, 4.0002), (50.0002, 4.0), (50.0, 4.0)])
+    scene, rep = ingest_elements(tmp_path, [bowtie, ROAD])
+    assert scene["buildings"] == []
+    assert any("NO buildings" in w and "building smaller than 8 m2: 1" in w for w in rep["warnings"]), rep["warnings"]
+
+
+def test_t09_an_extract_with_roads_only_gets_the_same_warning(tmp_path):                             # T09: legal, but not silent
+    scene, rep = ingest_elements(tmp_path, [ROAD])
+    assert scene["buildings"] == [] and any("NO buildings" in w and "no building features" in w for w in rep["warnings"])
+
+
+def test_t10_an_infinite_coordinate_drops_that_feature_and_the_scene_stays_valid_json(tmp_path):      # T10
+    f = tmp_path / "e.json"
+    f.write_text(json.dumps({"elements": [bld(1, square(50.0, 4.0)), bld(2, [(50, 4), (50, float("inf")), (50.1, 4.1), (50, 4)]), ROAD]}), encoding="utf-8")
+    rc, out, err = cli("ingest", f, "--out", tmp_path / "scene.json")
+    assert rc == 0, err
+    text = (tmp_path / "scene.json").read_text()
+    assert "Infinity" not in text and "NaN" not in text
+    scene = json.loads(text, parse_constant=lambda c: pytest.fail(f"{c} in the scene"))
+    assert [b["id"] for b in scene["buildings"]] == ["w1"] and scene["area"]["origin"]["lon"] == pytest.approx(4.0001, abs=1e-3)
+    assert "not a finite latitude/longitude" in out and "non-finite or out-of-range coordinate" in (tmp_path / "scene_report.md").read_text()
+
+
+def test_t10_nan_and_out_of_range_coordinates_are_left_out_too(tmp_path):                            # T10
+    nan = bld(2, [(50, 4), (float("nan"), 4.1), (50.1, 4.1), (50, 4)])
+    far = bld(3, [(50, 4), (95, 4.1), (50.1, 4.1), (50, 4)])
+    scene, rep = ingest_elements(tmp_path, [bld(1, square(50.0, 4.0)), nan, far, ROAD])
+    assert [b["id"] for b in scene["buildings"]] == ["w1"] and rep["skipped"]["features with a non-finite or out-of-range coordinate"] == 2
+
+
+def test_validate_scene_rejects_what_the_viewer_would_reject():                                       # the guard behind T10
+    from paperdolls.ingest.validate import validate_scene
+    good = {"roads": [], "buildings": [{"id": "w1", "footprint": [[0, 0], [5, 0], [5, 5]], "levels": 2, "neighbours": []}], "landuse": [], "trees": []}
+    assert validate_scene(good)[0] == []
+    bad = json.loads(json.dumps(good))
+    bad["buildings"] += [{"id": "w1", "footprint": [[0, 0], [5, 0], [5, 5]], "levels": 0, "neighbours": ["ghost"]},
+                         {"id": "w3", "footprint": [[0, 0], [float("inf"), 0], [5, 5]], "levels": 2}]
+    errors, _ = validate_scene(bad)
+    text = " | ".join(errors)
+    assert "not a finite number" in text and "appears twice" in text and "levels must be" in text and "neighbour id(s) name no building" in text
+
+
+def test_t11_duplicate_building_ids_keep_the_first_and_are_reported(tmp_path):                         # T11
+    scene, rep = ingest_elements(tmp_path, [bld(1, square(50.0, 4.0)), bld(1, square(50.001, 4.001)), ROAD])
+    ids = [b["id"] for b in scene["buildings"]]
+    assert ids == ["w1"] and rep["skipped"]["building with an id already used (kept the first)"] == 1
+    assert any("1 building(s) left out" in w for w in rep["warnings"])
+
+
+def test_t12_max_buildings_must_be_at_least_one(tmp_path):                                              # T12
+    from paperdolls.ingest.build import IngestError
+    els = [bld(i, square(50.0 + i * 0.001, 4.0)) for i in range(1, 4)] + [ROAD]
+    for bad in (-1, 0):
+        with pytest.raises(IngestError, match="at least 1"):
+            ingest_elements(tmp_path, els, max_buildings=bad)
+        rc, out, err = cli("ingest", tmp_path / "e.json", "--out", tmp_path / "s.json", "--max-buildings", bad)
+        assert rc == 1 and "at least 1" in err and "Traceback" not in err
+    scene, rep = ingest_elements(tmp_path, els, max_buildings=2)
+    assert len(scene["buildings"]) == 2 and list(v for k, v in rep["skipped"].items() if "max-buildings" in k) == [1]
+    assert len(ingest_elements(tmp_path, els, max_buildings=3)[0]["buildings"]) == 3, "exactly the count: nothing skipped"
+
+
+def test_t13_a_self_crossing_footprint_is_left_out_and_counted(tmp_path):                               # T13
+    figure8 = bld(1, [(50.0, 4.0), (50.0004, 4.0006), (50.0, 4.0006), (50.0002, 4.0), (50.0, 4.0)])
+    scene, rep = ingest_elements(tmp_path, [figure8, bld(2, square(50.01, 4.0)), ROAD])
+    assert [b["id"] for b in scene["buildings"]] == ["w2"] and rep["skipped"]["building footprint crosses itself"] == 1
+    assert any("crosses itself" in w for w in rep["warnings"])
+
+
+def test_ring_self_crossings_counts_crosses_not_touches():                                             # the rule behind T13
+    from paperdolls.ingest.geo import ring_self_crossings
+    assert ring_self_crossings([(0, 0), (4, 0), (4, 4), (0, 4)]) == 0
+    assert ring_self_crossings([(0, 0), (4, 4), (4, 0), (0, 4)]) == 1
+    assert ring_self_crossings([(0, 0), (4, 0), (4, 4), (2, 0), (0, 4)]) == 0, "a vertex touching an edge is not a crossing"
+    L = [(0, 0), (6, 0), (6, 2), (2, 2), (2, 6), (0, 6)]
+    assert ring_self_crossings(L) == 0, "a concave L is simple"
+
+
+@pytest.mark.parametrize("bbox", ["50,4,49,5", "50,4,51", "a,b,c,d", "50,4,nan,5", "50,4,95,5"])
+def test_a_bad_ingest_bbox_is_a_message(tmp_path, bbox):                                                   # T29 / argument combinations
+    write_extract(tmp_path / "e.json", [bld(1, square(50.0, 4.0)), ROAD])
+    rc, out, err = cli("ingest", tmp_path / "e.json", "--out", tmp_path / "s.json", "--bbox", bbox)
+    assert rc == 1 and "--bbox" in err and "Traceback" not in err
+
+
+def test_a_relation_with_a_bbox_clips_to_both_in_ingest_and_in_the_query(tmp_path):                       # T29
+    from paperdolls.ingest.query import overpass_query
+    assert overpass_query(relation=5, bbox=(50.0, 4.0, 50.1, 4.1)).count("(area.a)(50.000000,4.000000,50.100000,4.100000)") >= 10
+    with pytest.raises(ValueError):
+        overpass_query(relation=5, bbox=(50.1, 4.0, 50.0, 4.1))
+    ring = [(49.99, 3.99), (49.99, 4.2), (50.2, 4.2), (50.2, 3.99), (49.99, 3.99)]
+    rel = {"type": "relation", "id": 5, "tags": {"type": "boundary", "boundary": "administrative", "name": "R"}, "members": [{"type": "way", "ref": 700, "role": "outer", "geometry": [{"lat": a, "lon": b} for a, b in ring]}]}
+    els = [rel, bld(1, square(50.0, 4.0)), bld(2, square(50.15, 4.15))]                                    # w2 is inside the relation but outside the bbox
+    scene, _ = ingest_elements(tmp_path, els, boundary_relation=5, bbox=(49.99, 3.99, 50.05, 4.05))
+    assert [b["id"] for b in scene["buildings"]] == ["w1"]
+
+
+def test_the_jette_style_ingest_output_is_unchanged_for_valid_data():                                     # keep real ingest output as it was
+    """samples/osm_fixture_* are the committed output of the ingest on a fixture; ingesting the fixture again must give the same scene (the clock aside)."""
+    from paperdolls.ingest import build
+    sample = ROOT / "samples" / "osm_fixture_extract.json"
+    old = json.loads((ROOT / "samples" / "osm_fixture_scene.json").read_text())
+    new, _ = build.ingest(sample, boundary_relation=old["area"].get("osm_relation"), name=old["area"]["name"])
+    for sc in (old, new):
+        sc["area"].pop("generated", None)
+    assert new == old

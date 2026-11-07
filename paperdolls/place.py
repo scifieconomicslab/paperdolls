@@ -132,8 +132,8 @@ def _run(spec_path, data, place, kind, out, scene_path, summary, warnings, refet
         hint = f" If {extract.name} is stale or damaged, run 'paperdolls place --refetch' to fetch it again (or delete it)." if kind in ("osm_relation", "bbox") else ""
         raise PlaceError(f"the ingest failed: {e}.{hint}")
     rep["warnings"] = warnings + rep["warnings"]
-    write_atomic_group([(out / "scene_report.md", report.report_markdown(scene, rep)), (out / "scene_report.json", json.dumps(rep, indent=1)),
-                        (scene_path, json.dumps(scene, separators=(",", ":")))])
+    write_atomic_group([(out / "scene_report.md", report.report_markdown(scene, rep)), (out / "scene_report.json", json.dumps(rep, indent=1, allow_nan=False)),
+                        (scene_path, json.dumps(scene, separators=(",", ":"), allow_nan=False))])
     c = rep["counts"]
     return {**summary, "scene": str(scene_path), "report": str(out / "scene_report.md"), "buildings": c["buildings"], "roads": c["roads"], "trees": c["trees"],
             "rotation_deg": rep["frame"]["rotation_deg"], "asset_share_estimate": rep["estimated_asset_share"]["rotated"],

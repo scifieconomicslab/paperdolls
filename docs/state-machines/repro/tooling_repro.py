@@ -320,7 +320,11 @@ def t11_ingest_duplicate_ids_pass_through():
 def t12_ingest_negative_max_buildings():
     """--max-buildings -1: `if max_buildings and len(bld) > max_buildings` is true for any negative value; bld[:-1] drops the last one and the report counts len+1 as skipped."""
     els = [bld(i, square(50.0 + i * 0.001, 4.0)) for i in range(1, 4)] + [ROAD]
-    sc, rep = ingest(els, max_buildings=-1)
+    from paperdolls.ingest.build import IngestError
+    try:
+        sc, rep = ingest(els, max_buildings=-1)
+    except IngestError as e:
+        return False, f"refused: {e}"
     skipped = {k: v for k, v in rep["skipped"].items() if "max-buildings" in k}
     return (len(sc["buildings"]) == 2 and list(skipped.values()) == [4]), f"3 buildings in, {len(sc['buildings'])} out, skipped reported={skipped}"
 
