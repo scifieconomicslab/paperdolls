@@ -1,5 +1,6 @@
 /* Times the renderer on a big synthetic scene: the placeholder tiled N times (default 12 tiles, about 12,300 buildings).
  * Usage: node viz/scale_bench.js     Env: TILES=12 (columns of 4), SCALES=0.7,1.7,4 sets px per metre, FRAMES=15 the sample. The second table (patch frames) is described below.
+ * For the far ('Fit') view of a big scene, the first paint and playback with colour changes, see viz/far_bench.js (same output style).
  * Reports first frame, settled frame and a panning frame, median of FRAMES, on a 1200 by 700 node-canvas. Needs the 'canvas' package. */
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const { createCanvas } = require(process.env.NODE_CANVAS || 'canvas');

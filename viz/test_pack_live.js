@@ -82,16 +82,18 @@ else {
     b.dispose(); assert.strictEqual(sim.buildingStyle, null); assert.strictEqual(sim.frameVersion, undefined);
   });
   if (!createCanvas) skip('renderer: far layer and version', 'canvas is not installed');
-  else test('renderer: with a frame version the far-zoom layer is kept and repainted once per change; without one it is off', () => {
+  else test('renderer: with a frame version the far-zoom layer is kept and brought up to date once per change (patched in place, or repainted whole when most buildings changed); without one it is off', () => {
     A.sprites.factory = (w, h) => createCanvas(w, h);
     const { store, ctl } = mkHost(), sim = mkSim(), b = PH.bindRenderer({ manifest: TOY, store, controller: ctl, sim }); assert(b.ok);
     const W = 800, H = 520, ctx = createCanvas(W, H).getContext('2d'), view = V.fitView(sim.scene, W, H, 0.06); assert(view.scale < 1, 'a far view: ' + view.scale);
     let calls = 0; const inner = sim.buildingStyle; sim.buildingStyle = e => { calls++; return inner(e); };
-    const settle = () => { for (let i = 0; i < 400; i++) { V.renderFrame(ctx, sim, view, { vehicles: false, people: false }); if (i > 4 && !sim._farP && !sim._groundP && A.sprites.builds === 0) return i; } throw new Error('never settled'); };
+    const settle = () => { for (let i = 0; i < 400; i++) { V.renderFrame(ctx, sim, view, { vehicles: false, people: false }); if (i > 4 && !sim._farP && !sim._groundP && !sim._farPatch && !(sim._far && sim._far.rough) && !sim._farC && !sim._groundC && A.sprites.builds === 0) return i; } throw new Error('never settled'); };
     settle(); assert(sim._far, 'the far layer exists although a custom style is set'); const r0 = sim.layerRepaints, c0 = calls;
     for (let i = 0; i < 20; i++) V.renderFrame(ctx, sim, view, { vehicles: false, people: false });
     assert.strictEqual(sim.layerRepaints, r0, 'a still frame repaints nothing'); assert.strictEqual(calls, c0, 'and asks for no style at all');
-    store.setTime(20); settle(); assert.strictEqual(sim.layerRepaints, r0 + 1, 'a new frame repaints the layer once'); assert(calls > c0 && calls - c0 <= sim.buildings.length, 'each building is asked once: ' + (calls - c0));
+    store.setTime(20); settle();
+    assert(sim.layerRepaints === r0 || sim.layerRepaints === r0 + 1, 'a new frame repaints the layer at most once: ' + (sim.layerRepaints - r0)); assert(sim.layerRepaints === r0 + 1 || sim.farPatches >= 1, 'and is patched when it is not repainted');
+    assert(calls > c0 && calls - c0 <= 2 * sim.buildings.length, 'each building is asked once to see if it changed, and again if it is redrawn: ' + (calls - c0) + ' for ' + sim.buildings.length);
     const c1 = calls; for (let i = 0; i < 20; i++) V.renderFrame(ctx, sim, view, { vehicles: false, people: false }); assert.strictEqual(calls, c1);
     // near zoom: the buildings are drawn one by one, and still ask for a style only when the version moves
     const near = Object.assign({}, view, { scale: 4, ox: W / 2 - (b.entityOf(0).fit.cx - b.entityOf(0).fit.cy) * 4 * 0.866, oy: H / 2 - (b.entityOf(0).fit.cx + b.entityOf(0).fit.cy) * 2 });

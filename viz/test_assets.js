@@ -682,19 +682,19 @@ test('the ground layer is repainted a slice per frame after a zoom, the old one 
   assert.strictEqual(diff, 0, 'the settled picture is the same as a one-go repaint: ' + diff + ' bytes differ'); A.sprites.exact = false;
 });
 
-test('the far-zoom layer is painted a slice per frame while the buildings are drawn directly, and it does not repaint again when sprites settle', () => {
+test('the far-zoom layer starts as a rough flat picture at once, is painted exactly in slices behind it, and does not repaint again when sprites settle', () => {
   let createCanvas; try { createCanvas = require(process.env.NODE_CANVAS || 'canvas').createCanvas; } catch (e) { console.log('SKIP (node canvas not installed)'); return; }
   A.sprites.factory = (w, h) => createCanvas(w, h); A.sprites.cache.clear(); A.sprites.pixels = 0; A.sprites.index.clear();
   const W = 900, H = 600, mk = k => ({ w: W, h: H, scale: k, ox: W / 2 - (330 - 262) * k * 0.8660254, oy: H / 2 - (330 + 262) * k * 0.5 });
   const painted = c => { const d = c.getImageData(0, 0, W, H).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] < 700) n++; return n; };
   const run = slice => {
     const s = sim('nw'), c = createCanvas(W, H).getContext('2d'); s.opts.sliceLayers = slice; s.opts.layerMs = 0; s.opts.prewarm = false; s.opts.holdZoom = false;
-    let rep10 = 0; const ink = [], far = []; for (let i = 0; i < 260; i++) { V.renderFrame(c, s, mk(0.6), {}); ink.push(painted(c)); far.push(s._far ? 1 : 0); if (i === 9) rep10 = s.layerRepaints; }
+    let rep10 = 0; const ink = [], far = []; for (let i = 0; i < 260; i++) { V.renderFrame(c, s, mk(0.6), {}); ink.push(painted(c)); far.push(s._far ? (s._far.rough ? 1 : 2) : 0); if (i === 9) rep10 = s.layerRepaints; }
     return { s, c, ink, far, rep10, img: c.getImageData(0, 0, W, H).data };
   };
   const one = run(false), sliced = run(true);
-  assert.strictEqual(sliced.far[0], 0, 'sliced: the far layer does not exist after the first frame'); assert.strictEqual(sliced.far[259], 1, 'and exists once it is painted (a yield every 16 items, one step a frame with no time budget)');
-  assert(sliced.ink[0] > one.ink[259] * 0.7, 'but the first frame still shows the buildings, drawn directly: ' + sliced.ink[0] + ' of ' + one.ink[259]);
+  assert.strictEqual(sliced.far[0], 1, 'sliced: after the first frame the far layer is the rough one (it is never absent, so no frame waits for the exact painting)'); assert.strictEqual(sliced.far[259], 2, 'and is the exact one once that is painted (a yield every 16 items, one step a frame with no time budget)');
+  assert(sliced.ink[0] > one.ink[259] * 0.5, 'the first frame already shows the buildings, flat: ' + sliced.ink[0] + ' of ' + one.ink[259]);
   let diff = 0; for (let i = 0; i < one.img.length; i++) if (one.img[i] !== sliced.img[i]) diff++;
   assert.strictEqual(diff, 0, 'the settled picture is the same: ' + diff + ' bytes differ');
   assert(one.rep10 <= 2, 'ground and far layer are each painted once, not again when sprites go exact: ' + one.rep10 + ' repaints in 10 frames'); A.sprites.exact = false;

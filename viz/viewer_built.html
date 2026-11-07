@@ -1566,7 +1566,13 @@
   }
   function hexRgb(h) { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16)); }
   function rgbStr(c) { return 'rgb(' + c.map(v => Math.max(0, Math.min(255, Math.round(v)))).join(',') + ')'; }
-  function shade(hex, k) { return rgbStr(hexRgb(hex).map(v => v * k)); }
+  // shade/mixHex are called for every wall and roof of every building drawn, with a handful of distinct arguments: memoised (a Map per k, bounded by the colours in use)
+  const shadeMemo = new Map();
+  function shade(hex, k) {
+    let m = shadeMemo.get(k); if (!m) shadeMemo.set(k, m = new Map());
+    let r = m.get(hex); if (r === undefined) { if (m.size > 5000) m.clear(); m.set(hex, r = rgbStr(hexRgb(hex).map(v => v * k))); }
+    return r;
+  }
   function mixHex(a, b, t) { const A = hexRgb(a), B = hexRgb(b); return rgbStr(A.map((v, i) => v * (1 - t) + B[i] * t)); }
   function key(x, y) { return Math.round(x * 10) + ',' + Math.round(y * 10); }
 
@@ -1627,6 +1633,8 @@
   }
 
   // ---------- drawing primitives ----------
+  const WINDOW_LOD_PX = 1.5;                         // default for sim.opts.windowLodPx: a window module narrower than this (screen px) is not drawn
+  let windowLodPx = WINDOW_LOD_PX;                   // set by renderFrameInner for the frame being drawn
   function poly(ctx, pts, fill, stroke, lw) {
     ctx.beginPath();
     ctx.moveTo(pts[0][0], pts[0][1]);
@@ -1670,7 +1678,11 @@
       const bays = Math.max(1, Math.floor(len / arch.bayW));
       const bayLen = len / bays;
       const storeys = b.levels;
-      for (let bi = 0; bi < bays; bi++) {
+      // Level of detail: a window module narrower than WINDOW_LOD_PX on the screen cannot be seen (it is a smudge of ink on the wall), and drawing
+      // the windows of a district is most of the time a far-zoom frame costs (11.7 s of 12 s for the 9,214 buildings of Jette at Fit). The wall is then drawn plain.
+      // sim.opts.windowLodPx = 0 draws every window as before (renderFrame sets windowLodPx for the frame).
+      const winBays = bayLen * view.scale < windowLodPx ? 0 : bays;
+      for (let bi = 0; bi < winBays; bi++) {
         for (let si = 0; si < storeys; si++) {
           if (arch.shopFloor && si === 0) {
             // shopfront band
@@ -2417,6 +2429,7 @@
     A.sprites.collect = (A.sprites.exact && !warm.done && warm.still >= PREWARM_STILL_FRAMES && sim.opts.prewarm !== false) ? new Map() : null;
     // the whole view (scale and offset) unchanged for a few frames: cached layers are then repainted exactly if they are off by a fraction of a pixel
     if (zs.ox === view.ox && zs.oy === view.oy && zs.vscale === view.scale) zs.stillView = (zs.stillView || 0) + 1; else { zs.ox = view.ox; zs.oy = view.oy; zs.vscale = view.scale; zs.stillView = 0; }
+    windowLodPx = sim.opts.windowLodPx === undefined ? WINDOW_LOD_PX : sim.opts.windowLodPx;
     const detail = sim.opts.detail === true && pal.reg !== 'formal';
     A.sprites.detail = detail; A.sprites.ink = sim.opts.ink === true && pal.reg !== 'formal';
     const shadow = mixHex(pal.shadow, pal.bg, 0.72);
@@ -2445,17 +2458,17 @@
     const drawStatic = (c, v) => { for (const _ of drawStaticSteps(c, v)); };
     const F = A.sprites.factory, gkey = [view.w, view.h, pal.famId, pal.lookId, pal.reg, pal.surface, layers.buildings, detail, A.sprites.ink, A.sprites.posterize].join('|');
     const settled = zs.stillView >= 3, zooming = zs.still < 2;
-    if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg, drawStaticSteps);
+    if (F && sim.opts.cacheGround !== false) worldLayer(ctx, sim, '_ground', view, gkey, settled, zooming, drawStatic, pal.bg, drawStaticSteps, view.scale < 1.0, (c, v) => groundCoarse(c, v, sim, pal));      // far out (below 1 px/m) a missing ground is first painted flat, then exactly in slices
     else drawStatic(ctx, view);
     if (sim.groundTint) drawGroundTint(ctx, sim, view);                    // under the buildings and agents, over the ground and shadows
     // What can be seen at a view: buildings and trees (and the fountain) that reach it, and the agents. Anything whose screen bounds
     // miss the canvas is skipped (viewport culling).
     const collectStatic = (v, out) => {
       const pad = v.scale * 12;
-      if (layers.buildings) for (const e of sim.buildings) {
-        const H = heightOfEntity(e) * v.scale; let vis = false;
+      if (layers.buildings) for (let bi = 0; bi < sim.buildings.length; bi++) {
+        const e = sim.buildings[bi], H = heightOfEntity(e) * v.scale; let vis = false;
         for (const p of e.src.footprint) { const q = proj(v, p[0], p[1], e.z); if (q[0] > -pad && q[0] < v.w + pad && q[1] > -pad && q[1] < v.h + pad + H) { vis = true; break; } }
-        if (vis) out.push({ d: e.fit.cx + e.fit.cy + e.z, kind: 'b', o: e });
+        if (vis) out.push({ d: e.fit.cx + e.fit.cy + e.z, kind: 'b', o: e, i: bi });       // i: the building's index in sim.buildings (the far layer's signature table is indexed by it)
       }
       if (layers.trees) for (const t of sim.trees) {
         const q = proj(v, t.x, t.y, t.z), H = A.treeHeight(t.kind, t.s) * v.scale;
@@ -2495,13 +2508,27 @@
     const versioned = !!sim.buildingStyle && typeof sim.frameVersion === 'number';
     const far = view.scale < 1.0 && F && sim.opts.cacheGround !== false && !sim.bindings.length && (!sim.buildingStyle || versioned);
     if (far) {
+      // The data signature of the frame: changes whenever any building's colour may have changed. (A version number, or a hash of the states.)
       let h = 0;
       if (versioned) h = 'v' + sim.frameVersion;
       else for (const e of sim.buildings) h = (h * 31 + (e.state ? e.state.charCodeAt(0) : 0) * 2 + (e.investor ? 1 : 0)) | 0;
-      // painted in slices (a yield every 16 items); until it is ready the buildings are drawn directly below. The sprite exact flag is not part of the
-      // key: it flipped when the view settled and repainted the whole layer a second time for nothing.
-      const farSteps = function* (c, v) { c.lineJoin = 'round'; let n = 0; for (const it of collectStatic(v, []).sort(byDepth)) { drawItem(c, it, v); if ((++n & 15) === 0) yield; } };
-      const drew = worldLayer(ctx, sim, '_far', view, gkey + '|' + h + '|' + layers.trees, settled, zooming, (c, v) => { for (const _ of farSteps(c, v)); }, null, farSteps, true);
+      // INCREMENTAL: the layer is not repainted for a new signature. farPatch finds the buildings whose style changed and repaints only the small cells they touch (see
+      // FAR LAYER, below). sim.opts.farPatch = false (or posterize, which needs the whole picture) keys the layer on the signature as before: a changed colour repaints it all.
+      const incremental = sim.opts.farPatch !== false && !A.sprites.posterize;
+      const skey = gkey + '|' + layers.trees + (incremental ? '' : '|' + h);
+      // a building's signature: what decides its colour. The style object itself when the style is versioned (a shared object per distinct look), else the state and owner.
+      const sigOf = versioned ? (e => sim.buildingStyle(e)) : (e => (e.state ? e.state.charCodeAt(0) : 0) * 2 + (e.investor ? 1 : 0));
+      // painted in slices (a yield every 16 items); until it is ready the picture is the coarse one (or the buildings are drawn directly). The sprite exact flag is not part of the
+      // key: it flipped when the view settled and repainted the whole layer a second time for nothing. The generator returns what it painted (items, signatures, layer view).
+      const farSteps = function* (c, v) {
+        c.lineJoin = 'round'; let n = 0; const items = collectStatic(v, []).sort(byDepth), sigs = new Array(sim.buildings.length);
+        for (const it of items) { drawItem(c, it, v); if (it.kind === 'b') sigs[it.i] = sigOf(it.o); if ((++n & 15) === 0) yield; }
+        return { items, sigs, v };
+      };
+      const farOnce = (c, v) => { const g = farSteps(c, v); for (;;) { const r = g.next(); if (r.done) return r.value; } };
+      const coarse = (c, v) => farCoarse(c, v, sim, pal, reg, A.REG[pal.reg] || A.REG.colorfigures, layers);
+      if (incremental) farPatch(sim, view, skey, h, sigOf, drawItem, sim.opts.layerMs === undefined ? LAYER_MS : sim.opts.layerMs);
+      const drew = worldLayer(ctx, sim, '_far', view, skey, settled, zooming, farOnce, null, farSteps, true, coarse);
       if (drew) {
         const agents = collectAgents([]).sort(byDepth);
         drawItems(ctx, agents, view);
@@ -2543,23 +2570,42 @@
     return A_().sprites.factory(w, h);
   }
   const LAYER_STAND_IN = [0.15, 8];                  // the old layer, scaled, may stand in for a new one this far either way: no blurrier than the zoom just before it
+  const layerMsBase = sim => sim.opts.layerMs === undefined ? LAYER_MS : sim.opts.layerMs;
+  const COARSE_MS = 20;                              // wall time a frame may spend completing a rough (first) picture; the exact layer is sliced at LAYER_MS in the same frame
   const LAYER_MS = 6;                                // wall time a frame may spend painting a layer in slices
   const layerClock = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   // Returns true when it drew the layer. With steps and softStart, a layer that does not exist yet is started in slices and false is returned, so the
   // caller draws the frame another way until it is ready.
-  function worldLayer(ctx, sim, slot, view, skey, settled, zooming, paint, bg, steps, softStart) {
+  function worldLayer(ctx, sim, slot, view, skey, settled, zooming, paint, bg, steps, softStart, coarse) {
     const A = A_(), q = A.sprites.dpr || 1, sc = view.scale.toFixed(4);
     let L = sim[slot], sx = 0, sy = 0;
     if (L && L.skey === skey && L.sc !== sc && zooming) {
       const r = view.scale / L.scale;
       if (r > LAYER_STAND_IN[0] && r < LAYER_STAND_IN[1]) { blitScaled(ctx, view, L, q, bg); return true; }
     }
+    // FIRST PAINT. A layer that does not exist yet and has a coarse painter (opts.coarse) gets a rough layer at once: one cheap pass, so the screen is never empty and no
+    // frame waits for the exact painting. The layer is marked `rough`, which makes it out of date for the slicer below, so the exact one starts being painted in slices
+    // behind it and replaces it when whole.
+    if (!L && coarse && steps && softStart && sim.opts.sliceLayers !== false && sim.opts.coarseFirst !== false) {
+      const mw = Math.ceil(view.w * LAYER_MARGIN), mh = Math.ceil(view.h * LAYER_MARGIN);
+      const cv = layerCanvas(sim, slot, Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d');
+      c.scale(q, q); const g = coarse(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh });
+      L = sim[slot] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh, rough: true, info: null };
+      if (g && typeof g.next === 'function') sim[slot + 'C'] = { gen: g, L };        // a coarse painter that yields is stepped COARSE_MS a frame below, until it is done
+      sim.layerRoughPaints = (sim.layerRoughPaints || 0) + 1;
+    }
+    // A coarse painter still running (this layer's rough picture is being completed): step it. It is dropped when the layer it paints is gone.
+    const C = sim[slot + 'C'];
+    if (C) {
+      if (C.L !== sim[slot]) sim[slot + 'C'] = null;
+      else { const t0 = layerClock(); do { if (C.gen.next().done) { sim[slot + 'C'] = null; break; } } while (layerClock() - t0 < COARSE_MS); }
+    }
     // The layer is out of date and the zoom has stopped (the scale or the key has changed), or it does not exist and softStart is set: the new one is
     // painted a slice per frame into a second canvas while the old one, scaled, keeps the picture on screen, and is swapped in when it is whole.
     // (Painting it in one go cost 35 to 50 ms for the ground, and 275 ms for the far layer, in a browser.) The old layer stands in only within
     // LAYER_STAND_IN. Otherwise, and for a pan past the margin, it is painted at once as before.
-    const outOfDate = L && ((L.skey === skey && L.sc !== sc) || (L.skey !== skey && L.sc === sc));
-    if (steps && sim.opts.sliceLayers !== false && (outOfDate || (!L && softStart))) {
+    const outOfDate = L && (L.rough || (L.skey === skey && L.sc !== sc) || (L.skey !== skey && L.sc === sc));
+    if (steps && sim.opts.sliceLayers !== false && !sim[slot + 'C'] && (outOfDate || (!L && softStart))) {      // (not while the rough picture is still being completed: it gets the frame's time first)
       const r = L ? view.scale / L.scale : 1;
       if (!L || (r > LAYER_STAND_IN[0] && r < LAYER_STAND_IN[1])) {
         let p = sim[slot + 'P'];
@@ -2570,11 +2616,11 @@
           p = sim[slot + 'P'] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh, gen: steps(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh }), done: false };
         }
         const budget = sim.opts.layerMs === undefined ? LAYER_MS : sim.opts.layerMs, t0 = layerClock();
-        do { if (p.gen.next().done) { p.done = true; break; } } while (layerClock() - t0 < budget);
+        do { const r = p.gen.next(); if (r.done) { p.done = true; p.info = r.value || null; break; } } while (layerClock() - t0 < budget);
         if (p.done) {
           if (A.sprites.posterize) A.quantise(p.cv, A.sprites.posterize);
           if (L && L.cv !== p.cv) sim[slot + 'Spare'] = L.cv;
-          L = sim[slot] = { skey, sc, scale: p.scale, cv: p.cv, ox: p.ox, oy: p.oy, mw: p.mw, mh: p.mh }; sim[slot + 'P'] = null;
+          L = sim[slot] = { skey, sc, scale: p.scale, cv: p.cv, ox: p.ox, oy: p.oy, mw: p.mw, mh: p.mh, info: p.info, ver: null }; sim[slot + 'P'] = null;
           sim.layerRepaints = (sim.layerRepaints || 0) + 1;
         } else if (L) { blitScaled(ctx, view, L, q, bg); return true; }
         else return false;
@@ -2591,13 +2637,214 @@
       const mw = Math.ceil(view.w * LAYER_MARGIN), mh = Math.ceil(view.h * LAYER_MARGIN);
       if (sim[slot]) sim[slot + 'Spare'] = sim[slot].cv;
       const cv = layerCanvas(sim, slot, Math.ceil((view.w + 2 * mw) * q), Math.ceil((view.h + 2 * mh) * q)), c = cv.getContext('2d');
-      c.scale(q, q); paint(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh });
+      c.scale(q, q); const info = paint(c, { w: view.w + 2 * mw, h: view.h + 2 * mh, scale: view.scale, ox: view.ox + mw, oy: view.oy + mh });
       if (A.sprites.posterize) A.quantise(cv, A.sprites.posterize);
-      L = sim[slot] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh }; sx = mw * q; sy = mh * q;
+      L = sim[slot] = { skey, sc, scale: view.scale, cv, ox: view.ox, oy: view.oy, mw, mh, info: info || null, ver: null }; sx = mw * q; sy = mh * q;
       sim.layerRepaints = (sim.layerRepaints || 0) + 1;
     }
     ctx.drawImage(L.cv, sx, sy, Math.ceil(view.w * q), Math.ceil(view.h * q), 0, 0, view.w, view.h);
     return true;
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------------------------------------
+  // FAR LAYER: the state machine of sim._far (the buildings and trees below 1 px per metre, painted once into a world-anchored layer; see worldLayer).
+  //
+  //   ABSENT --first far frame--> ROUGH --exact painting done--> EXACT <------------------------------------+
+  //     (no layer)         (farCoarse: flat shapes, one fill       (L.info = items, signatures, layer view)  | signature changed: farPatch
+  //                         per colour, stepped COARSE_MS a frame;        |      ^                           v
+  //                         the exact layer is painted behind it           |      +----------- INDEXING (lookup grid, a few ms a frame, once per layer)
+  //                         in slices, sim._farP, once it is complete)     |                         |
+  //                                                                        |               DIFFING (which buildings changed) -> PAINTING (their boxes) -> EXACT
+  //   ROUGH or EXACT --scale changes (zoom)--> STALE: the old layer is blitted scaled; --zoom stops--> repainted in slices (sim._farP) and swapped in whole: EXACT
+  //   EXACT --key changes (theme, trees on/off, size)--> same repaint;  a pan past the margin or a fraction of a pixel after a pan --> one-shot repaint, EXACT
+  //   DIFFING finds more than FAR_PATCH_MAX of the buildings changed --> the layer is marked stale (skey = null) and repainted in slices as above: nothing is patched
+  //
+  // The same for the ground layer (sim._ground) up to ROUGH: groundCoarse (flat landuse and roads) first, then the exact ground in slices.
+  //
+  // A new data signature (the frame version, or the states) never repaints the layer. farPatch compares each building's signature with the one it was painted with
+  // (L.info.sigs, indexed like sim.buildings; the signature is the style object for a versioned style, else the state and owner) and repaints only those buildings, in place:
+  // the box of a changed building is cleared and every item touching it is drawn again, back to front, so the pixels equal a full painting (see the scratch canvas below).
+  // The work is queued in depth order and spent layerMs a frame (twice that with a backlog), so a colour change appears as a sweep across the picture over a few frames instead of the whole
+  // layer being redone in slices. A newer signature while a pass is painting starts another diff pass after it (changes between are coalesced into the queue, never lost).
+  // While a full repaint (sim._farP) is running the layer is not patched: the repaint draws the current colours itself, and the diff that follows its swap catches what changed meanwhile.
+  // Counters on the sim, for tests and benches: layerRepaints (whole layers painted), layerRoughPaints, farPatches (passes), farRectsPainted, farPatchFallbacks.
+  // Options: sim.opts.coarseFirst = false (no rough layer), sim.opts.farPatch = false (a new signature repaints the whole layer, as before), sim.opts.sliceLayers = false (everything in one go).
+  const FAR_RECT_PAD = 2.5;                          // css px added to a changed building's own box: its pixels, ink and sprite rounding included
+  const FAR_PAD = 2.5;                               // the same for every item's box in the lookup grid (the far ink is under a pixel wide; viz/test_farlayer.js would catch too little)
+  const FAR_SCRATCH_MARGIN = 2;                      // device px of margin round the scratch canvas a patch box is drawn in
+  const FAR_CELL = 32;                               // side of a lookup grid cell, device pixels
+  const FAR_PATCH_MAX = 0.2;                         // above this share of changed buildings, repainting the whole layer in slices is cheaper than patching (a patch redraws a building and its neighbours)
+  // The flat first picture: every building's top (and a body under it) in its colour, batched one fill per colour, and the trees as dots in one path. No sprites, no ink, no sorting:
+  // about a tenth of the exact painting. Colours come from the same style the exact painting uses, so the picture is the right colours, just not the right shapes.
+  function* farCoarse(c, v, sim, pal, reg, areg, layers) {
+    const A = A_(), body = new Map(), tops = new Map(), pad = v.scale * 12, shadeMemo = new Map();
+    const shaded = (col, k) => { const kk = col + '|' + k; let r = shadeMemo.get(kk); if (!r) shadeMemo.set(kk, r = shade(col, k)); return r; };
+    c.lineJoin = 'round';
+    if (layers.buildings) for (let bi = 0; bi < sim.buildings.length; bi++) {
+      if ((bi & 1023) === 1023) yield;
+      const e = sim.buildings[bi], fp = e.src.footprint, Hm = entityHeight(e), H = Hm * v.scale;
+      const q0 = proj(v, fp[0][0], fp[0][1], e.z); if (q0[0] < -pad - H || q0[0] > v.w + pad + H || q0[1] < -pad - H || q0[1] > v.h + pad + 2 * H) continue;
+      const wall = A.wallFor(pal, e.seed), st = (sim.buildingStyle || retrofitStyle)(e, areg, pal, wall) || {};
+      const wc = st.data || wall, rc = st.roof || pal.roof || wc;
+      let a = body.get(wc); if (!a) body.set(wc, a = []); a.push(e, Hm);
+      let b = tops.get(rc); if (!b) tops.set(rc, b = []); b.push(e, Hm);
+    }
+    // A building is a rectangle round its footprint on the screen when it is only a few pixels across (one native call instead of one per vertex, which is most of the cost:
+    // 9,214 polygons took 90 ms and the rectangles 20), and the footprint polygon itself when it is bigger.
+    const k = v.scale, SMALL = 36;
+    const fill = (groups, col, zf, up) => {
+      for (const [colour, list] of groups) {
+        c.fillStyle = col(colour); let open = 0;
+        for (let i = 0; i < list.length; i += 2) {
+          const e = list[i], z = e.z + list[i + 1] * zf, fp = e.src.footprint, oy = v.oy - z * k;
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+          for (let j = 0; j < fp.length; j++) { const x = v.ox + (fp[j][0] - fp[j][1]) * k * C30, y = oy + (fp[j][0] + fp[j][1]) * k * 0.5; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+          if (open === 0) c.beginPath();
+          if ((x1 - x0) * (y1 - y0) < SMALL) { const dx = (x1 - x0) * 0.12, dy = (y1 - y0) * 0.12; c.rect(x0 + dx, y0 + dy, (x1 - x0) - 2 * dx, (y1 - y0) - 2 * dy + up * list[i + 1] * k); if (++open === 128) { c.fill(); open = 0; } continue; }
+          for (let j = 0; j < fp.length; j++) { const x = v.ox + (fp[j][0] - fp[j][1]) * k * C30, y = oy + (fp[j][0] + fp[j][1]) * k * 0.5; if (j) c.lineTo(x, y); else c.moveTo(x, y); }
+          c.closePath();
+          if (++open === 128) { c.fill(); open = 0; }
+        }
+        if (open) c.fill();
+      }
+    };
+    yield; fill(body, w => shaded(w, reg.tones[1]), 0.5, 0.5); yield; fill(tops, r => shaded(r, reg.tones[0]), 1, 0);               // a body half way up (a rectangle also covers the wall below it), then the roofs
+    if (layers.trees && sim.trees.length) {
+      c.beginPath(); const s = Math.max(1.2, v.scale * 6);
+      yield;
+      for (const t of sim.trees) { const q = proj(v, t.x, t.y, t.z); if (q[0] > -pad && q[0] < v.w + pad && q[1] > -pad && q[1] < v.h + pad) c.rect(q[0] - s / 2, q[1] - s * 0.9, s, s); }
+      c.fillStyle = shaded(mixHex(pal.bg, '#4f7a46', 0.8), 1); c.fill();
+    }
+  }
+  // The flat first picture of the ground: the base colour, the landuse in one fill per colour, the roads as one stroke per width. About a twentieth of the exact painting
+  // (no relief shading, no building shadows, no markings), drawn at once the first time the ground is wanted far out; the exact ground is painted behind it in slices.
+  function groundCoarse(c, v, sim, th) {
+    const B = sceneBounds(sim.scene), P = (x, y) => proj(v, x, y, 0);
+    c.fillStyle = th.bg; c.fillRect(0, 0, v.w, v.h); c.lineJoin = 'round'; c.lineCap = 'butt';
+    c.beginPath(); [[B[0], B[1]], [B[2], B[1]], [B[2], B[3]], [B[0], B[3]]].forEach((p, i) => { const q = P(p[0], p[1]); if (i) c.lineTo(q[0], q[1]); else c.moveTo(q[0], q[1]); }); c.closePath(); c.fillStyle = th.ground; c.fill();
+    const groups = new Map();
+    for (const l of sim.scene.landuse) {
+      const fill = l.kind === 'park' ? th.grass : (l.kind === 'garden' ? mixHex(th.grass, th.ground, 0.3) : (l.kind === 'water' ? th.water : th.plaza));
+      let a = groups.get(fill); if (!a) groups.set(fill, a = []); a.push(l.footprint);
+    }
+    for (const [fill, list] of groups) { c.beginPath(); for (const fp of list) { fp.forEach((p, i) => { const q = P(p[0], p[1]); if (i) c.lineTo(q[0], q[1]); else c.moveTo(q[0], q[1]); }); c.closePath(); } c.fillStyle = fill; c.fill(); }
+    // roads: pavements (a wide stroke) then carriageways, one path per width
+    for (const pass of [0, 1]) {
+      const byW = new Map();
+      for (const r of sim.scene.roads) {
+        const cls = roadCls(r), w = Math.max(pass ? 0.8 : 1, (pass ? cls.width : cls.width + 2 * cls.pavement) * v.scale), colour = pass ? (r.class === 'cycle' || r.class === 'pedestrian' ? th.pave : th.road) : th.pave;
+        if (!pass && !(cls.pavement > 0)) continue;
+        const key = colour + '|' + Math.round(w * 2) / 2; let a = byW.get(key); if (!a) byW.set(key, a = { colour, w: Math.round(w * 2) / 2, roads: [] }); a.roads.push(r);
+      }
+      for (const g of byW.values()) {
+        c.strokeStyle = g.colour; c.lineWidth = g.w;
+        g.roads.forEach((r, n) => {
+          if ((n & 63) === 0) { if (n) c.stroke(); c.beginPath(); }
+          r.pts.forEach((p, i) => { const q = P(p[0], p[1]); if (i) c.lineTo(q[0], q[1]); else c.moveTo(q[0], q[1]); });
+        });
+        c.stroke();
+      }
+    }
+  }
+  // The box an item's pixels can fall in, in layer css pixels [x0, y0, x1, y1], generous (ink and rounding add a pixel or two).
+  function farBox(it, v, FAR_PAD) {
+    const k = v.scale;
+    if (it.kind === 'b') {
+      const e = it.o;
+      if (e._asset) { const p = proj(v, e.fit.cx, e.fit.cy, e.z), bb = e._asset.bbox; return [p[0] + bb.minX * k - FAR_PAD, p[1] + bb.minY * k - FAR_PAD, p[0] + bb.maxX * k + FAR_PAD, p[1] + bb.maxY * k + FAR_PAD]; }
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; const Hk = entityHeight(e) * k;
+      for (const f of e.src.footprint) { const q = proj(v, f[0], f[1], e.z); x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1] - Hk); y1 = Math.max(y1, q[1]); }
+      return [x0 - FAR_PAD, y0 - FAR_PAD, x1 + FAR_PAD, y1 + FAR_PAD];
+    }
+    if (it.kind === 't') {
+      const t = it.o, p = proj(v, t.x, t.y, t.z), bb = t._asset ? t._asset.bbox : { minX: -3, minY: -8, maxX: 3, maxY: 0 }, w = (bb.maxX - bb.minX) * k;
+      return [Math.min(p[0] + bb.minX * k, p[0] - w * 0.4) - FAR_PAD, p[1] + bb.minY * k - FAR_PAD, Math.max(p[0] + bb.maxX * k, p[0] + w * 0.4) + FAR_PAD, Math.max(p[1] + bb.maxY * k, p[1] + w * 0.15) + FAR_PAD];
+    }
+    const p = proj(v, it.o[0], it.o[1], it.o[2]), r = 60 * k + 40; return [p[0] - r, p[1] - r, p[0] + r, p[1] + r];       // the fountain
+  }
+  // The lookup grid of a painted layer (built the first time it is patched): each item's box (css px in the layer), and per grid cell the items whose box touches it, in the layer's
+  // depth order (a lookup structure only: what gets repainted is the box of a changed building, not whole cells).
+  // Built in steps (about 3 microseconds an item, 55 ms for Jette's 18,000 items at once): returns the grid when it is whole, else null after spending `budget` ms from t0.
+  function farGrid(L, q, t0, budget) {
+    const info = L.info; if (info.grid) return info.grid;
+    const n = info.items.length, cell = FAR_CELL / q;
+    let G = info.gridBuild;
+    if (!G) G = info.gridBuild = { pos: 0, nb: 0, cols: Math.ceil(L.cv.width / FAR_CELL), rows: Math.ceil(L.cv.height / FAR_CELL), cells: null, box: new Float32Array(n * 4) };
+    if (!G.cells) G.cells = new Array(G.cols * G.rows);
+    while (G.pos < n) {
+      const end = Math.min(n, G.pos + 512);
+      for (let k = G.pos; k < end; k++) {
+        const it = info.items[k], b = farBox(it, info.v, FAR_PAD); G.box[k * 4] = b[0]; G.box[k * 4 + 1] = b[1]; G.box[k * 4 + 2] = b[2]; G.box[k * 4 + 3] = b[3]; if (it.kind === 'b') G.nb++;
+        const cx0 = Math.max(0, Math.floor(b[0] / cell)), cy0 = Math.max(0, Math.floor(b[1] / cell)), cx1 = Math.min(G.cols - 1, Math.floor(b[2] / cell)), cy1 = Math.min(G.rows - 1, Math.floor(b[3] / cell));
+        for (let y = cy0; y <= cy1; y++) for (let x = cx0; x <= cx1; x++) { const i = y * G.cols + x; (G.cells[i] || (G.cells[i] = [])).push(k); }
+      }
+      G.pos = end;
+      if (G.pos < n && layerClock() - t0 >= budget) return null;
+    }
+    info.gridBuild = null;
+    return (info.grid = { cols: G.cols, rows: G.rows, cell, cells: G.cells, box: G.box, nb: G.nb, dirty: new Uint8Array(n), queue: [], qpos: 0, seen: new Uint32Array(n), stamp: 0 });
+  }
+  // One call per frame (before the layer is blitted): bring the exact layer up to date with the buildings' current signature `h`, within `budget` ms.
+  // sim._farPatch is the state: null when the layer is current, else { ver, phase: 'diff' | 'paint', pos }.
+  function farPatch(sim, view, skey, h, sigOf, drawItem, budget) {
+    const L = sim._far, q = (A_().sprites.dpr || 1);
+    if (!L || !L.info || L.rough || sim._farP || L.skey !== skey || L.sc !== view.scale.toFixed(4) || !A_().sprites.factory) { return; }
+    const info = L.info, P = sim._farPatch;
+    if (!P && L.ver === h) return;
+    const t0 = layerClock(), grid = farGrid(L, q, t0, budget), nItems = info.items.length;
+    if (!grid) { sim._farPatch = sim._farPatch || { ver: null, phase: 'index', pos: 0 }; return; }          // INDEXING: the lookup grid is built a few ms a frame first
+    const st = (P && P.phase !== 'index') ? P : (sim._farPatch = { ver: h, phase: 'diff', pos: 0 });               // st.ver: the signature this pass of the diff started from
+    const c = L.cv.getContext('2d'), v = info.v, box = grid.box, W = L.cv.width, Hd = L.cv.height;
+    for (;;) {
+      if (st.phase === 'diff') {
+        while (st.pos < nItems) {
+          const end = Math.min(nItems, st.pos + 128);
+          for (let n = st.pos; n < end; n++) {
+            const it = info.items[n]; if (it.kind !== 'b') continue;
+            const sg = sigOf(it.o); if (sg === info.sigs[it.i]) continue;
+            info.sigs[it.i] = sg;
+            if (!grid.dirty[n]) { grid.dirty[n] = 1; grid.queue.push(n); }
+          }
+          st.pos = end;
+          if (layerClock() - t0 >= budget) return;
+        }
+        if (grid.queue.length - grid.qpos > FAR_PATCH_MAX * grid.nb) {                  // too many to patch one by one: repaint the lot in slices instead
+          sim._farPatch = null; L.skey = null; info.grid = null; sim.farPatchFallbacks = (sim.farPatchFallbacks || 0) + 1; return;
+        }
+        st.phase = 'paint';
+      }
+      if (grid.queue.length - grid.qpos > 64 && budget < 2 * layerMsBase(sim)) budget = 2 * layerMsBase(sim);       // a backlog (patches arriving faster than they are painted): spend twice the time on it
+      // paint phase: for each queued building (in depth order, so a change sweeps across the screen), clear its box and redraw, back to front, every item touching the box, clipped to it
+      while (grid.qpos < grid.queue.length) {
+        const n = grid.queue[grid.qpos++]; grid.dirty[n] = 0;
+        const rb = farBox(info.items[n], v, FAR_RECT_PAD);
+        const x0 = Math.max(0, Math.floor(rb[0] * q)), y0 = Math.max(0, Math.floor(rb[1] * q)), x1 = Math.min(W, Math.ceil(rb[2] * q)), y1 = Math.min(Hd, Math.ceil(rb[3] * q));
+        if (x1 > x0 && y1 > y0) {
+          // The items are drawn into a scratch canvas a few pixels bigger than the box on every side, and the middle of it is copied into the layer: drawing straight into the
+          // layer under a clip differs from the unclipped painting by one level of 255 on a few pixels at the clip's edge (the canvas resamples scaled sprites differently there).
+          // Here the edge is in the scratch's margin, and the copy is 1:1 on whole device pixels.
+          const S = FAR_SCRATCH_MARGIN, w = x1 - x0, h = y1 - y0, rx0 = (x0 - S) / q, ry0 = (y0 - S) / q, rx1 = (x1 + S) / q, ry1 = (y1 + S) / q, hit = [], stamp = ++grid.stamp;
+          for (let cy = Math.max(0, Math.floor(ry0 / grid.cell)); cy <= Math.min(grid.rows - 1, Math.floor(ry1 / grid.cell)); cy++)
+            for (let cx = Math.max(0, Math.floor(rx0 / grid.cell)); cx <= Math.min(grid.cols - 1, Math.floor(rx1 / grid.cell)); cx++) {
+              const list = grid.cells[cy * grid.cols + cx]; if (!list) continue;
+              for (const k of list) if (grid.seen[k] !== stamp) { grid.seen[k] = stamp; if (box[k * 4] < rx1 && box[k * 4 + 2] > rx0 && box[k * 4 + 1] < ry1 && box[k * 4 + 3] > ry0) hit.push(k); }
+            }
+          hit.sort((a, b) => a - b);                                                      // item order is the layer's depth order
+          const sw = w + 2 * S, sh = h + 2 * S; let X = sim._farScratch;
+          if (!X || X.width < sw || X.height < sh) X = sim._farScratch = A_().sprites.factory(Math.max(sw, X ? X.width : 0, 64), Math.max(sh, X ? X.height : 0, 64));
+          const sc = X.getContext('2d'); sc.setTransform(1, 0, 0, 1, 0, 0); sc.clearRect(0, 0, X.width, X.height);
+          sc.setTransform(q, 0, 0, q, S - x0, S - y0); sc.lineJoin = 'round';
+          for (const k of hit) drawItem(sc, info.items[k], v);
+          c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(x0, y0, w, h); c.drawImage(X, S, S, w, h, x0, y0, w, h);
+          sim.farRectsPainted = (sim.farRectsPainted || 0) + 1;
+        }
+        if (layerClock() - t0 >= budget) return;
+      }
+      grid.queue.length = 0; grid.qpos = 0; L.ver = st.ver; sim.farPatches = (sim.farPatches || 0) + 1;
+      // The pass is painted. If the signature moved on while it ran, diff again (only what changed since is queued); else the layer is current.
+      if (st.ver === h) { sim._farPatch = null; return; }
+      st.ver = h; st.phase = 'diff'; st.pos = 0;
+    }
   }
 
   // Ground tint (model packs): sim.groundTint = { cells(version) -> [{ x0, y0, x1, y1, colour }] (world metres), opacity, version() }. The cells are painted opaque into a
