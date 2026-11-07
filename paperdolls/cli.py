@@ -1,5 +1,5 @@
 """Command-line entry points. Every stage is runnable without Claude."""
-import argparse, importlib, json, sys, tempfile
+import argparse, importlib, json, os, sys, tempfile
 from pathlib import Path
 
 
@@ -252,7 +252,7 @@ def cmd_place(a):
     try:
         sp = specmod.load(a.spec, goal="place_scene")
         specmod.require_confirmed(a.spec)
-        r = placemod.run(a.spec, refetch=a.refetch, fetch=not a.no_fetch)
+        r = placemod.run(a.spec, refetch=a.refetch, fetch=not a.no_fetch, endpoint=a.endpoint)
     except (specmod.SpecError, placemod.PlaceError) as e:
         raise SystemExit(f"cannot continue: {e}")
     for k, v in r.items():
@@ -365,6 +365,7 @@ def cmd_osm_fetch(a):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="paperdolls")
+    ap.add_argument("--debug", action="store_true", help="show the traceback of an unexpected error (or set PAPERDOLLS_DEBUG=1)")
     sub = ap.add_subparsers(required=True)
     s = sub.add_parser("validate"); s.add_argument("spec"); s.set_defaults(f=cmd_validate)
     s = sub.add_parser("export"); s.add_argument("spec"); s.add_argument("--out"); s.set_defaults(f=cmd_export)
@@ -396,7 +397,8 @@ def main(argv=None):
     i = isub.add_parser("docs"); i.add_argument("--out")
     s.set_defaults(f=cmd_intake)
     s = sub.add_parser("place", help="get the OSM extract, ingest it, and write the scene and its report (place_scene projects)")
-    s.add_argument("spec"); s.add_argument("--refetch", action="store_true"); s.add_argument("--no-fetch", action="store_true"); s.set_defaults(f=cmd_place)
+    s.add_argument("spec"); s.add_argument("--refetch", action="store_true"); s.add_argument("--no-fetch", action="store_true")
+    s.add_argument("--endpoint", help="an Overpass endpoint other than the public one"); s.set_defaults(f=cmd_place)
     s = sub.add_parser("viewer", help="write a one-file viewer page for the project's place"); s.add_argument("spec"); s.set_defaults(f=cmd_viewer)
     s = sub.add_parser("pack", help="model packs: check, build, or serve a pack with hot reload"); psub = s.add_subparsers(dest="pcmd", required=True)
     def _pack_args(i, scene_help):
@@ -420,7 +422,49 @@ def main(argv=None):
     i.add_argument("--port", type=int, default=8765); i.add_argument("--max-mb", type=float, default=16); i.add_argument("--trim", help="trim stages (see pack build)")
     s.set_defaults(f=cmd_pack)
     a = ap.parse_args(argv)
-    a.f(a)
+    _run(a)
+
+
+def _known_errors():
+    """The exception types that mean 'the input or the environment is wrong', each with a one-line message. Imported on use: doctor must run without them."""
+    import http.client, zipfile
+    kinds = [OSError, ValueError, http.client.HTTPException, zipfile.BadZipFile, EOFError]    # ValueError covers JSON/YAML decode and the SpecError/IngestError/FetchError family
+    for mod, name in ((".ingest.fetch", "FetchError"), (".place", "PlaceError"), (".ingest.build", "IngestError"), (".spec", "SpecError"),
+                      (".pack", "PackError"), (".intake", "IntakeError")):
+        try:
+            kinds.append(getattr(importlib.import_module(mod, __package__), name))
+        except ImportError:
+            pass
+    try:
+        import yaml
+        kinds.append(yaml.YAMLError)
+    except ImportError:
+        pass
+    return tuple(kinds)
+
+
+def _one_line(e):
+    if isinstance(e, OSError) and e.filename:
+        return f"{e.strerror or type(e).__name__}: {e.filename}"
+    text = " ".join(str(e).split()) or type(e).__name__
+    return text
+
+
+def _run(a):
+    """The error boundary: a known failure is one line on stderr and exit 1; anything else is reported as a bug (traceback with --debug)."""
+    debug = getattr(a, "debug", False) or bool(os.environ.get("PAPERDOLLS_DEBUG"))
+    try:
+        a.f(a)
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except Exception as e:
+        if debug:
+            raise
+        if isinstance(e, _known_errors()):
+            raise SystemExit(f"error: {_one_line(e)}")
+        raise SystemExit(f"internal error: {type(e).__name__}: {_one_line(e)}. This is a bug in paperdolls; re-run with --debug for the traceback.")
 
 if __name__ == "__main__":
     main()

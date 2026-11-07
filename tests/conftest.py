@@ -26,3 +26,17 @@ def _model_present():
 
 # The Great Retrofit model is not distributed with the plugin until its licence is confirmed (see vendor/greatretrofit_v2/NOTICE.md).
 needs_model = pytest.mark.skipif(not _model_present(), reason="the vendored Great Retrofit model is not installed (vendor/greatretrofit_v2/model.py)")
+
+
+@pytest.fixture(autouse=True)
+def _no_outside_network(monkeypatch):
+    """No test may reach a real server (Overpass in particular). Only loopback and unix sockets connect; tests use local fake servers."""
+    import socket
+    real = socket.socket.connect
+
+    def guarded(self, address):
+        host = address[0] if isinstance(address, tuple) else None
+        if isinstance(host, str) and not (host.startswith("127.") or host in ("::1", "localhost")):
+            raise OSError(f"tests must not use the network: refused to connect to {host}")
+        return real(self, address)
+    monkeypatch.setattr(socket.socket, "connect", guarded)

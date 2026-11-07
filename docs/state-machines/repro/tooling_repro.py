@@ -39,6 +39,30 @@ def tmp():
     return Path(tempfile.mkdtemp(prefix="pdrepro-"))
 
 
+def _block_outside_network():
+    """Safety net: a repro must never reach a real server (Overpass). Any connect to a non-loopback address fails."""
+    real = socket.socket.connect
+
+    def guarded(self, address):
+        host = address[0] if isinstance(address, tuple) else address
+        if isinstance(host, str) and not (host.startswith("127.") or host in ("::1", "localhost")) and self.family != getattr(socket, "AF_UNIX", -1):
+            raise OSError(f"repro network guard: refusing to connect to {host}")
+        return real(self, address)
+    socket.socket.connect = guarded
+
+
+_block_outside_network()
+
+
+def fake_fetch(calls, elements):
+    """A stand-in for place.fetch_overpass: counts the call and writes a canned extract. Never touches the network."""
+    def fetch(query, out_path, *a, **k):
+        calls.append(query)
+        extract(out_path, elements)
+        return len(elements)
+    return fetch
+
+
 # ---------------------------------------------------------------- fixtures
 
 def way(i, pts, tags):
@@ -189,12 +213,13 @@ def t05_place_reuses_a_cached_extract_for_a_different_area():
     from paperdolls.ingest import fetch as fetchmod
     d = tmp()
     spec = place_spec(d, [50.00, 4.00, 50.01, 4.01])
-    out = d / "out"; out.mkdir()
-    extract(out / "extract.json", [bld(1, square(50.001, 4.001)), bld(2, square(50.002, 4.002)), ROAD])            # fetched earlier for the small bbox
     calls = []
     real = placemod.fetch_overpass
-    placemod.fetch_overpass = lambda *a, **k: calls.append(1) or real(*a, **k)
+    placemod.fetch_overpass = fake_fetch(calls, [bld(1, square(50.001, 4.001)), bld(2, square(50.002, 4.002)), ROAD])        # the first run: fetched for the small bbox
     try:
+        placemod.run(spec)
+        calls.clear()
+        placemod.fetch_overpass = fake_fetch(calls, [bld(i, square(50.0 + i * 0.01, 4.0)) for i in range(1, 6)] + [ROAD])  # what the server answers for the larger bbox
         spec = place_spec(d, [49.90, 3.90, 50.10, 4.10])                                                         # the user enlarges the area (intake answer place.bbox)
         r = placemod.run(spec)
     finally:
@@ -210,13 +235,24 @@ def t06_place_truncated_cache_fails_forever_without_a_hint():
     spec = place_spec(d, [50.0, 4.0, 50.01, 4.01])
     out = d / "out"; out.mkdir()
     (out / "extract.json").write_text('{"elements": [{"type": "way", "id": 1, "geometry": [{"lat": 50.0', encoding="utf-8")
-    msgs = []
-    for _ in range(2):
-        try:
-            placemod.run(spec)
-        except placemod.PlaceError as e:
-            msgs.append(str(e))
-    return (len(msgs) == 2 and "refetch" not in msgs[0].lower()), f"same failure twice={msgs[0] == msgs[1]}; message={msgs[0][:110]!r}"
+    msgs, calls = [], []
+    real = placemod.fetch_overpass
+    placemod.fetch_overpass = fake_fetch(calls, [bld(1, square(50.0, 4.0)), ROAD])
+    try:
+        for _ in range(2):
+            try:
+                placemod.run(spec)
+            except placemod.PlaceError as e:
+                msgs.append(str(e))
+    finally:
+        placemod.fetch_overpass = real
+    (out / "extract.json").write_text('{"elements": [{"type": "way", "id": 1, "geometry": [{"lat": 50.0', encoding="utf-8")
+    try:
+        placemod.run(spec, fetch=False)                                   # with --no-fetch the damaged file cannot be replaced: the message must say what to do
+        nofetch = "no error"
+    except placemod.PlaceError as e:
+        nofetch = str(e)
+    return (len(msgs) == 2 and "refetch" not in msgs[0].lower()), f"errors with fetching allowed={len(msgs)}; refetched {len(calls)} time(s); with --no-fetch: {nofetch[:150]!r}"
 
 
 @repro("T07")
