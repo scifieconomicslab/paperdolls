@@ -31,7 +31,7 @@
   // ---- A/B compare ----
   function createCompare(o) {
     const { manifest, store: A } = o, B = PS().create(manifest), horizon = manifest.time.steps;
-    const cmp = { manifest, A, B, enabled: false, showing: 'a', bSource: null, snapshotsList: [], ctlB: null, runtimeB: null, error: null };
+    const cmp = { manifest, A, B, enabled: false, showing: 'a', bSource: null, snapshotsList: [], ctlB: null, runtimeB: null, error: null, bShown: null };
     const listeners = []; let flips = 0;
     const emit = what => { for (const f of [...listeners]) { try { f(what); } catch (e) { if (root.console) root.console.error(e); } } };
     cmp.onChange = fn => { listeners.push(fn); return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); }; };
@@ -54,6 +54,21 @@
       if (src.snapshot) { const sn = cmp.snapshotsList.find(x => x.id === src.snapshot); return sn ? sn.label : src.snapshot; }
       return 'custom';
     };
+    cmp.labelOfParams = p => {                                        // what a finished run was made from, in the words of the presets and snapshots
+      const same = q => Object.keys(p).every(k => p[k] === q[k]);
+      const pr = (manifest.presets || []).find(x => same(cmp.paramsOf({ preset: x.id }))); if (pr) return pr.label;
+      const sn = cmp.snapshotsList.find(x => same(cmp.paramsOf({ snapshot: x.id }))); return sn ? sn.label : 'custom';
+    };
+    // B is usable when its last run succeeded. After a failed run B still holds the frames of the run before (they stay on the map and nothing else describes them):
+    // the label says which run that is, the charts leave B out and there is nothing to list as a difference.
+    cmp.bOk = () => !(cmp.ctlB && cmp.ctlB.error);
+    cmp.bLabel = () => (cmp.bOk() ? cmp.labelOf(cmp.bSource) : (cmp.bShown ? cmp.labelOfParams(cmp.bShown.params) + ' (the new B run failed: this is the last good one)' : 'B (its run failed: no data)'));
+    const bRan = c => {                                                // every finished run of B's controller, the first and each later one
+      const was = cmp.error;
+      if (c.error) cmp.error = 'The comparison run failed: ' + c.error;
+      else { cmp.error = null; cmp.bShown = { params: c.shownParams }; }
+      if (cmp.error !== was) emit('error');
+    };
     cmp.setB = src => {
       cmp.bSource = src; B.setParams(cmp.paramsOf(src));            // the controller of B (once made) sees the change and re-runs
       emit('b'); return true;
@@ -64,6 +79,7 @@
     };
     cmp.differences = () => {                                         // where B differs from A, in the words of the controls
       const a = A.params(), b = B.params(), out = [];
+      if (!cmp.bOk()) return out;
       for (const [k, p] of Object.entries(manifest.params || {})) if (a[k] !== b[k]) {
         const show = v => { if (p.type === 'enum') { const e = (p.values || []).find(x => (typeof x === 'object' ? x.value : x) === v); return e && typeof e === 'object' && e.label ? e.label : String(v); } if (p.type === 'boolean') return v ? 'on' : 'off'; return String(Math.round(v * 1000) / 1000) + (p.unit ? ' ' + p.unit : ''); };
         out.push({ name: k, label: p.label || k, a: show(a[k]), b: show(b[k]) });
@@ -82,11 +98,15 @@
         try {
           cmp.runtimeB = o.createRuntime();
           cmp.ctlB = PH().createController({ manifest, runtime: cmp.runtimeB, store: B, schedule: o.schedule, immediate: o.immediate });
-          const done = cmp.ctlB.start(); follow();
-          Promise.resolve(done).then(() => { if (cmp.ctlB.error) { cmp.error = 'The comparison run failed: ' + cmp.ctlB.error; emit('error'); } });
+          cmp.ctlB.onRun = bRan;
+          cmp.ctlB.start(); follow();
         } catch (e) { cmp.error = 'Could not start the comparison run: ' + ((e && e.message) || e); cmp.enabled = false; if (root.console) root.console.error(e); }
       }
       if (!cmp.enabled && cmp.showing === 'b') cmp.show('a');
+      if (!on && cmp.ctlB) {                                          // off: B's worker and model copy are released; B's settings stay, and switching on again starts B afresh
+        cmp.ctlB.dispose(); cmp.ctlB = null; cmp.runtimeB = null; cmp.bShown = null;
+        if (cmp.error) { cmp.error = null; emit('error'); }
+      }
       emit('enabled');
     };
     cmp.show = which => {
@@ -110,6 +130,7 @@
     for (const k of READS) view[k] = (...a) => live()[k](...a);
     view.bindScene = (en, opts) => { A.bindScene(en, opts); B.bindScene(en, opts); return view; };
     view.shownVersion = () => A.shownVersion() + B.shownVersion() + flips;
+    view.runId = () => cmp.showing + ':' + live().runId();             // which run is on the map: tells A's frames from B's even when both are at the same generation
     const flipSubs = [];
     view.subscribe = (topic, fn) => {
       const offA = A.subscribe(topic, ev => { if (!(cmp.showing === 'b' && FRAME_TOPICS.includes(topic))) fn(ev); });
@@ -130,7 +151,7 @@
     let hoverBusy = false;
     const hoverAll = (from, t) => { if (hoverBusy) return; hoverBusy = true; try { for (const c of charts) if (c !== from) c.hoverAt(t, true); } finally { hoverBusy = false; } };
     const pick = t => { A.setPlaying(false); if (ctl && ctl.ensure) ctl.ensure(t); A.setTime(t); };
-    const bOn = () => !!(cmp && cmp.enabled && cmp.ctlB);
+    const bOn = () => !!(cmp && cmp.enabled && cmp.ctlB && cmp.bOk());
 
     function chart(item) {
       const info = seriesInfo(manifest, item.series, item.y); if (!info) return null;
@@ -153,7 +174,7 @@
       redraw();
       const offs = [A.subscribe('series', redraw)];
       offs.push(A.subscribe('time', () => { if (type === 'bar') redraw(); else c.setCursor(A.time().t); }));
-      if (cmp) { offs.push(cmp.B.subscribe('series', () => { if (compareOn()) redraw(); }), cmp.B.subscribe('time', () => { if (type === 'bar' && compareOn()) redraw(); }), cmp.onChange(w => { if (w === 'enabled' || w === 'b') redraw(); })); }
+      if (cmp) { offs.push(cmp.B.subscribe('series', () => { if (compareOn()) redraw(); }), cmp.B.subscribe('time', () => { if (type === 'bar' && compareOn()) redraw(); }), cmp.onChange(w => { if (w === 'enabled' || w === 'b' || w === 'error') redraw(); })); }
       charts.push(c); box.appendChild(c.el); box.destroy = () => { offs.forEach(f => f()); charts.splice(charts.indexOf(c), 1); };
       box.chart = c;
       return box;
@@ -178,7 +199,7 @@
       }
       redraw();
       const offs = [A.subscribe('series', redraw), A.subscribe('time', redraw)];
-      if (cmp) offs.push(cmp.B.subscribe('series', () => { if (bOn()) redraw(); }), cmp.B.subscribe('time', () => { if (bOn()) redraw(); }), cmp.onChange(w => { if (w === 'enabled' || w === 'b') redraw(); }));
+      if (cmp) offs.push(cmp.B.subscribe('series', () => { if (bOn()) redraw(); }), cmp.B.subscribe('time', () => { if (bOn()) redraw(); }), cmp.onChange(w => { if (w === 'enabled' || w === 'b' || w === 'error') redraw(); }));
       box.destroy = () => offs.forEach(f => f()); box.kpis = k;
       return box;
     }
@@ -208,8 +229,8 @@
         aBtn.setAttribute('aria-pressed', String(cmp.showing === 'a')); bBtn.setAttribute('aria-pressed', String(cmp.showing === 'b')); aBtn.classList.toggle('on', cmp.showing === 'a'); bBtn.classList.toggle('on', cmp.showing === 'b');
         diff.textContent = '';
         if (cmp.enabled) for (const d of cmp.differences()) diff.appendChild(el('li', { text: d.label + ': A ' + d.a + ', B ' + d.b }));
-        if (cmp.enabled && !diff.childNodes.length) diff.appendChild(el('li', { text: 'B has the same settings as A.' }));
-        msg.textContent = cmp.error || (cmp.enabled ? 'The map shows ' + (cmp.showing === 'b' ? 'B (' + cmp.labelOf(cmp.bSource) + ')' : 'A (the current settings)') + '. Press B on the keyboard to flip.' : '');
+        if (cmp.enabled && cmp.bOk() && !diff.childNodes.length) diff.appendChild(el('li', { text: 'B has the same settings as A.' }));
+        msg.textContent = cmp.error || (cmp.enabled ? 'The map shows ' + (cmp.showing === 'b' ? 'B (' + cmp.bLabel() + ')' : 'A (the current settings)') + '. Press B on the keyboard to flip.' : '');
       };
       ctx.refreshers.push(draw); cmp.onChange(draw); A.subscribe('params', draw);
       const keys = e => {

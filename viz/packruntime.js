@@ -163,8 +163,8 @@
       get t() { return t; },
       // Begin again from time 0 with these parameters. Returns the frame at time 0.
       start(p, s) {
-        params = Object.assign({}, p); if (s !== undefined) seed = s;
-        handle = impl.init(Object.assign({}, params), plain(ents), seed); t = 0;
+        const sd = s !== undefined ? s : seed, h = impl.init(Object.assign({}, p), plain(ents), sd);        // nothing is replaced before init has succeeded: a refusing model leaves the old run whole
+        seed = sd; params = Object.assign({}, p); handle = h; t = 0;
         return take(impl.step(handle, 0), 0)[0];
       },
       // New parameters: a re-run starts again (and returns the frame at time 0); "continue" keeps the state and returns null.
@@ -174,7 +174,11 @@
         const h = impl.setParams(handle, Object.assign({}, params)); if (h !== undefined) handle = h;
         return { restarted: false, frame: null };
       },
-      step(n) { if (!handle) throw new Error('start() first'); n = Math.max(0, n | 0); const fr = take(impl.step(handle, n), t + 1); t += fr.length; return fr; },
+      step(n) {                                                      // n = 0: the current frame, without advancing (the interface of impl.step)
+        if (!handle) throw new Error('start() first'); n = Math.max(0, n | 0);
+        if (n === 0) return take(impl.step(handle, 0), t);
+        const fr = take(impl.step(handle, n), t + 1); t += fr.length; return fr;
+      },
       run(toT) {
         if (!handle) throw new Error('start() first');
         toT = Math.min(horizon, toT | 0); if (toT <= t) return [];

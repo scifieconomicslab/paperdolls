@@ -1,4 +1,4 @@
-/* R08: a setParams that throws in the worker does not bump the server's epoch, so the run in flight is not cancelled: it keeps computing to the horizon
+/* [FIXED aa30227] R08: a setParams that throws in the worker does not bump the server's epoch, so the run in flight is not cancelled: it keeps computing to the horizon
  * for nobody (the client drops its chunks by ctl.gen). Wasted work, and the store keeps the truncated old-run frames.
  * Run: node docs/state-machines/repro/r08-failed-setparams-does-not-cancel-run.js */
 const H = require('./_harness');

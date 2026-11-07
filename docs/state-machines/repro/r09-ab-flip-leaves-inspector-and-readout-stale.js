@@ -1,4 +1,4 @@
-/* R09: flipping the map between A and B (the B key, or the A/B buttons) emits only 'view'. The inspector (selection, time, frames) and the timeline readout
+/* [FIXED f5765bd] R09: flipping the map between A and B (the B key, or the A/B buttons) emits only 'view'. The inspector (selection, time, frames) and the timeline readout
  * (params, time, frames) listen to none of those, so after a flip they keep showing the run that was on screen BEFORE the flip until time moves.
  * Needs jsdom: PAPERDOLLS_NODE_MODULES=<node_modules dir>. Run: node docs/state-machines/repro/r09-ab-flip-leaves-inspector-and-readout-stale.js */
 const path = require('path'); let JSDOM;

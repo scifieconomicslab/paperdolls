@@ -245,10 +245,10 @@
   const pick = binding.ok ? Pick.create(sim) : null;
   const inter = binding.ok ? PackHost.bindInteraction({ manifest: MANIFEST, store: view, sim, binding, pick, box, camera: cam, doc: document, tip: $('tip'), controller: ctl }) : null;
   const ui = PackHost.mountUI({ manifest: MANIFEST, store: view, controller: ctl, compare, register, doc: document, regions: { left: $('left'), right: $('right'), bottom: $('bottom'), inspector: $('stagebox') }, display });
-  const badge = $('mapbadge'), drawBadge = () => { badge.hidden = !(compare.enabled && compare.showing === 'b'); badge.textContent = badge.hidden ? '' : 'Map shows B: ' + compare.labelOf(compare.bSource); };
-  compare.onChange(w => { if (w === 'showing' || w === 'enabled' || w === 'b') { drawBadge(); } }); drawBadge();
-  compare.onChange(w => { if (w === 'error') problem(compare.error); });
-  ctl.onRun = c => { if (c.error) problem('The model failed: ' + c.error); else if ($('problem').textContent.startsWith('The model failed')) problem(''); };
+  const badge = $('mapbadge'), drawBadge = () => { badge.hidden = !(compare.enabled && compare.showing === 'b'); badge.textContent = badge.hidden ? '' : 'Map shows B: ' + compare.bLabel(); };
+  compare.onChange(w => { if (w === 'showing' || w === 'enabled' || w === 'b' || w === 'error') { drawBadge(); } }); drawBadge();
+  compare.onChange(w => { if (w === 'error') { if (compare.error) problem(compare.error); else if ($('problem').textContent.startsWith('The comparison run')) problem(''); } });
+  ctl.onRun = c => { if (c.error) problem('The model failed: ' + c.error); else if (c.notice) problem(c.notice); else if ($('problem').textContent.startsWith('The model failed')) problem(''); };
   ctl.start().then(() => { if (ctl.error) problem('The model failed: ' + ctl.error); });
   ui.refresh();
   window.labPack = { manifest: MANIFEST, store, view, compare, register, controller: ctl, runtime, sim, binding, ui, pick, interaction: inter, tip: $('tip') };       // a handle for tests and for the browser console

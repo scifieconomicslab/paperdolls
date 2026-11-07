@@ -1,4 +1,4 @@
-/* R06: the worker -> inline fallback ("auto" mode).
+/* [FIXED aa30227] R06: the worker -> inline fallback ("auto" mode).
  *  (a) the worker errors before it answers init: falls back, terminates and revokes once; the controller's `mode` is a stale copy ('worker')
  *  (b) a second error event before the first inline answer: a second inline server is built and init is sent again (an extra runtime per event)
  *  (c) `new Worker` throws after the Blob URL was made: the URL is never revoked
@@ -20,7 +20,7 @@ const inlineServer = env => ({ chunk: 8, yieldFn: () => new Promise(r => env.yie
     const rt = env.worker({ mode: 'auto', server: inlineServer(env) });
     env.workers[0].fail('first'); env.workers[0].fail('second');
     await env.drain(); await env.settle(); G.PackRuntime.create = orig;
-    console.log('(b) two error events before init is answered: PackRuntime.create called ' + made.length + ' times (expected 1); revoked=' + JSON.stringify(env.URL.revoked) + '; mode=' + rt.mode);
+    console.log('(b) two error events before init is answered: PackRuntime.create called ' + made.length + ' times (expected 1, was 2 on aa2d936); revoked=' + JSON.stringify(env.URL.revoked) + '; mode=' + rt.mode);
   }
   { // (c)
     const env = H.makeEnv(); env.failConstruct = true;

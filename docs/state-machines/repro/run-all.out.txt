@@ -1,0 +1,62 @@
+=== r01-continue-policy-async.js
+policy=continue frames after start+drain: 1 (horizon 40)
+after 100 clock ticks: t=19 frames=21 playing=true time events=19x t
+after a slider move and 3 s more: frame 19 load=519 (made before: rate 0.5), frame 22 load=822 (made after: rate 0.8)
+model starts: 1, steps executed by the server: 32 (= frames made - 1: 32)
+=== r02-compare-b-failure-silent.js
+B source={"preset":"low"} B rate=0.2 B frames=41 B frame5 load=205 (expect 205)
+after setB(bad: rate 0.95, the model throws):
+  ctlB.error      = "runtime repro: model refuses rate 0.95"
+  cmp.error       = "The comparison run failed: runtime repro: model refuses rate 0.95"   (what the page shows in the header and the compare panel)
+  onChange events = [enabled,b,error]
+  B.params().rate = 0.95   differences() = []
+  B frame5 load   = 205   (rate 0.2 run; the 0.95 run never produced a frame); bOk=false
+  map would show frame with load 205 under the label "Low (the new B run failed: this is the last good one)"
+=== r03-playhead-jump-on-replace.js
+run in flight: store holds 41 frames, load at t=30 is 530 (old run, rate 0.5)
+clock after 8 ticks while the new run catches up: t=30 (held; old frames, load 530)
+after replace: t=30 (was 30), frames=33, load at t is 830 (new run, rate 0.8)
+time events during the jump: []  frames events: [replace:33]
+=== r04-play-stalls-after-failed-run.js
+run finished: ctl.error="runtime repro: model exploded at step 20" running=false frames=17 of 41
+after 20 s of clock: playing=false t=16 (Play stopped at the last frame)
+=== r05-silent-worker-dispose.js
+(a) silent init: start() is pending, ctl.running=true, ctl.error=null, frames=0
+    after the 1 s watchdog (mode worker, no fallback): start() is resolved, running=false error="runtime repro: the worker did not answer within 1 s"
+    after a slider move: running=false error="runtime repro: the worker did not answer within 1 s" (refused at once, nothing queued behind the dead init)
+(b) after dispose() x2: URL.revoked=["blob:fake/1"] (once), start() is rejected(disposed)
+(c) worker died mid-run (mode worker): ctl.error="worker out of memory" running=false
+    next slider move: running=false error="worker out of memory" frames=9 messages posted to the dead worker: 0
+(d) the same in auto mode: mode=inline ctl.error=null frames=41 load@3=603 notice="The model worker stopped; the model now runs on the main thread, where moving a slider may feel slower."
+=== r06-fallback-paths.js
+(a) before the error: rt.mode=worker ctl.mode=worker
+    after: rt.mode=inline ctl.mode=inline fellBack="SyntaxError in worker script" frames=41 revoked=["blob:fake/1"] log=["terminate blob:fake/1"]
+(b) two error events before init is answered: PackRuntime.create called 1 times (expected 1, was 2 on aa2d936); revoked=["blob:fake/1"]; mode=inline
+(c) new Worker() throws: URL.created=1 URL.revoked=["blob:fake/1"] mode=inline fellBack="Worker construction blocked"
+=== r07-dropped-chunk-silent-truncation.js
+dropped 1 partial message; frames in store=17 of 41 ctl.error="frame t=25 out of order: expected 17" ctl.running=false ctl.runs=1
+exceptions thrown out of the message handler (uncaught in a browser): []
+Play: playing=false t=16
+=== r08-failed-setparams-does-not-cancel-run.js
+setParams failed: ctl.error="runtime repro: model refuses rate 0.95" frames=9 pending yields=1
+after releasing the server: 0 more partial chunks sent by the old run, model steps 8 -> 8 (horizon 40); store still 9 frames of rate 500
+=== r09-ab-flip-leaves-inspector-and-readout-stale.js
+showing A  : map load[0]=500 | inspector fields: A | 500 | rate of this run 0.5 | readout: Totals: load 500 · zero 0
+after flip : map load[0]=200 | inspector fields: A | 200 | rate of this run 0.2 | readout: Totals: load 200 · zero 0
+time moved : map load[0]=201 | inspector fields: B | 201 | rate of this run 0.2 | readout: Totals: load 201 · zero 0
+=== r10-store-emit.js
+(a) []
+(b) later subscriber saw: ["v1 rate=0.9","v2 rate=0.9"] (in order)
+=== r11-inspect-answers-from-partial-run.js
+on screen at t=30: load 530 (old run, rate 0.5)
+inspect answer: withheld (stale: the model is busy with the new run; the inspector keeps the rows of the run on screen and asks again when the new run replaces it)
+after the new run replaced it: rate of this run=0.8; asked for t=30; run has simulated to=40; events logged by t=30
+=== r12-stale-chunks-are-dropped.js
+chunks in flight when run 3 started: 1; frames now 41; distinct runs among frames: [0.9]; t=3 (never moved by the run completing)
+=== r13-store-and-small-cases.js
+(a1) runtime threw new Error(""): ctl.error="runtime repro: Error" frames=0 -> reported (REFUTED: message becomes "Error")
+(a2) runtime threw the empty string: ctl.error="runtime repro: the runtime failed without a message" frames=0 ctl.runs=1 (FIXED: the server never sends an empty message, the client tests `error !== undefined`)
+(b) pushFrames threw "frame t=5 out of order: expected 2": length=3 (was 3), events=[], time.t=2, frame() is present, bound load[0]=2 (FIXED: pushFrames is all or nothing; unchanged: 2)
+(c) compare off: B worker dead=true, ctlB=null, flush() re-ran B: false, workers made: 2
+(d) validator ok=true (errors: []); after applyPreset("odd") rate=0.2 isPreset("odd")=true (the preset is compared as the store holds it)
+(e) setTime(30) while 9 frames exist: t=8; after the run completed (41 frames) t=30

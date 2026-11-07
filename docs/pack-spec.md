@@ -60,7 +60,7 @@ runtime: {type: js, entry: runtime.js, seed: 7, on_params: rerun}
 | `entry` | The file that registers the runtime. Required for `js`. It is inlined into the built page, so it must not contain `</script>`. |
 | `files` | Optional. Every file to inline, in load order, as paths relative to `pack.yaml`; the `entry` must be one of them. Use it when the runtime is split (`[prng.js, hook.js, runtime.js, bind.js]`): `build`, `check` and `dev` then load exactly these files in this order, and `dev` reloads when any of them changes. Without `files` (the single-entry form) the page inlines `--include` files, the `entry`, and `bind.js` if it sits beside it. A listed file that is missing, or an inlined file that names a sibling script (`require('./x.js')`, `importScripts('x.js')`) that is not inlined, is an error; other `.js` files beside `pack.yaml` that are not inlined give a warning. |
 | `seed` | Whole number handed to `init`. Default 1. |
-| `on_params` | What a parameter change means. `rerun` (default): start again from time 0 with the new values and fill the whole timeline, so the timeline can be scrubbed. `continue`: keep the state and call `setParams`; frames are made only as the clock reaches them. |
+| `on_params` | What a parameter change means. `rerun` (default): start again from time 0 with the new values and fill the whole timeline, so the timeline can be scrubbed. `continue`: keep the state and call `setParams`; frames are made only as the clock (or a scrub of the timeline) reaches them, the timeline grows as it goes, a moved parameter changes the frames made after it and the frames already made keep the values they were made with. |
 | `options` | Free mapping for the runtime's own use (not yet passed on). |
 
 ### `time`

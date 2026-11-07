@@ -30,15 +30,26 @@
       version: { params: 0, time: 0, selection: 0, frames: 0, series: 0, view: 0 },
       data: 0,                                       // bumped whenever the frame at the current time may differ
       shown: 0,                                      // bumped whenever what the map shows may have changed (the frame at the current time, or how it is read)
+      goal: null,                                    // a time asked for beyond the frames made so far (setTime), or the playhead's place when a shorter run replaced the frames
       gen: 0,                                        // bumped by every run that replaces the frames
       bind: new Map(),                               // entity -> bound typed arrays (see bindScene)
     };
     const store = { manifest };
 
+    // An event raised while another is being delivered (a handler that writes the store) waits until the one in progress has reached every subscriber, so all of them
+    // see the events in the order they happened. A subscriber that was unsubscribed meanwhile is not called.
+    const queue = []; let emitting = false;
     function emit(topic, detail) {
       st.version[topic]++;
-      const ev = Object.assign({ topic, version: st.version[topic] }, detail || {});
-      for (const [, s] of [...subs]) if (s.topic === topic || s.topic === '*') { try { s.fn(ev); } catch (e) { if (root.console) root.console.error(e); } }
+      queue.push(Object.assign({ topic, version: st.version[topic] }, detail || {}));
+      if (emitting) return;
+      emitting = true;
+      try {
+        while (queue.length) {
+          const ev = queue.shift();
+          for (const [id, s] of [...subs]) if (subs.has(id) && (s.topic === ev.topic || s.topic === '*')) { try { s.fn(ev); } catch (e) { if (root.console) root.console.error(e); } }
+        }
+      } finally { emitting = false; }
     }
     store.subscribe = (topic, fn) => {
       if (topic !== '*' && !TOPICS.includes(topic)) throw new Error('unknown topic ' + topic + ' (known: ' + TOPICS.join(', ') + ', *)');
@@ -46,6 +57,7 @@
       return () => { subs.delete(id); };
     };
     store.version = topic => st.version[topic];
+    store.runId = () => st.gen;                                        // the run whose frames the store holds: changes whenever a run's frames replace the old ones
 
     // ---- parameters ----
     // A number is clamped to its range and snapped to its step; an enum or a boolean must be legal as it is.
@@ -87,14 +99,16 @@
     store.isPreset = id => {
       const pr = (manifest.presets || []).find(p => p.id === id); if (!pr) return false;
       const want = Object.assign(defaults(), pr.params);
+      for (const k of Object.keys(want)) { const c = coerce(k, want[k]); if (c.ok) want[k] = c.value; }         // the value as the store holds it: a preset off the step is snapped on the way in
       return Object.keys(want).every(k => st.params[k] === want[k]);
     };
 
     // ---- time ----
     store.time = () => Object.assign({}, st.time);
+    // A time beyond the frames made so far is clamped to the last one, and remembered (`goal`): when the frames arrive the playhead goes on to it. Any later setTime replaces the wish.
     store.setTime = t => {
-      const last = Math.max(0, Math.min(horizon, st.frames.length ? st.frames.length - 1 : horizon));
-      t = Math.max(0, Math.min(last, Math.round(+t) || 0));
+      const last = Math.max(0, Math.min(horizon, st.frames.length ? st.frames.length - 1 : horizon)), asked = Math.max(0, Math.min(horizon, Math.round(+t) || 0));
+      t = Math.min(last, asked); st.goal = asked > t ? asked : null;
       if (t === st.time.t) return false;
       st.time.t = t; st.data++; st.shown++; emit('time', { what: 't' }); return true;
     };
@@ -137,18 +151,27 @@
     }
     store.pushFrames = (frames, opts) => {
       const replace = !!(opts && opts.replace);
-      if (replace) { st.frames = []; st.series = {}; st.gen++; }
-      const before = st.frames.length;
+      // all or nothing: the new frames are checked and resolved on the side, and the store changes only when every one of them is good (a refused chunk leaves the run it found)
+      const base = replace ? [] : st.frames, nf = [], ns = {};
       for (const f0 of frames) {
-        if (f0.t !== st.frames.length) throw new Error('frame t=' + f0.t + ' out of order: expected ' + st.frames.length);
-        const f = resolve(f0, st.frames[st.frames.length - 1]);
-        st.frames.push(f);
-        for (const [name, pt] of Object.entries(f.series || {})) (st.series[name] || (st.series[name] = [])).push(pt);
+        if (f0.t !== base.length + nf.length) throw new Error('frame t=' + f0.t + ' out of order: expected ' + (base.length + nf.length));
+        const f = resolve(f0, nf.length ? nf[nf.length - 1] : base[base.length - 1]);
+        nf.push(f);
+        for (const [name, pt] of Object.entries(f.series || {})) (ns[name] || (ns[name] = [])).push(pt);
       }
-      if (st.time.t > st.frames.length - 1) st.time.t = Math.max(0, st.frames.length - 1);
-      if (replace || before <= st.time.t || st.frames.length <= st.time.t) { st.data++; st.shown++; }         // frames added beyond the current time change nothing on the map
+      if (replace) { st.frames = nf; st.series = ns; st.gen++; }
+      else { for (const f of nf) st.frames.push(f); for (const [name, pts] of Object.entries(ns)) { const a = st.series[name] || (st.series[name] = []); for (const pt of pts) a.push(pt); } }
+      const before = replace ? 0 : st.frames.length - nf.length;
+      // the playhead stays on a frame: clamped when the run is shorter than where it was looking (it goes back to that place when the frames arrive), and moved on to a time
+      // setTime asked for beyond the frames then made. Either is a change of time and is announced.
+      const t0 = st.time.t, last = Math.max(0, st.frames.length - 1);
+      if (t0 > last) { st.goal = st.goal === null ? t0 : st.goal; st.time.t = last; }
+      else if (st.goal !== null) { st.time.t = Math.min(st.goal, last); if (st.goal <= last) st.goal = null; }
+      const moved = st.time.t !== t0;
+      if (replace || moved || before <= st.time.t || st.frames.length <= st.time.t) { st.data++; st.shown++; }         // frames added beyond the current time change nothing on the map
       emit('frames', { replace, length: st.frames.length });
       emit('series', { replace });
+      if (moved) emit('time', { what: 't' });
     };
     store.series = name => (name === undefined ? st.series : (st.series[name] || []));
     store.latest = name => { const a = st.series[name]; const pt = a && a[Math.min(st.time.t, a.length - 1)]; return pt === undefined ? null : pt; };    // the series point at the current time
