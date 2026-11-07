@@ -46,6 +46,7 @@
       return () => { subs.delete(id); };
     };
     store.version = topic => st.version[topic];
+    store.runId = () => st.gen;                                        // the run whose frames the store holds: changes whenever a run's frames replace the old ones
 
     // ---- parameters ----
     // A number is clamped to its range and snapped to its step; an enum or a boolean must be legal as it is.

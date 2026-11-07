@@ -81,17 +81,17 @@
   // run being replaced stay on screen until the new run has reached the time being looked at, so a slider moves the map without a flicker back to time 0.
   function createController(o) {
     const { manifest, runtime, store } = o, horizon = manifest.time.steps, isAsync = !!runtime.async;
-    const ctl = { wall: 0, dirty: false, runs: 0, lastRunMs: 0, error: null, acc: 0, gen: 0, running: false, async: isAsync, mode: runtime.mode || 'inline' };
+    const ctl = { wall: 0, dirty: false, runs: 0, lastRunMs: 0, error: null, acc: 0, gen: 0, shown: 0, shownParams: null, runParams: null, running: false, async: isAsync, get mode() { return runtime.mode || 'inline'; } };
     const clock = () => (root.performance && root.performance.now ? root.performance.now() : Date.now());
     const fail = e => { ctl.error = (e && e.message) || String(e); if (root.console) root.console.error(e); };
-    function finish(t0) { ctl.runs++; ctl.lastRunMs = clock() - t0; ctl.running = false; ctl.onRun && ctl.onRun(ctl); }
+    function finish(t0) { if (!ctl.error) ctl.shownParams = ctl.runParams; ctl.runs++; ctl.lastRunMs = clock() - t0; ctl.running = false; ctl.onRun && ctl.onRun(ctl); }
     // Stream a run into the store: hold the chunks until they reach `want` (or the run ends), replace the old frames with them once, then extend.
     function stream(gen, first, want) {
       let held = [first], replaced = false;
       const put = (frames, last) => {
         if (gen !== ctl.gen) return;
         held = held.concat(frames);
-        if (!replaced && (held.length > want || last)) { store.pushFrames(held, { replace: true }); replaced = true; held = []; }
+        if (!replaced && (held.length > want || last)) { store.pushFrames(held, { replace: true }); ctl.shown = gen; replaced = true; held = []; }
         else if (replaced && frames.length) { store.pushFrames(frames); held = []; }
       };
       return runtime.run(horizon, fr => put(fr, false)).then(r => { if (!r.cancelled) put([], true); });
@@ -99,31 +99,33 @@
     function rerun() {
       const t0 = clock();
       if (isAsync) {
-        const gen = ++ctl.gen; ctl.running = true; const want = store.time().t;
-        runtime.setParams(store.params()).then(res => {
+        const gen = ++ctl.gen; ctl.running = true; const want = store.time().t; ctl.runParams = store.params();
+        runtime.setParams(ctl.runParams).then(res => {
           if (gen !== ctl.gen) return null;
           if (res.restarted) return stream(gen, res.frame, want);
           if (!store.length()) store.pushFrames([res.frame || null].filter(Boolean), { replace: true });
+          ctl.shown = gen;
           return null;
         }).then(() => { if (gen === ctl.gen) { ctl.error = null; finish(t0); } }, e => { if (gen === ctl.gen) { fail(e); finish(t0); } });
         return;
       }
       try {
-        const res = runtime.setParams(store.params());
+        ctl.runParams = store.params();
+        const res = runtime.setParams(ctl.runParams);
         if (res.restarted) store.pushFrames([res.frame].concat(runtime.run(horizon)), { replace: true });
         else if (!store.length()) store.pushFrames([runtime.start(store.params())], { replace: true });
-        ctl.error = null;
+        ctl.shown = ctl.gen; ctl.error = null;
       } catch (e) { fail(e); }
       finish(t0);
     }
     ctl.start = () => {
       if (isAsync) {
-        const gen = ++ctl.gen, t0 = clock(); ctl.running = true;
-        const done = runtime.start(store.params()).then(f0 => (gen !== ctl.gen ? null : runtime.policy === 'rerun' ? stream(gen, f0, 0) : store.pushFrames([f0], { replace: true })))
+        const gen = ++ctl.gen, t0 = clock(); ctl.running = true; ctl.runParams = store.params();
+        const done = runtime.start(ctl.runParams).then(f0 => (gen !== ctl.gen ? null : runtime.policy === 'rerun' ? stream(gen, f0, 0) : (store.pushFrames([f0], { replace: true }), void (ctl.shown = gen))))
           .then(() => { if (gen === ctl.gen) { ctl.error = null; finish(t0); } }, e => { if (gen === ctl.gen) { fail(e); finish(t0); } });
         return done;
       }
-      try { store.pushFrames([runtime.start(store.params())].concat(runtime.policy === 'rerun' ? runtime.run(horizon) : []), { replace: true }); ctl.error = null; }
+      try { ctl.runParams = store.params(); store.pushFrames([runtime.start(ctl.runParams)].concat(runtime.policy === 'rerun' ? runtime.run(horizon) : []), { replace: true }); ctl.shown = ctl.gen; ctl.error = null; }
       catch (e) { fail(e); }
       return Promise.resolve();
     };
@@ -145,8 +147,12 @@
     };
     ctl.togglePlay = () => { const tm = store.time(); if (!tm.playing && tm.t >= horizon) store.setTime(0); store.setPlaying(!tm.playing); };
     ctl.setWall = i => { const n = wallMaps(manifest).length, w = Math.max(0, Math.min(Math.max(0, n - 1), i | 0)); if (w !== ctl.wall) { ctl.wall = w; store.invalidate(); } };
-    // detail for one entity: the runtime's answer (a promise either way), at the time shown
-    ctl.inspect = sel => { try { return Promise.resolve(runtime.inspect(sel, store.time().t)); } catch (e) { return Promise.reject(e); } };
+    // detail for one entity: the runtime's answer (a promise either way), at the time shown. The runtime answers from the run it holds now; while a newer run is being computed
+    // (or the newer run failed) that is not the run whose frames are on screen, so the answer is withheld: { stale: true }, and the caller asks again when the frames are replaced.
+    ctl.inspect = sel => {
+      if (isAsync && ctl.shown !== ctl.gen && (ctl.running || ctl.error)) return Promise.resolve({ stale: true });
+      try { return Promise.resolve(runtime.inspect(sel, store.time().t)); } catch (e) { return Promise.reject(e); }
+    };
     return ctl;
   }
 
@@ -541,10 +547,11 @@
       const ask = () => {
         const sel = store.selection(); if (!sel || !ctl || !ctl.inspect) return;
         if (busy) { again = true; return; }
-        busy = true; const key = sel.entity + ':' + sel.id + '@' + store.time().t;
+        // an answer is good for one (entity, run on screen, time); it is dropped if any of the three has moved by the time it arrives
+        const keyNow = () => { const n = store.selection(); return n ? n.entity + ':' + n.id + '#' + (store.runId ? store.runId() : 0) + '@' + store.time().t : ''; };
+        busy = true; const key = keyNow();
         Promise.resolve(ctl.inspect(sel)).then(detail => {
-          const now = store.selection();
-          if (now && now.entity === sel.entity && now.id === sel.id && key === now.entity + ':' + now.id + '@' + store.time().t) {
+          if (key === keyNow() && !(detail && detail.stale)) {            // a stale reply (the model is busy with another run) leaves the rows of the run on screen as they are
             shown = detail || null;
             const own = detail && detail.title && !(info() && info().of(sel.id) && info().of(sel.id).id);        // the OSM id names a building on a scene; the model's own title is then a row
             if (own) title.textContent = detail.title;
@@ -556,11 +563,11 @@
         const sel = store.selection();
         root0.hidden = !sel;
         if (!sel) { shown = null; return; }
-        if (ev && ev.topic === 'selection') { put(extraEl, []); note.textContent = ''; shown = null; }
+        if (ev && (ev.topic === 'selection' || ev.flip)) { put(extraEl, []); note.textContent = ''; shown = null; }       // a flip to the other run: its rows are not these
         const info = o.scene || store.sceneInfo; title.textContent = entityTitle(sel, info); put(fieldsEl, sceneRows(info, sel).concat(entityRows(manifest, store, sel)));
         if (!ev || ev.topic !== 'frames' || ev.replace) ask();
       };
-      const offs2 = ['selection', 'time', 'frames'].map(t => store.subscribe(t, draw));
+      const offs2 = ['selection', 'time', 'frames', 'view'].map(t => store.subscribe(t, draw));
       refreshers.push(() => draw(null));
       root0.destroy = () => offs2.forEach(f => f());
       return root0;
@@ -584,7 +591,7 @@
       ihost.appendChild(panel);
     }
     const refresh = () => refreshers.forEach(f => f());
-    const offs = [store.subscribe('params', refresh), store.subscribe('time', refresh), store.subscribe('frames', refresh)];
+    const offs = [store.subscribe('params', refresh), store.subscribe('time', refresh), store.subscribe('frames', refresh), store.subscribe('view', refresh)];
     refresh();
     return { refresh, destroy() { offs.forEach(f => f()); for (const n of mounted) if (n.destroy) n.destroy(); if (dash) dash.destroy(); } };
   }
@@ -634,7 +641,8 @@
     box.addEventListener('pointermove', onMove); box.addEventListener('pointerdown', onDown); box.addEventListener('pointerup', onUp); box.addEventListener('pointerleave', onLeave);
     box.addEventListener('pointercancel', () => { down = null; }); box.addEventListener('wheel', onWheel, { passive: true });
     doc.addEventListener('keydown', onKey);
-    const offT = store.subscribe('time', () => { if (hover >= 0 && lastXY) showTip({ k: hover }, lastXY[0], lastXY[1]); });       // the tooltip's value follows the time
+    const retip = () => { if (hover >= 0 && lastXY) showTip({ k: hover }, lastXY[0], lastXY[1]); };
+    const offT = (offs => () => offs.forEach(f => f()))(['time', 'view'].map(t => store.subscribe(t, retip)));       // the tooltip's value follows the time and the A/B flip
     // The outline of the selected (solid) and hovered (dashed) building: its footprint on the ground and lifted by its height, and the edges between.
     function drawHighlight(ctx, view) {
       ctx.clearRect(0, 0, view.w, view.h);
