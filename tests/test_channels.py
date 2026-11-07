@@ -20,3 +20,9 @@ def test_js_channel_suite_passes():
     r = subprocess.run([node, str(ROOT / "viz" / "test_channels.js"), "--manifest-json", json.dumps(toy)], capture_output=True, text=True, env=node_env(), timeout=300)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "FAIL" not in r.stdout, r.stdout
+
+
+def test_js_declutter_suite_passes():
+    r = subprocess.run([node, str(ROOT / "viz" / "test_declutter.js")], capture_output=True, text=True, env=node_env(), timeout=300)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "FAIL" not in r.stdout, r.stdout

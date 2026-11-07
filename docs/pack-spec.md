@@ -194,6 +194,17 @@ mappings:
 - **No sprite is built or changed.** Both are drawn on the canvas above the map (the one the selection uses), so a highlight cannot multiply the sprite cache, and the far-zoom layer is not repainted for it. Per frame version the shell gathers the buildings to highlight, grouped by colour (`binding.highlights()`); a draw strokes one path per colour and kind and skips buildings off screen.
 - **Selection is the same layer.** `store.selection()` is drawn as a halo and a solid outline in blue (`#1d4ed8`) under the hover outline, after the pack's own highlights, so a selected building that also "cannot retrofit" shows both.
 - The legend lists each highlighted value with a bordered (outline) or glowing (halo) swatch; plain values are not listed. Several outline mappings may be given: for a building the first that has a colour wins.
+- **Level of detail (`lod`).** An outline or halo on every building swamps a zoomed-out map, and hides the wall and roof colour that is the point of the picture. Each outline and halo mapping may say what happens below a scale:
+
+  ```yaml
+  - entity: building
+    field: cannot_retrofit
+    channel: outline
+    lod: {min_scale: 1.2, far: aggregate, cell: 200}     # all three optional; these are the defaults
+  ```
+
+  `min_scale` is the view scale in pixels per metre (a 12 m building is 14 px wide at 1.2; the Jette fit view is about 0.12, the "mid" view 0.9, a street 6). From `min_scale` up, every flagged building is outlined or haloed as before. Below it, `far` says what is drawn: `aggregate` (default) hatches the **ground** of each `cell`-metre cell (default 200, about 24 px across in the Jette fit view) with diagonal lines in the flag colour, the weight and opacity growing with the share of the model buildings in that cell that are flagged (outline: one diagonal, halo: the other); the hatch is drawn under the buildings, with the ground tint, so it cannot cover a wall or roof colour, and cells are cut at the scene's edge. `hide` draws nothing below `min_scale`. `show` draws the per-building highlight at every zoom (the behaviour before `lod` existed; `min_scale` is then ignored). The legend of an `aggregate` or `hide` mapping says so in a note. Only the first mapping of each channel that the drawn entity has sets the `lod` for that channel. The **selection and hover highlight is not part of `lod`**: it is drawn at every zoom. **Default change:** a pack that says nothing now gets `aggregate` below 1.2, where it used to get a per-building outline at every scale; say `lod: {far: show}` to keep the old picture. Validation: `lod` only on outline and halo; `far` one of aggregate, hide, show; `min_scale` from 0 to 20; `cell` from 20 to 1000 m.
+- **Segments far away** (the same sanity check). Zoomed out, a building with sections cannot show them, so its colour is mixed toward the `done` colour by the share k/n. When a wall mapping paints a state colour (or roof colour) the mix is at most 0.3 of the way (it was 0.85), so the state stays readable in the far view; a pack with segments and no wall mapping keeps 0.85, because there the sections are the picture. A halo, outline or overlay never recolours a wall or roof.
 - Drawn by `PackHost.bindInteraction(...).drawHighlight`, which the page already calls every frame; a page that does not create the interaction layer shows no highlights.
 
 #### `groundtint`: who is left behind

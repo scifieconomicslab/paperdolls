@@ -125,8 +125,8 @@ const BLOCKS = {
     { entity: 'block', field: 'state', channel: 'wall', scale: { type: 'categorical', label: 'State', values: { plain: { colour: '#c9c2b0', label: 'Plain' }, clad: { colour: '#9fc3a8', label: 'Clad' } } } },
     { entity: 'block', field: 'done', channel: 'segments', total: 'units', scale: { type: 'segments', label: 'Units retrofitted', colour: '#00aa55', todo: '#e6e0d0' } },
     { entity: 'block', field: 'state', channel: 'overlay', scale: { type: 'categorical', label: 'Insulation', values: { plain: { overlay: null, label: 'Not insulated' }, clad: { overlay: 'insulation', label: 'Insulated' } } } },
-    { entity: 'block', field: 'cannot', channel: 'outline', scale: { type: 'categorical', label: 'Cannot retrofit', values: { true: { colour: '#c0392b', label: 'Cannot: no credit' }, false: { colour: null, label: 'Can' } } } },
-    { entity: 'block', field: 'state', channel: 'halo', scale: { type: 'categorical', label: 'Done', values: { plain: { colour: null, label: 'Not yet' }, clad: { colour: '#f1c40f', label: 'Insulated' } } } },
+    { entity: 'block', field: 'cannot', channel: 'outline', lod: { far: "show" }, scale: { type: 'categorical', label: 'Cannot retrofit', values: { true: { colour: '#c0392b', label: 'Cannot: no credit' }, false: { colour: null, label: 'Can' } } } },
+    { entity: 'block', field: 'state', channel: 'halo', lod: { far: "show" }, scale: { type: 'categorical', label: 'Done', values: { plain: { colour: null, label: 'Not yet' }, clad: { colour: '#f1c40f', label: 'Insulated' } } } },
   ],
 };
 const mkFrames = () => {
@@ -168,7 +168,7 @@ if (createCanvas) test('segments in a pack: rendered through the real path (vers
   const e1 = b.entityOf(1), near = Object.assign({}, nearView, { w: 900, h: 600, ox: 450 - (e1.fit.cx - e1.fit.cy) * 9 * 0.866, oy: 300 - (e1.fit.cx + e1.fit.cy) * 4.5 });
   settle(near); assert(e1._asset && e1._asset.prims.some(p => p.role === 'segdone') && e1._asset.prims.some(p => p.role === 'segtodo'), 'sections near');
   const far = V.fitView(sim.scene, 900, 600, 0.06); settle(far, 120);
-  assert(sim._far, 'the far layer is kept'); assert(!e1._asset.prims.some(p => p.role === 'segdone'), 'no sections far'); assert.strictEqual(e1._cols.data, A.mix('#c9c2b0', '#00aa55', 0.85 * 3 / 6), 'the wall colour of the state, mixed toward done by 3 of 6');
+  assert(sim._far, 'the far layer is kept'); assert(!e1._asset.prims.some(p => p.role === 'segdone'), 'no sections far'); assert.strictEqual(e1._cols.data, A.mix('#c9c2b0', '#00aa55', 0.3 * 3 / 6), 'the wall colour of the state, mixed toward done by 3 of 6');
   b.dispose();
 });
 
@@ -385,7 +385,7 @@ if (createCanvas) test('roof colour render: the sprite takes the roof colour (fl
   assert.notStrictEqual(e1._cols.data, '#c9c2b0', 'the walls keep the look when only the roof is painted');
   assert.notStrictEqual(e1._ck, e2._ck, 'the sprite key follows the roof colour');
   const far = V.fitView(sim.scene, 900, 600, 0.06); settle(far, 120); assert(sim._far, 'the far layer is kept');
-  assert.strictEqual(e1._cols.roof, A.mix('#c9c2b0', '#00aa55', 0.85 * 3 / 6), 'far: the roof is mixed toward the segment colour like the wall (3 of 6 done)');
+  assert.strictEqual(e1._cols.roof, A.mix('#c9c2b0', '#00aa55', 0.3 * 3 / 6), 'far: the roof is mixed toward the segment colour like the wall (3 of 6 done)');
   store.setTime(0); settle(far, 120); assert.strictEqual(e1._cols.roof, '#c9c2b0', 'the layer repaints for a change of frame: nothing done yet'); store.setTime(1); settle(far, 120); assert.notStrictEqual(e2._cols.roof, '#9fc3a8', 'the clad building is mixed toward done too');
   b.dispose();
 });
@@ -397,7 +397,7 @@ if (createCanvas) test('roof colour render: a building drawn as a generic extrus
   const x = s.buildings.find(q => !q.params); V.renderFrame(ctx, s, V.fitView(s.scene, 1000, 700, 0.06), ONLY_B); if (x) assert.strictEqual(x._froof, '#ff8800', 'extruded: the roof is passed to the drawing');
   s.buildingStyle = () => ({ data: '#336699', roof: '#336699', overlays: [], seg: { n: 4, k: 2, done: '#00aa55', todo: null } }); s.frameVersion = 2;
   V.renderFrame(ctx, s, V.fitView(s.scene, 1000, 700, 0.06), ONLY_B);
-  const f = s.buildings.find(q => q.params && q._cols); assert.strictEqual(f._cols.roof, A.mix('#336699', '#00aa55', 0.85 * 2 / 4), 'far: the roof is mixed toward done like the wall');
+  const f = s.buildings.find(q => q.params && q._cols); assert.strictEqual(f._cols.roof, A.mix('#336699', '#00aa55', 0.3 * 2 / 4), 'far: the roof is mixed toward done like the wall');
 });
 // a roof colour is an option of the wall mapping only (validators: tests/pack_cases.json)
 test('roof colour: validated like the spec says', () => {
