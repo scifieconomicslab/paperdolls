@@ -54,6 +54,27 @@ def _n(v):
     return str(int(v)) if _is_num(v) and float(v).is_integer() else str(v)
 
 
+def _show(v):
+    """A value as the JavaScript validator prints it in a message."""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if v is None:
+        return "null"
+    if isinstance(v, (int, float)):
+        return _n(v)
+    return v if isinstance(v, str) else str(v)
+
+
+def _j(seq):
+    """', '.join over anything: a manifest can hold numbers or null where a name should be, and a message must not crash on them."""
+    return ", ".join(_show(x) for x in seq)
+
+
+def _js_falsy(v):
+    """JavaScript truthiness (the other validator tests `!m.banner`): null, false, 0, NaN and "" are falsy; [] and {} are not."""
+    return v is None or v is False or v == "" or (isinstance(v, (int, float)) and (v == 0 or v != v))
+
+
 def _obj(v):
     return isinstance(v, dict)
 
@@ -69,7 +90,7 @@ def check_value(p, v):
     if t == "boolean":
         return None if isinstance(v, bool) else "must be true or false"
     if t == "enum":
-        return None if v in enum_values(p) and not isinstance(v, bool) else "must be one of " + ", ".join(map(str, enum_values(p)))
+        return None if v in enum_values(p) and not isinstance(v, bool) else "must be one of " + _j(enum_values(p))
     if t in ("number", "integer"):
         if not _is_num(v):
             return "must be a number"
@@ -93,7 +114,7 @@ def validate(m):
     for k in m:
         if k not in TOP:
             err(str(k), "unknown top-level key (known: " + ", ".join(TOP) + ")")
-    if "spec" in m and m["spec"] != 1:
+    if "spec" in m and (isinstance(m["spec"], bool) or m["spec"] != 1):
         err("spec", "must be 1")
     if not _is_str(m.get("id")) or not SLUG.match(m["id"]):
         err("id", "required: lower-case letters, digits and hyphens, starting with a letter")
@@ -201,6 +222,13 @@ def validate(m):
                 err(f"{at}.values", "an enum needs a non-empty list of values")
             else:
                 names = enum_values(p)
+                for i, ev in enumerate(vs):
+                    if _obj(ev):
+                        for ek in ev:
+                            if ek not in ("value", "label"):
+                                err(f"{at}.values[{i}].{ek}", "unknown key")
+                        if "label" in ev and not isinstance(ev["label"], str):
+                            err(f"{at}.values[{i}].label", "must be a string")
                 if not all(_is_str(n) for n in names):
                     err(f"{at}.values", "each value is a string or {value, label}")
                 if len(set(map(str, names))) != len(names):
@@ -346,6 +374,8 @@ def validate(m):
         if not _obj(f):
             err(f"{at}.field", f"entity {mp['entity']} has no field {mp.get('field')}")
             continue
+        if "group" in mp and mp["channel"] != "groundtint":
+            err(f"{at}.group", "only the groundtint channel has a group")
         sc = mp.get("scale")
         if mp["channel"] == "segments":  # k of n units: the field holds k, mp["total"] names the field that holds n
             if f.get("type") == "category":
@@ -368,6 +398,8 @@ def validate(m):
                 err(f"{at}.scale.colour", "needs a #rrggbb colour")
             if "todo" in sc and not (isinstance(sc["todo"], str) and HEX.match(sc["todo"])):
                 err(f"{at}.scale.todo", "must be a #rrggbb colour")
+            if "label" in sc and not isinstance(sc["label"], str):
+                err(f"{at}.scale.label", "must be a string")
             if not _is_str(sc.get("label")):
                 warn(f"{at}.scale.label", "missing: the legend will show the field name")
             continue
@@ -401,6 +433,8 @@ def validate(m):
             if not _obj(sc) or sc.get("type") != "sequential":
                 err(f"{at}.scale.type", "the groundtint channel needs a sequential scale")
                 continue
+            if "label" in sc and not isinstance(sc["label"], str):
+                err(f"{at}.scale.label", "must be a string")
             dom = sc.get("domain")
             if not (isinstance(dom, list) and len(dom) == 2 and all(_is_num(d) for d in dom) and dom[0] < dom[1]):
                 err(f"{at}.scale.domain", "must be [low, high] with low below high")
@@ -413,6 +447,8 @@ def validate(m):
         if not _obj(sc) or sc.get("type") not in ("categorical", "sequential"):
             err(f"{at}.scale.type", "must be categorical or sequential")
             continue
+        if "label" in sc and not isinstance(sc["label"], str):
+            err(f"{at}.scale.label", "must be a string")
         if sc["type"] == "sequential":
             if mp["channel"] != "wall":
                 err(at, "a sequential scale colours walls; " + ("an overlay" if mp["channel"] == "overlay" else "the " + mp["channel"] + " channel") + " needs a categorical scale")
@@ -436,7 +472,11 @@ def validate(m):
                 k = "true" if k is True else "false" if k is False else k  # YAML 1.1 reads an unquoted true: or false: key as a boolean; the JSON the page gets already has "true" and "false"
                 vat = f"{at}.scale.values.{k}"
                 if isinstance(legal, list) and str(k) not in legal:
-                    err(vat, f"not a value of {mp['entity']}.{mp['field']} ({', '.join(legal)})")
+                    err(vat, f"not a value of {mp['entity']}.{mp['field']} ({_j(legal)})")
+                if _obj(v):
+                    for vk in v:
+                        if vk not in ("label", "colour", "overlay"):
+                            err(f"{vat}.{vk}", "unknown key")
                 if not _obj(v) or not _is_str(v.get("label")):
                     err(vat, "needs a label (the legend names it)")
                     continue
@@ -447,9 +487,10 @@ def validate(m):
                 if mp["channel"] == "overlay" and v.get("overlay") is not None and v["overlay"] not in OVERLAYS:
                     err(f"{vat}.overlay", "must be null or one of " + ", ".join(OVERLAYS))
             if f.get("type") == "category" and isinstance(f.get("values"), list):
-                miss = [v for v in f["values"] if v not in {str(k) for k in vals}]
+                have = {str(k) for k in vals}
+                miss = [v for v in f["values"] if isinstance(v, str) and v not in have]
                 if miss:
-                    warn(f"{at}.scale.values", "no entry for " + ", ".join(miss) + ": " + ('drawn as "no data"' if mp["channel"] == "wall" else "drawn with no marking" if mp["channel"] == "overlay" else f"drawn with no {mp['channel']}"))
+                    warn(f"{at}.scale.values", "no entry for " + _j(miss) + ": " + ('drawn as "no data"' if mp["channel"] == "wall" else "drawn with no marking" if mp["channel"] == "overlay" else f"drawn with no {mp['channel']}"))
     if not maps and ents:
         warn("mappings", "none: nothing will be drawn on the map")
 
@@ -517,7 +558,7 @@ def validate(m):
                             elif _obj(sr) and isinstance(sr.get("y"), list):
                                 for n in y:
                                     if n not in sr["y"]:
-                                        err(f"{iat}.y", f"no value {n} in series {it['series']} ({', '.join(sr['y'])})")
+                                        err(f"{iat}.y", f"no value {n} in series {it['series']} ({_j(sr['y'])})")
                         for k in ("title", "unit", "x"):
                             if k in it and not _is_str(it[k]):
                                 err(f"{iat}.{k}", "must be a non-empty string")
@@ -549,9 +590,9 @@ def validate(m):
                                 err(f"{kat}.y", "must be a value name from the series")
                             elif _obj(sr) and isinstance(sr.get("y"), list):
                                 if "y" not in k and len(sr["y"]) > 1:
-                                    err(f"{kat}.y", f"required: series {k['series']} has several values ({', '.join(sr['y'])})")
+                                    err(f"{kat}.y", f"required: series {k['series']} has several values ({_j(sr['y'])})")
                                 elif "y" in k and k["y"] not in sr["y"]:
-                                    err(f"{kat}.y", f"no value {k['y']} in series {k['series']} ({', '.join(sr['y'])})")
+                                    err(f"{kat}.y", f"no value {k['y']} in series {k['series']} ({_j(sr['y'])})")
                             if "at" in k and k["at"] not in KPI_AT:
                                 err(f"{kat}.at", "must be one of " + ", ".join(KPI_AT))
                             if "unit" in k and not _is_str(k["unit"]):
@@ -575,7 +616,7 @@ def validate(m):
                         else:
                             for g in it["groups"]:
                                 if g not in groups:
-                                    err(f"{iat}.groups", f"no parameter is in group {g} (groups: {', '.join(groups) or 'none'})")
+                                    err(f"{iat}.groups", f"no parameter is in group {g} (groups: {_j(groups) or 'none'})")
                     if "items" in it:
                         if it["control"] != "display":
                             err(f"{iat}.items", "only the display control has items")
@@ -587,7 +628,7 @@ def validate(m):
                                     err(f"{iat}.items", f"unknown switch {n} (" + ", ".join(DISPLAY_IDS) + ")")
     if "banner" in m and not isinstance(m["banner"], str):
         err("banner", "must be a string")
-    if not m.get("banner"):
+    if _js_falsy(m.get("banner")):
         warn("banner", "none: say where the geometry and the data come from")
     return errors, warnings
 

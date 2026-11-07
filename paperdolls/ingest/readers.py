@@ -195,15 +195,21 @@ def read_geojson(data):
 
 
 def read_file(path):
-    """Detect the format and return (features, notes, format name)."""
+    """Detect the format and return (features, notes, format name). A malformed element is a ValueError that names the file and the element."""
     p = Path(path)
     text = p.read_text(encoding="utf-8")
     head = text.lstrip()[:1]
-    if head == "<":
-        return (*read_osm_xml(ET.fromstring(text)), "osm-xml")
-    data = json.loads(text)
-    if "elements" in data:
-        return (*read_overpass_json(data), "overpass-json")
-    if "features" in data:
-        return (*read_geojson(data), "geojson")
+    try:
+        if head == "<":
+            return (*read_osm_xml(ET.fromstring(text)), "osm-xml")
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            raise ValueError(f"{p.name}: expected a JSON object (Overpass JSON or GeoJSON), found {type(data).__name__}")
+        if "elements" in data:
+            return (*read_overpass_json(data), "overpass-json")
+        if "features" in data:
+            return (*read_geojson(data), "geojson")
+    except (KeyError, TypeError, AttributeError, IndexError) as e:
+        what = f"missing key {e}" if isinstance(e, KeyError) else f"{type(e).__name__}: {e}"
+        raise ValueError(f"{p.name}: malformed element ({what}). Check that every element has 'type', and every node 'lat' and 'lon'") from e
     raise ValueError(f"{p.name}: not Overpass JSON (elements), OSM XML, or GeoJSON (features)")

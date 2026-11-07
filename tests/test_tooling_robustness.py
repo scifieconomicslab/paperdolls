@@ -180,3 +180,128 @@ def test_the_relation_only_and_bbox_only_queries_are_unchanged():               
     from paperdolls.ingest.query import overpass_query
     assert '  way["building"](area.a);' in overpass_query(relation=58258) and "rel(58258);\nmap_to_area->.a;" in overpass_query(relation=58258)
     assert '  way["building"](50.000000,4.000000,50.010000,4.010000);' in overpass_query(bbox=(50, 4, 50.01, 4.01))
+
+
+# ================================================================ #9 exceptions that escaped the CLI: T07, T08, T19, T27, T28 (T01-T03 above)
+
+@pytest.mark.parametrize("place, word", [({"kind": "osm_relation"}, "place.relation"), ({"kind": "bbox", "bbox": [50, 4, 50.1]}, "place.bbox"),
+                                         ({"kind": "bbox", "bbox": [50, 4, 49, 5]}, "south below north"), ({"kind": "bbox", "bbox": [50, 4, float("nan"), 5]}, "place.bbox"),
+                                         ({"kind": "extract_file"}, "place.extract_path"), ({"kind": "scene_file"}, "place.scene_path"),
+                                         ({"kind": "bbox", "bbox": [50, 4, 50.1, 4.1], "max_buildings": -3}, "max_buildings")])
+def test_t07_a_hand_written_place_block_is_a_message_not_a_traceback(tmp_path, place, word):          # T07
+    (tmp_path / "render.yaml").write_text(yaml.safe_dump({"goal": "place_scene", "name": "t", "place": place, "look": {"region": "ce"}}), encoding="utf-8")
+    rc, out, err = cli("place", tmp_path / "render.yaml")
+    assert rc == 1 and "Traceback" not in err and err.startswith("cannot continue:") and word in err
+
+
+def test_t07_place_run_itself_names_a_block_that_validation_let_through(tmp_path):                  # T07, second line of defence
+    from paperdolls import place
+    spec = tmp_path / "render.yaml"
+    spec.write_text(yaml.safe_dump({"goal": "place_scene", "name": "t", "place": {"kind": "bbox"}, "look": {"region": "ce"}}), encoding="utf-8")
+    with pytest.raises(place.PlaceError, match="not usable"):
+        place.run(spec)
+
+
+@pytest.mark.parametrize("els, word", [([{"id": 1}], "type"), ([{"type": "node", "id": 5, "tags": {"natural": "tree"}}], "lat")])
+def test_t08_a_malformed_element_is_an_ingest_error(tmp_path, els, word):                          # T08
+    write_extract(tmp_path / "e.json", els)
+    rc, out, err = cli("ingest", tmp_path / "e.json", "--out", tmp_path / "scene.json")
+    assert rc == 1 and "Traceback" not in err and err.startswith("ingest failed:") and word in err and not (tmp_path / "scene.json").exists()
+
+
+def test_t08_json_that_is_not_an_object_is_an_ingest_error(tmp_path):                              # T08
+    (tmp_path / "e.json").write_text("[1, 2]", encoding="utf-8")
+    rc, out, err = cli("ingest", tmp_path / "e.json", "--out", tmp_path / "scene.json")
+    assert rc == 1 and "Traceback" not in err and "expected a JSON object" in err
+
+
+def test_t19_pack_dev_starts_on_an_unparseable_manifest_and_serves_the_error_page(tmp_path):       # T19
+    import shutil
+    import urllib.request
+    d = tmp_path / "toy"
+    shutil.copytree(ROOT / "packs" / "toy-epidemic", d)
+    (d / "pack.yaml").write_text("id: [unclosed\n  title: : :", encoding="utf-8")
+    p = subprocess.Popen([sys.executable, "-u", "-m", "paperdolls", "pack", "dev", str(d), "--port", "0"], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        lines = []
+        for _ in range(6):                                                                         # the banner: "open http://127.0.0.1:PORT/" is its second line
+            lines.append(p.stdout.readline())
+            if "open http" in lines[-1]:
+                break
+        assert p.poll() is None, f"the server stopped: {p.stderr.read()}"
+        url = next(l.split("open ", 1)[1].strip() for l in lines if "open http" in l)
+        page = urllib.request.urlopen(url, timeout=5).read().decode()
+        assert "not valid YAML" in page
+    finally:
+        p.kill(); p.communicate()
+
+
+@pytest.mark.parametrize("n", ["abc", None, [1], True])
+def test_t27_a_non_numeric_n_is_a_spec_error(tmp_path, n):                                          # T27
+    (tmp_path / "render.yaml").write_text(yaml.safe_dump({"name": "t", "model": {"params": {"n": n, "run_time": 6}}, "replay": {"weeks": [0], "palettes": ["ce"]}}), encoding="utf-8")
+    rc, out, err = cli("validate", tmp_path / "render.yaml")
+    assert rc == 1 and "Traceback" not in err and "model.params.n must be a whole number" in err
+
+
+def _base_manifest():
+    return json.loads((ROOT / "tests" / "pack_cases.json").read_text(encoding="utf-8"))["base"]
+
+
+def test_t28_validate_reports_where_it_used_to_raise_a_type_error():                                 # T28
+    import copy
+    from paperdolls import pack
+    a = copy.deepcopy(_base_manifest())
+    a["entities"]["thing"]["fields"]["kind"]["values"] = ["a", 1.5]
+    a["mappings"][0]["scale"]["values"]["zzz"] = {"label": "Z", "colour": "#aa0000"}
+    errors, _ = pack.validate(a)
+    assert any("not a value of thing.kind" in e for e in errors) and any("each value is a string" in e or "a category needs" in e for e in errors)
+    b = copy.deepcopy(_base_manifest())
+    b["params"]["rate"]["group"] = 5
+    b["layout"]["left"][0]["groups"] = ["A", "nope"]
+    errors, _ = pack.validate(b)
+    assert any("rate.group" in e for e in errors) and any("no parameter is in group nope" in e for e in errors)
+
+
+def test_t28_pack_check_on_such_a_manifest_exits_one_with_messages(tmp_path):                       # T28
+    import shutil
+    d = tmp_path / "toy"
+    shutil.copytree(ROOT / "packs" / "toy-epidemic", d)
+    m = yaml.safe_load((d / "pack.yaml").read_text())
+    m["entities"]["building"]["fields"]["state"]["values"].append(1.5)
+    m["mappings"][0]["scale"]["values"]["zzz"] = {"label": "Z", "colour": "#aa0000"}
+    (d / "pack.yaml").write_text(yaml.safe_dump(m, sort_keys=False))
+    rc, out, err = cli("pack", "check", d, "--manifest-only")
+    assert rc == 1 and "Traceback" not in err and "not a value of building.state" in out
+
+
+def test_the_three_validators_agree_on_mutated_manifests():                                          # T28: the differential fuzz, bounded
+    """pack.py, viz/packvalidate.js and schemas/pack.schema.json on random mutations of the base manifest (docs/state-machines/repro/validator_diff.py has the full run).
+    No crash, the same verdict, the same places flagged, and nothing the schema rejects that both validators accept."""
+    import importlib.util
+    import shutil
+    pytest.importorskip("jsonschema")
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    spec = importlib.util.spec_from_file_location("validator_diff", ROOT / "docs" / "state-machines" / "repro" / "validator_diff.py")
+    vd = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vd)
+    for seed in (1, 2):
+        stat, first = vd.compare(600, seed)
+        assert stat["disagreements"] == 0, (seed, stat, {k: v[2] for k, v in first.items() if k in ("py_crash", "js_crash", "verdict_differs", "locations_differ", "schema_rejects_but_both_accept")})
+        assert stat["total"] == 600
+
+
+def test_each_validator_rule_added_for_agreement_is_enforced():                                      # unknown keys and types the schema already rejected
+    import copy
+    from paperdolls import pack
+    cases = [("mappings.0.scale.values.b.extra", 1, "unknown key"), ("mappings.0.scale.label", 5, "must be a string"), ("mappings.3.scale.label", False, "must be a string"),
+             ("params.mode.values.1.extra", 1, "unknown key"), ("mappings.6.channel", "wall", "only the groundtint channel has a group")]
+    for path, value, word in cases:
+        m = copy.deepcopy(_base_manifest())
+        cur = m
+        parts = path.split(".")
+        for p in parts[:-1]:
+            cur = cur[int(p)] if isinstance(cur, list) else cur[p]
+        cur[parts[-1]] = value
+        errors, _ = pack.validate(m)
+        assert any(word in e for e in errors), (path, errors)
