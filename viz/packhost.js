@@ -161,9 +161,10 @@
     fp.forEach((p, j) => { const dx = p[0] - cx, dy = p[1] - cy, d = Math.hypot(dx, dy) || 1, q = V.proj(view, p[0] + dx / d * grow, p[1] + dy / d * grow, z || 0); if (j) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
     ctx.closePath();
   }
-  function outlinePath(ctx, V, view, fp, h, edges) {
-    for (const z of edges ? [0, h] : [0]) { fp.forEach((p, j) => { const q = V.proj(view, p[0], p[1], z); if (j) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); }
-    if (edges) for (const p of fp) { const a = V.proj(view, p[0], p[1], 0), b = V.proj(view, p[0], p[1], h); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+  function outlinePath(ctx, V, view, fp, h, edges, z0) {                      // z0: the ground height the building stands at (e.z), so the outline encloses the building on a hill (paperdolls#14)
+    z0 = z0 || 0;
+    for (const z of edges ? [z0, z0 + h] : [z0]) { fp.forEach((p, j) => { const q = V.proj(view, p[0], p[1], z); if (j) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); }
+    if (edges) for (const p of fp) { const a = V.proj(view, p[0], p[1], z0), b = V.proj(view, p[0], p[1], z0 + h); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
   }
   // value -> colour or null for one outline or halo mapping (a category by index, a boolean by 0 and 1)
   function highlightReader(manifest, m) {
@@ -289,17 +290,17 @@
       refreshHL();
       const V = root.VizLib, sc = view.scale, pad = 14 * sc + 20; let drawn = 0;
       const solo = ci => !lods[ci] || sc >= lods[ci].minScale;                              // zoomed out past min_scale a kind is not drawn per building (see the ground marks)
-      const vis = e => { const p = V.proj(view, e.fit.cx, e.fit.cy, 0), h = V.entityHeight(e) * sc; return p[0] > -pad && p[0] < view.w + pad && p[1] > -pad && p[1] - h < view.h + pad; };
+      const vis = e => { const p = V.proj(view, e.fit.cx, e.fit.cy, e.z || 0), h = V.entityHeight(e) * sc; return p[0] > -pad && p[0] < view.w + pad && p[1] > -pad && p[1] - h < view.h + pad; };
       ctx.save(); ctx.lineJoin = 'round';
       if (solo(0)) for (const g of HL.halo) for (const [w, a] of [[9, 0.18], [4.5, 0.36]]) {           // a soft glow: two translucent strokes of a ring a little outside the footprint
         ctx.strokeStyle = g.colour; ctx.lineWidth = w; ctx.globalAlpha = a; ctx.beginPath();
-        for (let j = 0; j < g.idx.length; j++) { const e = sim.buildings[g.idx[j]]; if (vis(e)) { ringPath(ctx, V, view, e.src.footprint, 1.6, 0); if (a > 0.3) drawn++; } }
+        for (let j = 0; j < g.idx.length; j++) { const e = sim.buildings[g.idx[j]]; if (vis(e)) { ringPath(ctx, V, view, e.src.footprint, 1.6, e.z || 0); if (a > 0.3) drawn++; } }
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
       if (solo(1)) for (const g of HL.outline) {
         ctx.strokeStyle = g.colour; ctx.lineWidth = sc < 0.8 ? 1.6 : 2.4; ctx.beginPath();
-        for (let j = 0; j < g.idx.length; j++) { const e = sim.buildings[g.idx[j]]; if (vis(e)) { outlinePath(ctx, V, view, e.src.footprint, V.entityHeight(e), sc >= 0.8); drawn++; } }
+        for (let j = 0; j < g.idx.length; j++) { const e = sim.buildings[g.idx[j]]; if (vis(e)) { outlinePath(ctx, V, view, e.src.footprint, V.entityHeight(e), sc >= 0.8, e.z || 0); drawn++; } }
         ctx.stroke();
       }
       // below min_scale with aggregate: besides the hatch on the ground (VizLib.drawGroundMarks, hidden wherever buildings stand close), a thin ring on the cell, as large as the share of
@@ -309,7 +310,8 @@
         for (const mk of HL.marks) {
           if (sc >= mk.minScale || !(mk.share >= 0.05)) continue;
           const cx = (mk.x0 + mk.x1) / 2, cy = (mk.y0 + mk.y1) / 2, r = Math.max(3 / sc, 0.5 * Math.min(mk.x1 - mk.x0, mk.y1 - mk.y0) * Math.sqrt(Math.min(1, mk.share)) * 0.7);
-          const a = V.proj(view, cx - r, cy - r, 0), b = V.proj(view, cx + r, cy - r, 0), c = V.proj(view, cx + r, cy + r, 0), d = V.proj(view, cx - r, cy + r, 0);
+          const gz = sim.terrain ? sim.terrain.at(cx, cy) * sim.relief : 0;                // the ring lies on the ground at the cell's centre
+          const a = V.proj(view, cx - r, cy - r, gz), b = V.proj(view, cx + r, cy - r, gz), c = V.proj(view, cx + r, cy + r, gz), d = V.proj(view, cx - r, cy + r, gz);
           if (Math.max(a[0], b[0], c[0], d[0]) < 0 || Math.min(a[0], b[0], c[0], d[0]) > view.w || Math.max(a[1], b[1], c[1], d[1]) < 0 || Math.min(a[1], b[1], c[1], d[1]) > view.h) continue;
           ctx.strokeStyle = mk.colour; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.stroke(); drawn++;
         }
@@ -646,7 +648,7 @@
         const si = binding.index[k]; if (si < 0) continue; const sh = pick.silhouette(si), P = (p, z) => V.proj(view, p[0], p[1], z);
         if (!dashed) {                                                                // selection is the same channel as the pack's own: a halo, then the outline
           ctx.save(); ctx.lineJoin = 'round'; ctx.strokeStyle = '#1d4ed8';
-          for (const [w, a] of [[9, 0.16], [4.5, 0.3]]) { ctx.lineWidth = w; ctx.globalAlpha = a; ctx.beginPath(); ringPath(ctx, V, view, sh.footprint, 1.6, 0); ctx.stroke(); }
+          for (const [w, a] of [[9, 0.16], [4.5, 0.3]]) { ctx.lineWidth = w; ctx.globalAlpha = a; ctx.beginPath(); ringPath(ctx, V, view, sh.footprint, 1.6, sh.z || 0); ctx.stroke(); }
           ctx.restore();
         }
         ctx.save(); ctx.lineJoin = 'round'; ctx.lineWidth = dashed ? 1.5 : 2.5; ctx.strokeStyle = dashed ? 'rgba(20,20,20,0.7)' : '#1d4ed8'; ctx.setLineDash(dashed ? [4, 3] : []);
