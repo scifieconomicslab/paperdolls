@@ -174,7 +174,11 @@
         const h = impl.setParams(handle, Object.assign({}, params)); if (h !== undefined) handle = h;
         return { restarted: false, frame: null };
       },
-      step(n) { if (!handle) throw new Error('start() first'); n = Math.max(0, n | 0); const fr = take(impl.step(handle, n), t + 1); t += fr.length; return fr; },
+      step(n) {                                                      // n = 0: the current frame, without advancing (the interface of impl.step)
+        if (!handle) throw new Error('start() first'); n = Math.max(0, n | 0);
+        if (n === 0) return take(impl.step(handle, 0), t);
+        const fr = take(impl.step(handle, n), t + 1); t += fr.length; return fr;
+      },
       run(toT) {
         if (!handle) throw new Error('start() first');
         toT = Math.min(horizon, toT | 0); if (toT <= t) return [];

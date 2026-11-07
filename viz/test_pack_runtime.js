@@ -307,6 +307,110 @@ test('#6 r01: with rerun the controller still makes the whole timeline at once (
 });
 
 // =====================================================================================================================================================
+// Issue #7: the playhead, and the small leaks and ordering oddities of the runtime layer
+// =====================================================================================================================================================
+// r03 / P-1
+test('#7 r03: a moved slider while Play runs holds the clock until the new run has reached the time on screen; the playhead does not jump back', async () => {
+  const { env, store, ctl } = H.makePage({ chunk: 8 });
+  const p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  const tev = []; store.subscribe('time', e => tev.push(e.what + '@' + store.time().t));
+  store.setTime(30); store.setPlaying(true); tev.length = 0;
+  store.setParam('rate', 0.8); ctl.flush(); await env.drain();
+  for (let i = 0; i < 8; i++) ctl.advance(0.25);                         // the clock must not run on over the old frames
+  assert.strictEqual(store.time().t, 30); assert.strictEqual(H.frameLoad(store, 30), 530, 'the old run is still the picture');
+  await env.yieldOne(); await env.yieldOne(); await env.yieldOne();
+  assert.strictEqual(store.time().t, 30, 'no jump'); assert.strictEqual(H.frameLoad(store, 30), 830, 'the new run replaced it at the time being looked at'); assert.deepStrictEqual(tev, []);
+  for (let i = 0; i < 4; i++) ctl.advance(0.25);
+  assert(store.time().t > 30, 'Play goes on over the new frames'); assert.strictEqual(store.time().playing, true);
+});
+test('#7 r03: a pushFrames that makes the playhead fall back announces it with a time event, and the playhead returns when the frames arrive', () => {
+  const s = G.PackStore.create(H.MANIFEST()), fr = t => ({ t, entities: { thing: { kind: Int8Array.from([0, 0, 0, 0, 0]), load: Float32Array.from([t, 0, 0, 0, 0]) } }, series: { totals: [t, 0] } });
+  s.pushFrames([0, 1, 2, 3, 4].map(fr), { replace: true }); s.setTime(4);
+  const ev = []; s.subscribe('time', e => ev.push(e.what + '@' + s.time().t));
+  s.pushFrames([0, 1].map(fr), { replace: true });
+  assert.strictEqual(s.time().t, 1); assert.deepStrictEqual(ev, ['t@1'], 'the clamp is an event'); assert.strictEqual(s.frame().t, 1);
+  s.pushFrames([2, 3, 4].map(fr)); assert.strictEqual(s.time().t, 4, 'back where it was looking'); assert.strictEqual(s.frame().t, 4);
+});
+// r13 e / P-3
+test('#7 r13e: a scrub beyond the frames computed so far is remembered and reached when they arrive', async () => {
+  const { env, store, ctl } = H.makePage({ chunk: 8 });
+  const p = ctl.start(); await env.drain();
+  store.setTime(30); assert.strictEqual(store.time().t, 8, 'clamped for now');
+  await env.yieldAll(); await p;
+  assert.strictEqual(store.time().t, 30);
+  store.setTime(5); await env.drain(); assert.strictEqual(store.time().t, 5, 'a later scrub forgets the wish');
+});
+// r06 / T-3 T-4 T-5
+test('#7 r06a: after the fallback ctl.mode says inline', async () => {
+  quiet(); const env = H.makeEnv(), rt = env.worker({ mode: 'auto', server: inlineOf(env) }), store = G.PackStore.create(env.manifest), ctl = G.PackHost.createController({ manifest: env.manifest, runtime: rt, store });
+  assert.strictEqual(ctl.mode, 'worker'); env.workers[0].fail('SyntaxError in worker script');
+  const p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  assert.strictEqual(rt.mode, 'inline'); assert.strictEqual(ctl.mode, 'inline'); assert.strictEqual(store.length(), 41); assert.deepStrictEqual(env.URL.revoked, ['blob:fake/1']);
+});
+test('#7 r06b: a second error event of the same worker builds no second runtime and revokes the URL once', async () => {
+  quiet(); const env = H.makeEnv(), made = [], orig = G.PackRuntime.create; G.PackRuntime.create = (...a) => { made.push(a[0].id); return orig(...a); };
+  try { const rt = env.worker({ mode: 'auto', server: inlineOf(env) }); env.workers[0].fail('first'); env.workers[0].fail('second'); await env.drain(); await env.settle(); assert.strictEqual(made.length, 1); assert.strictEqual(rt.mode, 'inline'); assert.deepStrictEqual(env.URL.revoked, ['blob:fake/1']); }
+  finally { G.PackRuntime.create = orig; }
+});
+test('#7 r06c: a Worker that cannot be constructed leaves no Blob URL behind', async () => {
+  const env = H.makeEnv(); env.failConstruct = true; const rt = env.worker({ mode: 'auto', server: inlineOf(env) }); await env.drain();
+  assert.strictEqual(env.URL.created, 1); assert.deepStrictEqual(env.URL.revoked, ['blob:fake/1']); assert.strictEqual(rt.mode, 'inline'); assert(/blocked/.test(rt.fellBack));
+});
+test('#7 r06: the fallback after a failed Worker keeps the runtime that was passed in', async () => {
+  const env = H.makeEnv(), reg = G.PaperDolls.runtimes[env.manifest.id]; delete G.PaperDolls.runtimes[env.manifest.id];
+  try { const rt = env.worker({ mode: 'auto', impl: env.impl, server: inlineOf(env) }); env.workers[0].fail('boom'); const s = state(rt.start({ rate: 0.5 })); await env.drain(); assert.strictEqual(s(), 'resolved'); }
+  finally { G.PaperDolls.runtimes[env.manifest.id] = reg; }
+});
+// r13 c / B-3 and "no resource outlives dispose()"
+test('#7 r13c: switching the compare off stops B\'s worker; switching it on again starts a fresh one', async () => {
+  const env = H.makeEnv(); const A = G.PackStore.create(env.manifest), ctlA = G.PackHost.createController({ manifest: env.manifest, runtime: env.worker(), store: A });
+  await settleStart(env, ctlA);
+  const cmp = G.PackDash.createCompare({ manifest: env.manifest, store: A, createRuntime: () => env.worker(), schedule() {} });
+  cmp.enable(true); await env.drain(); await env.yieldAll(); assert.strictEqual(H.frameLoad(cmp.B, 5), 205);
+  cmp.enable(false);
+  assert.strictEqual(env.workers[1].dead, true, 'B\'s worker is terminated'); assert(env.URL.revoked.includes('blob:fake/2'));
+  cmp.B.setParam('rate', 0.35); assert.strictEqual(cmp.flush(), false); await env.drain(); await env.yieldAll();
+  assert.strictEqual(H.frameLoad(cmp.B, 5), 205, 'nothing re-ran'); assert.strictEqual(env.workers.length, 2);
+  cmp.enable(true); await env.drain(); await env.yieldAll();
+  assert.strictEqual(env.workers.length, 3); assert.strictEqual(H.frameLoad(cmp.B, 5), 355, 'B runs again with the settings it was left with'); assert.strictEqual(cmp.error, null);
+});
+test('#7: dispose() of a controller ends its run, its worker and its subscription', async () => {
+  const env = H.makeEnv({ chunk: 8 }); const { store, tm, runtime, ctl } = pageWith(env);
+  const p = state(ctl.start()); await env.drain(); ctl.dispose(); await env.drain(); await env.yieldAll();
+  assert.strictEqual(env.workers[0].dead, true); assert.deepStrictEqual(env.URL.revoked, ['blob:fake/1']); assert.strictEqual(tm.pending(), 0);
+  const posted = env.toServer.length; store.setParam('rate', 0.7); assert.strictEqual(ctl.flush(), false); await env.drain(); assert.strictEqual(env.toServer.length, posted, 'a disposed controller asks for nothing');
+  assert(store.length() <= 9, 'no frames arrive after dispose: ' + store.length());
+});
+// r10 / F-2
+test('#7 r10a: a subscriber unsubscribed during an emit is not called', () => {
+  const s = G.PackStore.create(H.MANIFEST()), log = []; let off2; s.subscribe('params', () => off2()); off2 = s.subscribe('params', () => log.push('called'));
+  s.setParam('rate', 0.6); assert.deepStrictEqual(log, []);
+});
+test('#7 r10b: an event raised inside a handler is delivered after the one in progress, in order, to every subscriber', () => {
+  const t = G.PackStore.create(H.MANIFEST()), seen = []; let first = true;
+  t.subscribe('params', ev => { if (first) { first = false; t.setParam('rate', 0.9); } });
+  t.subscribe('params', ev => seen.push('v' + ev.version));
+  t.setParam('rate', 0.6); assert.deepStrictEqual(seen, ['v1', 'v2']);
+  assert.strictEqual(t.param('rate'), 0.9);
+});
+test('#7 r10: a handler that throws does not stop the queue', () => {
+  quiet(); const t = G.PackStore.create(H.MANIFEST()), seen = []; t.subscribe('params', () => { throw new Error('x'); }); t.subscribe('params', ev => seen.push(ev.version));
+  t.setParam('rate', 0.6); t.setParam('rate', 0.7); assert.deepStrictEqual(seen, [1, 2]);
+});
+// r13 d
+test('#7 r13d: a preset whose value is off the parameter step is active once applied', () => {
+  const m = H.MANIFEST(); m.presets.push({ id: 'odd', label: 'Odd', params: { rate: 0.22 } });
+  const s = G.PackStore.create(m); assert.strictEqual(s.isPreset('odd'), false); s.applyPreset('odd'); assert.strictEqual(s.param('rate'), 0.2); assert.strictEqual(s.isPreset('odd'), true);
+  s.setParam('rate', 0.5); assert.strictEqual(s.isPreset('odd'), false);
+});
+// SM-13
+test('#7 SM-13: PackRuntime.step(0) after start() returns the current frame without advancing', () => {
+  const env = H.makeEnv(), rt = G.PackRuntime.create(env.manifest, env.impl); rt.start({ rate: 0.5 });
+  let f = rt.step(0); assert.strictEqual(f.length, 1); assert.strictEqual(f[0].t, 0); assert.strictEqual(rt.t, 0);
+  rt.run(5); f = rt.step(0); assert.strictEqual(f[0].t, 5); assert.strictEqual(rt.t, 5); assert.strictEqual(rt.step(2).map(x => x.t).join(), '6,7');
+});
+
+// =====================================================================================================================================================
 (async () => {
   for (const [name, fn] of queue) {
     let timer; const guard = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('hang: the test never finished (a promise that is never settled)')), 4000); });

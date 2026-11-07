@@ -83,13 +83,13 @@
   // run being replaced stay on screen until the new run has reached the time being looked at, so a slider moves the map without a flicker back to time 0.
   function createController(o) {
     const { manifest, runtime, store } = o, horizon = manifest.time.steps, isAsync = !!runtime.async;
-    const ctl = { wall: 0, dirty: false, runs: 0, lastRunMs: 0, error: null, acc: 0, gen: 0, shown: 0, shownParams: null, runParams: null, running: false, pulling: false, notice: null, async: isAsync, get mode() { return runtime.mode || 'inline'; } };
+    const ctl = { wall: 0, dirty: false, runs: 0, lastRunMs: 0, error: null, acc: 0, gen: 0, shown: 0, shownParams: null, runParams: null, running: false, holding: false, disposed: false, pulling: false, notice: null, async: isAsync, get mode() { return runtime.mode || 'inline'; } };
     const clock = () => (root.performance && root.performance.now ? root.performance.now() : Date.now());
     const fail = e => { ctl.error = (e && e.message) || String(e); if (root.console) root.console.error(e); };
     let retried = 0;
     function finish(t0) {
       if (!ctl.error) { ctl.shownParams = ctl.runParams; retried = 0; }
-      ctl.runs++; ctl.lastRunMs = clock() - t0; ctl.running = false;
+      ctl.runs++; ctl.lastRunMs = clock() - t0; ctl.running = false; ctl.holding = false;
       if (ctl.error && isAsync && store.time().playing && store.time().t >= store.length() - 1) store.setPlaying(false);        // nothing more will come: Play must not stay on Pause
       if (ctl.onRun) { try { ctl.onRun(ctl); } catch (e) { if (root.console) root.console.error(e); } }
     }
@@ -105,7 +105,8 @@
       const put = (frames, last) => {
         if (gen !== ctl.gen) return;
         got += frames.length; held = held.concat(frames);
-        if (!replaced && (held.length > want || last)) { store.pushFrames(held, { replace: true }); ctl.shown = gen; replaced = true; held = []; }
+        // the old frames stay on screen until the new run has reached the time being looked at (the clock waits meanwhile, see advance), so the playhead never falls back
+        if (!replaced && (held.length > Math.max(want, store.time().t) || last)) { store.pushFrames(held, { replace: true }); ctl.shown = gen; ctl.holding = false; replaced = true; held = []; }
         else if (replaced && frames.length) { store.pushFrames(frames); held = []; }
       };
       // a run that is not cancelled must deliver all of its frames: the horizon and frame 0; a chunk that went missing is a failure, not a shorter timeline
@@ -130,7 +131,7 @@
         return;
       }
       if (isAsync) {
-        const gen = ++ctl.gen; ctl.running = true; const want = store.time().t; ctl.runParams = store.params();
+        const gen = ++ctl.gen; ctl.running = true; ctl.holding = store.length() > 0; const want = store.time().t; ctl.runParams = store.params();
         runtime.setParams(ctl.runParams).then(res => {
           if (gen !== ctl.gen) return null;
           if (res.restarted) return stream(gen, res.frame, want);
@@ -151,7 +152,7 @@
     }
     ctl.start = want => {
       if (isAsync) {
-        const gen = ++ctl.gen, t0 = clock(); ctl.running = true; ctl.runParams = store.params();
+        const gen = ++ctl.gen, t0 = clock(); ctl.running = true; ctl.holding = store.length() > 0; ctl.runParams = store.params();
         const done = runtime.start(ctl.runParams).then(f0 => (gen !== ctl.gen ? null : runtime.policy === 'rerun' ? stream(gen, f0, want | 0) : (store.pushFrames([f0], { replace: true }), void (ctl.shown = gen))))
           .then(() => { if (gen === ctl.gen) { ctl.error = null; finish(t0); } }, e => failed(gen, t0, e));
         return done;
@@ -161,8 +162,8 @@
       return Promise.resolve();
     };
     // a changed parameter marks the model stale; the re-run happens once, at the next flush, however many events came before it (the page flushes from a zero-delay timer and again every animation frame, so a hidden tab still answers)
-    store.subscribe('params', () => { ctl.dirty = true; if (o.immediate) ctl.flush(); else if (o.schedule) o.schedule(); });
-    ctl.flush = () => { if (!ctl.dirty) return false; ctl.dirty = false; rerun(); return true; };
+    const offParams = store.subscribe('params', () => { ctl.dirty = true; if (o.immediate) ctl.flush(); else if (o.schedule) o.schedule(); });
+    ctl.flush = () => { if (ctl.disposed || !ctl.dirty) return false; ctl.dirty = false; rerun(); return true; };
     // "continue" models make a frame only when the clock reaches it (the asynchronous adapter streams a whole run instead)
     ctl.ensure = t => {
       while (!isAsync && runtime.policy === 'continue' && store.length() <= t && runtime.t < horizon) store.pushFrames(runtime.step(1));
@@ -170,6 +171,7 @@
     };
     ctl.advance = dt => {
       const tm = store.time(); if (!tm.playing) return;
+      if (ctl.holding) { ctl.acc = 0; return; }                                           // a new run is catching up with the time on screen: the old frames stand still, then play on as the new ones
       ctl.acc += dt * tm.speed;
       while (ctl.acc >= 1) {
         ctl.acc -= 1;
@@ -184,6 +186,8 @@
         ctl.ensure(next); store.setTime(next);
       }
     };
+    // Stop everything this controller started: the run (its answers are dropped), the subscription to the parameters, the runtime and with it the worker and its Blob URL.
+    ctl.dispose = () => { if (ctl.disposed) return; ctl.disposed = true; ctl.gen++; ctl.running = false; ctl.holding = false; ctl.dirty = false; offParams(); if (runtime.dispose) runtime.dispose(); };
     ctl.togglePlay = () => { const tm = store.time(); if (!tm.playing && tm.t >= horizon) store.setTime(0); store.setPlaying(!tm.playing); };
     ctl.setWall = i => { const n = wallMaps(manifest).length, w = Math.max(0, Math.min(Math.max(0, n - 1), i | 0)); if (w !== ctl.wall) { ctl.wall = w; store.invalidate(); } };
     // detail for one entity: the runtime's answer (a promise either way), at the time shown. The runtime answers from the run it holds now; while a newer run is being computed

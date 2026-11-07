@@ -103,6 +103,10 @@
         } catch (e) { cmp.error = 'Could not start the comparison run: ' + ((e && e.message) || e); cmp.enabled = false; if (root.console) root.console.error(e); }
       }
       if (!cmp.enabled && cmp.showing === 'b') cmp.show('a');
+      if (!on && cmp.ctlB) {                                          // off: B's worker and model copy are released; B's settings stay, and switching on again starts B afresh
+        cmp.ctlB.dispose(); cmp.ctlB = null; cmp.runtimeB = null; cmp.bShown = null;
+        if (cmp.error) { cmp.error = null; emit('error'); }
+      }
       emit('enabled');
     };
     cmp.show = which => {
