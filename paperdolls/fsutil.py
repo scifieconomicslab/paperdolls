@@ -87,9 +87,10 @@ def write_atomic_group(items, encoding="utf-8"):
 
 @contextlib.contextmanager
 def file_lock(path):
-    """An advisory exclusive lock on `<path>.lock`, held while the block runs; other processes block until it is free. The lock file is left in place
+    """An advisory exclusive lock on `.<name>.lock` beside `path`, held while the block runs; other processes block until it is free. The lock file is left in place
     (removing it would let two processes lock two different files)."""
-    lock = Path(str(path) + ".lock")
+    path = Path(path)
+    lock = path.with_name(f".{path.name}.lock")
     with open(lock, "a+b") as fh:
         try:
             import fcntl

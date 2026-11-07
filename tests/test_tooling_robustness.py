@@ -439,3 +439,97 @@ def test_t24_the_confirmation_gate_names_a_damaged_file_as_well(tmp_path):      
         spec.require_confirmed(p)
     rc, out, err = cli("place", p)
     assert rc == 1 and "Traceback" not in err and "not valid YAML" in err
+
+
+# ================================================================ #11 intake: overlapping answers and stale bookkeeping: T23, T25
+
+def _fresh_intake(tmp_path):
+    from paperdolls.intake import Intake
+    p = tmp_path / "render.yaml"
+    Intake.init(p)
+    return p
+
+
+def test_t23_two_instances_that_loaded_before_either_saved_keep_both_answers(tmp_path):              # T23, the repro's interleaving
+    from paperdolls.intake import Intake
+    p = _fresh_intake(tmp_path)
+    a, b = Intake(p), Intake(p)
+    a.answer("goal", "model_replay")
+    b.answer("name", "my project")                                                                      # b loaded before a saved
+    final = Intake(p)
+    assert final.value("goal") == "model_replay" and final.value("name") == "my project"
+
+
+def test_t23_twenty_overlapping_answer_commands_keep_every_answer(tmp_path):                         # T23 stress: separate processes
+    p = _fresh_intake(tmp_path)
+    assert cli("intake", "answer", p, "goal", "place_scene")[0] == 0
+    fixed = {"audience": "researchers", "place.kind": "placeholder", "look.region": "ce", "look.register": "colorfigures"}
+    jobs = list(fixed.items()) + [("name", f"name-{i}") for i in range(8)] + [("output.dir", f"out-{i}") for i in range(8)]
+    assert len(jobs) == 20
+    procs = [subprocess.Popen([sys.executable, "-m", "paperdolls", "intake", "answer", str(p), q, v], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for q, v in jobs]
+    results = [(q, pr.communicate(), pr.returncode) for (q, _), pr in zip(jobs, procs)]
+    assert all(rc == 0 for _, _, rc in results), [(q, err) for q, (out, err), rc in results if rc]
+    data = yaml.safe_load(p.read_text())
+    assert data["goal"] == "place_scene" and data["audience"] == "researchers" and data["place"]["kind"] == "placeholder"
+    assert data["look"]["region"] == "ce" and data["look"]["register"] == "colorfigures"
+    assert data["name"] in {f"name-{i}" for i in range(8)} and data["output"]["dir"] in {f"out-{i}" for i in range(8)}
+    assert "intake" in data and not list(tmp_path.glob(".*.tmp"))
+
+
+def test_t23_the_lock_is_held_for_the_whole_read_modify_write(tmp_path, monkeypatch):                 # T23: a second writer waits, it does not interleave
+    from paperdolls import intake as intakemod
+    p = _fresh_intake(tmp_path)
+    inside, order = threading.Event(), []
+    real_read = intakemod.Intake._read
+
+    def slow_read(self):
+        data = real_read(self)
+        if threading.current_thread().name == "first":
+            inside.set(); order.append("first read"); threading.Event().wait(0.3)
+        else:
+            order.append("second read")
+        return data
+    monkeypatch.setattr(intakemod.Intake, "_read", slow_read)
+    t1 = threading.Thread(name="first", target=lambda: intakemod.Intake(p).answer("goal", "model_replay"))
+    t1.start(); inside.wait(5)
+    intakemod.Intake(p).answer("name", "second")
+    t1.join()
+    assert order.index("first read") < order.index("second read") and yaml.safe_load(p.read_text())["goal"] == "model_replay"
+
+
+def test_t25_a_goal_change_resets_the_bookkeeping_of_the_branch_it_removes(tmp_path):                  # T25
+    from paperdolls.intake import Intake
+    p = _fresh_intake(tmp_path)
+    Intake(p).answer("goal", "model_replay"); Intake(p).answer("name", "xyz")
+    Intake(p).answer("model.source", "vendored")
+    Intake(p).answer("model.params.overrides", "none")
+    assert Intake(p).meta.get("overrides_answered") is True
+    Intake(p).answer("goal", "place_scene")
+    meta = Intake(p).meta
+    assert "overrides_answered" not in meta and "override_keys" not in meta and not [d for d in meta.get("defaults", []) if d.startswith(("model", "replay"))]
+    Intake(p).answer("goal", "model_replay")
+    it = Intake(p); it.answer("model.source", "vendored")
+    status = {r["id"]: r["state"] for r in Intake(p).status()}
+    assert status["model.params.overrides"] == "missing", "the overrides question is asked again"
+    assert "model.params.overrides" not in it.meta.get("defaults", []) and Intake(p).value("model.params")
+
+
+def test_t25_the_decision_table_does_not_claim_you_said_for_reset_values(tmp_path):                    # T25
+    from paperdolls.intake import Intake
+    p = _fresh_intake(tmp_path)
+    Intake(p).answer("goal", "model_replay"); Intake(p).answer("model.source", "vendored")
+    Intake(p).answer("model.params.overrides", "beta=0.5") if "beta" in (Intake(p).model_fields() or {}) else Intake(p).answer("model.params.overrides", "none")
+    Intake(p).answer("goal", "place_scene"); Intake(p).answer("goal", "model_replay"); Intake(p).answer("model.source", "vendored")
+    it = Intake(p)
+    kv = next(r for r in it.status() if r["id"] == "model.params.overrides")
+    assert kv["state"] == "missing"
+
+
+def test_t25_the_same_goal_again_changes_nothing(tmp_path):                                              # a re-answer must not wipe the branch it keeps
+    from paperdolls.intake import Intake
+    p = _fresh_intake(tmp_path)
+    Intake(p).answer("goal", "model_replay"); Intake(p).answer("model.source", "vendored"); Intake(p).answer("model.params.overrides", "none")
+    before = yaml.safe_load(p.read_text())
+    Intake(p).answer("goal", "model_replay")
+    after = yaml.safe_load(p.read_text())
+    assert after["model"] == before["model"] and after["intake"]["overrides_answered"] is True
