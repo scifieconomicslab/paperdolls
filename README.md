@@ -134,7 +134,7 @@ The full list of open problems, including the Great Retrofit model's, is in [doc
 - `viz/`: the isometric library and viewer, including `replay.js` and the model-pack shell (`pack*.js`, `packhost.html`). See [viz/README.md](viz/README.md).
 - `packs/`: model packs (a manifest and a runtime): `toy-epidemic` is the worked example. `schemas/pack.schema.json` is the manifest's JSON Schema; `paperdolls/pack.py` validates and builds.
 - `docs/`: the model-pack spec (`pack-spec.md`) and what the renderer allows (`pack-architecture-findings.md`), the model interface, the replay mapping, the intake questions, known issues, and the design and plan the replay work followed (`docs/superpowers/`).
-- `.github/workflows/tests.yml`: runs the Python and JavaScript tests on Python 3.10 and 3.12.
+- `.github/workflows/tests.yml`: runs the Python and JavaScript tests on Python 3.12.
 - `vendor/greatretrofit_v2/`: the vendored model and its licence.
 - `assets/`: palettes, the intake question bank, the demo configuration and the icon.
 - `samples/`: a demo replay and a synthetic OpenStreetMap extract.
