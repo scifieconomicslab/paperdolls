@@ -374,7 +374,7 @@
 
   // Sprite cache: an asset at a given scale and colouring is painted once into an offscreen canvas, then blitted.
   // Set AssetLib.sprites.factory = (w, h) => canvas (browser: document.createElement; node: createCanvas).
-  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false, ink: false, grain: true, minDetail: 2.5, posterize: 0, maxZoomBuilds: Infinity, maxBuildMs: Infinity, frameStart: 0, zooming: false, collect: null, index: new Map(), shapes: new Map(), frame: 0, evictions: 0, staleOk: false, unbudgeted: false };       // staleOk: the caller draws to the screen, so a sprite in other colours may stand in for one over the budget (never into a cached layer)
+  const sprites = { factory: null, cache: new Map(), limit: 20000, dpr: 1, pixels: 0, maxPixels: 90e6, exact: false, builds: 0, maxBuilds: Infinity, detail: false, ink: false, grain: true, minDetail: 2.5, posterize: 0, maxZoomBuilds: Infinity, maxBuildMs: Infinity, frameStart: 0, zooming: false, collect: null, index: new Map(), shapes: new Map(), frame: 0, evictions: 0, staleOk: false, unbudgeted: false, screenFactory: null };       // screenFactory: for canvases that are painted over and over and blitted to the stage every frame (the tint and the marks); GPU-backed in the pages. Falls back to factory       // staleOk: the caller draws to the screen, so a sprite in other colours may stand in for one over the budget (never into a cached layer)
   // The canvas factory for browser pages. Every offscreen canvas the renderer makes (sprites, the ground and far layers, the patch scratch, the tint) is a cache that is written with
   // thousands of small drawImage / fill calls and only ever read by a drawImage. Chromium backs a plain canvas with the GPU and runs those calls as GPU work: 9,900 sprite canvases
   // and two 3x-view layers made the whole-commune view of Jette run at 0.8 fps on a real GPU (paperdolls#3; 40-60 fps with the canvases in memory, 20 fps while the layer was repainting).
@@ -2893,7 +2893,7 @@
     const q = A.sprites.dpr || 1, w = Math.ceil(view.w * q), h = Math.ceil(view.h * q), key = ver + '|' + view.scale + '|' + view.ox + '|' + view.oy + '|' + w + 'x' + h + '|' + cells.length + '|' + sim.relief;
     if (!A.sprites.factory) { ctx.save(); ctx.globalAlpha = T.opacity; for (const c of cells) tintCell(ctx, sim, view, c); ctx.restore(); return; }
     let C = sim._tint;
-    if (!C || C.cv.width !== w || C.cv.height !== h) C = sim._tint = { cv: A.sprites.factory(w, h), key: null };
+    if (!C || C.cv.width !== w || C.cv.height !== h) C = sim._tint = { cv: (A.sprites.screenFactory || A.sprites.factory)(w, h), key: null };
     if (C.key !== key) {
       const c = C.cv.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); c.scale(q, q); c.lineJoin = 'round';
       for (const cell of cells) tintCell(c, sim, view, cell);
@@ -2912,7 +2912,7 @@
     if (!A.sprites.factory || sim.opts.cacheMarks === false) { paintGroundMarks(ctx, sim, view, cells); return; }       // cacheMarks: false draws straight onto the frame (the pixel reference for the tests)
     const q = A.sprites.dpr || 1, w = Math.ceil(view.w * q), h = Math.ceil(view.h * q), key = ver + '|' + view.scale + '|' + view.ox + '|' + view.oy + '|' + w + 'x' + h + '|' + cells.length + '|' + sim.relief;
     let C = sim._marks;
-    if (!C || C.cv.width !== w || C.cv.height !== h) C = sim._marks = { cv: A.sprites.factory(w, h), key: null };
+    if (!C || C.cv.width !== w || C.cv.height !== h) C = sim._marks = { cv: (A.sprites.screenFactory || A.sprites.factory)(w, h), key: null };
     if (C.key !== key) {
       const c = C.cv.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); c.scale(q, q);
       paintGroundMarks(c, sim, view, cells);

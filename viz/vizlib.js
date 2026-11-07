@@ -1322,7 +1322,7 @@
     const q = A.sprites.dpr || 1, w = Math.ceil(view.w * q), h = Math.ceil(view.h * q), key = ver + '|' + view.scale + '|' + view.ox + '|' + view.oy + '|' + w + 'x' + h + '|' + cells.length + '|' + sim.relief;
     if (!A.sprites.factory) { ctx.save(); ctx.globalAlpha = T.opacity; for (const c of cells) tintCell(ctx, sim, view, c); ctx.restore(); return; }
     let C = sim._tint;
-    if (!C || C.cv.width !== w || C.cv.height !== h) C = sim._tint = { cv: A.sprites.factory(w, h), key: null };
+    if (!C || C.cv.width !== w || C.cv.height !== h) C = sim._tint = { cv: (A.sprites.screenFactory || A.sprites.factory)(w, h), key: null };
     if (C.key !== key) {
       const c = C.cv.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); c.scale(q, q); c.lineJoin = 'round';
       for (const cell of cells) tintCell(c, sim, view, cell);
@@ -1341,7 +1341,7 @@
     if (!A.sprites.factory || sim.opts.cacheMarks === false) { paintGroundMarks(ctx, sim, view, cells); return; }       // cacheMarks: false draws straight onto the frame (the pixel reference for the tests)
     const q = A.sprites.dpr || 1, w = Math.ceil(view.w * q), h = Math.ceil(view.h * q), key = ver + '|' + view.scale + '|' + view.ox + '|' + view.oy + '|' + w + 'x' + h + '|' + cells.length + '|' + sim.relief;
     let C = sim._marks;
-    if (!C || C.cv.width !== w || C.cv.height !== h) C = sim._marks = { cv: A.sprites.factory(w, h), key: null };
+    if (!C || C.cv.width !== w || C.cv.height !== h) C = sim._marks = { cv: (A.sprites.screenFactory || A.sprites.factory)(w, h), key: null };
     if (C.key !== key) {
       const c = C.cv.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); c.scale(q, q);
       paintGroundMarks(c, sim, view, cells);

@@ -19,6 +19,7 @@ test('#3 canvasFactory: every offscreen canvas opens its 2d context willReadFreq
     const src = fs.readFileSync(path.join(R.VIZ, page), 'utf8');
     assert(/A\.sprites\.factory = A\.canvasFactory\(document\)/.test(src), page + ' builds its canvases with AssetLib.canvasFactory');
     assert(!/sprites\.factory = \(w, hh\) =>/.test(src), page + ' has no plain factory left');
+    assert(/A\.sprites\.screenFactory = A\.canvasFactory\(document, \{ soft: false \}\)/.test(src), page + ': the tint and marks canvases (blitted whole every frame version) stay on the GPU');
   }
 });
 

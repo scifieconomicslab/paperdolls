@@ -176,6 +176,7 @@
 <script>
 (function () {
   const V = window.VizLib, A = window.AssetLib, $ = id => document.getElementById(id);
+  A.sprites.screenFactory = A.canvasFactory(document, { soft: false });       // the tint and the marks are repainted per frame version and blitted whole: on the GPU
   A.sprites.factory = A.canvasFactory(document);          // memory-backed offscreen canvases: see canvasFactory (paperdolls#3)
   A.sprites.dpr = window.devicePixelRatio || 1;       // kept current by A.watchDpr below (browser zoom, another monitor)
   const FAMS = /*__PALETTES__*/;
