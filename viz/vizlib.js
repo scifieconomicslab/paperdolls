@@ -100,7 +100,7 @@
   function drawBuilding(ctx, view, reg, pal, b, shadowRgb, state, wallOverride, roofOverride) {
     reg = Object.assign({}, reg, { lw: reg.lw * Math.max(0.3, Math.min(1, view.scale / 10)) });   // thinner ink when zoomed out
     const arch = LIB.buildings[b.archetype] || LIB.buildings.terrace;
-    const H = b.levels * arch.storeyH;
+    const H = Math.min(b.levels, MAX_LEVELS) * arch.storeyH;
     const fp = b.footprint;
     const n = fp.length;
     // orientation: make the polygon counter-clockwise in world (x right, y down means screen-ccw; use signed area)
@@ -129,7 +129,7 @@
       // windows, bay by bay
       const bays = Math.max(1, Math.floor(len / arch.bayW));
       const bayLen = len / bays;
-      const storeys = b.levels;
+      const storeys = Math.min(b.levels, MAX_LEVELS);
       // Level of detail: a window module narrower than WINDOW_LOD_PX on the screen cannot be seen (it is a smudge of ink on the wall), and drawing
       // the windows of a district is most of the time a far-zoom frame costs (11.7 s of 12 s for the 9,214 buildings of Jette at Fit). The wall is then drawn plain.
       // sim.opts.windowLodPx = 0 draws every window as before (renderFrame sets windowLodPx for the frame).
@@ -283,6 +283,17 @@
   }
 
   // ---------- scene validation ----------
+  // The most storeys the renderer draws or sorts (the ingest caps at 60 too): a scene with 200,000 levels cost a second per frame. validateScene counts
+  // the buildings over it and createSim draws them at the cap; the scene itself is not changed.
+  const MAX_LEVELS = 60;
+  // A footprint with fewer than three distinct non-collinear points has no area. createSim places it at the centre of its bounding box (fitFootprint).
+  function degenerateFootprint(fp) {
+    const a = fp[0]; let b = null;
+    for (const p of fp) if (p[0] !== a[0] || p[1] !== a[1]) { b = p; break; }
+    if (!b) return true;
+    for (const p of fp) if (Math.abs((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) > 1e-9 * (1 + Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1])) ** 2) return false;
+    return true;
+  }
   // Checks a scene before it is built, so a bad file fails with a clear message and not deep inside the renderer.
   function validateScene(scene) {
     const A = A_(), errors = [], warnings = [], num = x => typeof x === 'number' && isFinite(x), pt = p => Array.isArray(p) && p.length >= 2 && num(p[0]) && num(p[1]);
@@ -313,6 +324,10 @@
       if (b.residential !== undefined && !['residential', 'probable', 'other'].includes(b.residential)) bad('building ' + i + ' (' + b.id + '): residential must be residential, probable or other');
       if (b.neighbours !== undefined && !(Array.isArray(b.neighbours) && b.neighbours.every(n => typeof n === 'string' || num(n)))) bad('building ' + i + ' (' + b.id + '): neighbours must be a list of building ids');
     });
+    let degenerate = 0, tall = 0;
+    scene.buildings.forEach(b => { if (b && Array.isArray(b.footprint) && b.footprint.length >= 3 && b.footprint.every(pt)) { if (degenerateFootprint(b.footprint)) degenerate++; if (num(b.levels) && b.levels > MAX_LEVELS) tall++; } });
+    if (degenerate) warnings.push(degenerate + ' building footprint(s) have no area (repeated or collinear points): drawn at the centre of their bounding box');
+    if (tall) warnings.push(tall + ' building(s) have more than ' + MAX_LEVELS + ' levels: drawn with ' + MAX_LEVELS);
     let dangling = 0;
     scene.buildings.forEach(b => { if (b && Array.isArray(b.neighbours)) for (const n of b.neighbours) if (!ids.has(n)) dangling++; });
     if (dangling) warnings.push(dangling + ' neighbour id(s) name no building in the scene');
@@ -459,12 +474,13 @@
     for (const r of scene.roads) if (r.z) for (const z of r.z) zmax = Math.max(zmax, z * relief);
     if (T) zmax = Math.max(zmax, T.hi * relief);
     const rIdx = A.roadIndex(scene.roads);                       // a spatial index, so a city of tens of thousands of buildings stays fast
-    const buildings = scene.buildings.map(b => {
+    const buildings = scene.buildings.map(b0 => {
+      const b = Object.assign({}, b0);                       // each sim owns its buildings' mutable state (state, investor, levels...): a replay on one sim must not leave its states in the scene the next sim starts from. The footprint array is shared and never written.
       const fit = A.fitFootprint(b.footprint, rIdx), seed = A.hashStr(String(b.id)) ^ opts.seed;
-      const kind = (b.archetype && b.archetype !== 'auto' && A.ARCH[b.archetype]) ? b.archetype : A.pickArchetype(opts.region, b.levels, A.hash(seed + 5));
+      const kind = (b.archetype && b.archetype !== 'auto' && A.ARCH[b.archetype]) ? b.archetype : A.pickArchetype(opts.region, Math.min(b.levels, MAX_LEVELS), A.hash(seed + 5));
       const bz = (b.z !== undefined ? b.z : (T ? T.at(fit.cx, fit.cy) : 0)) * relief; if (bz > zmax) zmax = bz;
-      const e = { src: b, id: b.id, group: 'buildings', kind, seed, fit, z: bz, params: fit.ok ? A.buildingParams(opts.region, kind, b.levels, fit, seed) : null,
-                  get state() { return b.state; }, get investor() { return b.investor; }, get levels() { return b.levels; } };
+      const e = { src: b, id: b.id, group: 'buildings', kind, seed, fit, z: bz, params: fit.ok ? A.buildingParams(opts.region, kind, Math.min(b.levels, MAX_LEVELS), fit, seed) : null,
+                  get state() { return b.state; }, get investor() { return b.investor; }, get levels() { return Math.min(b.levels, MAX_LEVELS); } };
       if (e.params && opts.detail) e.params.fs = Object.assign({}, e.params.fs, { rich: true });   // opt-in detail: roof clutter and varied glazing
       if (e.params) stats.assets++; else { stats.extruded++; stats.reasons[fit.reason] = (stats.reasons[fit.reason] || 0) + 1; }
       return e;
@@ -688,25 +704,119 @@
   // The terrain surface: the grid's cells in painter's order (far to near), each filled with the ground colour at its true height, so the ground
   // stands where the hills are. Returns a canvas of grey relief shading (50% grey is flat; lighter faces the sun, darker faces away; the sun is where
   // the building shadows say it is) that the caller lays over the finished ground with soft-light.
+  // Per-vertex slopes of the grid (Sobel: the 3 x 3 neighbourhood, edges clamped), in metres of height per metre of ground, east (gx) and south (gy). The relief
+  // shading interpolates these across each cell instead of taking one slope per cell, so the shade is continuous over cell edges (a flat shade per cell
+  // showed as a staircase of diamonds). The heights themselves stay bilinear (T.at): buildings and roads stand on exactly the surface that is drawn.
+  // `passes` blurs the heights first with a 3 x 3 binomial kernel (0, 1 or 2 times): when a cell is only a few pixels wide the shade of one cell is a block
+  // you cannot read as a slope, only as noise, so the far views shade the land from its broader shape, the way a map is filtered at small scale.
+  function terrainSlopes(T, passes) {
+    const cache = T._slope || (T._slope = {}); if (cache[passes]) return cache[passes];
+    const nx = T.nx, ny = T.ny; let z = T.z;
+    for (let p = 0; p < passes; p++) {
+      const o = new Float32Array(nx * ny), at = (i, j) => z[(j < 0 ? 0 : j >= ny ? ny - 1 : j) * nx + (i < 0 ? 0 : i >= nx ? nx - 1 : i)];
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) o[j * nx + i] = (at(i - 1, j - 1) + 2 * at(i, j - 1) + at(i + 1, j - 1) + 2 * at(i - 1, j) + 4 * at(i, j) + 2 * at(i + 1, j) + at(i - 1, j + 1) + 2 * at(i, j + 1) + at(i + 1, j + 1)) / 16;
+      z = o;
+    }
+    const gx = new Float32Array(nx * ny), gy = new Float32Array(nx * ny);
+    const at = (i, j) => z[(j < 0 ? 0 : j >= ny ? ny - 1 : j) * nx + (i < 0 ? 0 : i >= nx ? nx - 1 : i)];
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      gx[j * nx + i] = ((at(i + 1, j - 1) + 2 * at(i + 1, j) + at(i + 1, j + 1)) - (at(i - 1, j - 1) + 2 * at(i - 1, j) + at(i - 1, j + 1))) / (8 * T.dx);
+      gy[j * nx + i] = ((at(i - 1, j + 1) + 2 * at(i, j + 1) + at(i + 1, j + 1)) - (at(i - 1, j - 1) + 2 * at(i, j - 1) + at(i + 1, j - 1))) / (8 * T.dy);
+    }
+    const fade = edgeFade(T);
+    if (fade) for (let i = 0; i < gx.length; i++) { gx[i] *= fade[i]; gy[i] *= fade[i]; }
+    return cache[passes] = { gx, gy };
+  }
+  // Where the elevation data ends, the ingest fills the grid with the nearest height, so a strip along the grid's border in which every column (or row) repeats
+  // its neighbour is made-up land, not data: it showed as streaks along the scene's south and east corners. The relief shade fades out over it (weight 1 inside
+  // the data, 0 well inside the strip) so it ends as plain ground; the heights themselves are left as the file has them. A strip is at least EDGE_RUN and at
+  // most 40% of the grid wide (a whole grid of identical columns is a plane tilted along y: real). Returns null when nothing is filled (the usual case),
+  // else a Float32Array of weights per vertex.
+  const EDGE_RUN = 4;
+  function edgeFade(T) {
+    const nx = T.nx, ny = T.ny, z = T.z; let m = null;
+    const mark = (j, i) => { if (!m) m = new Float32Array(nx * ny); m[j * nx + i] = 1; };
+    const sameCol = (i, i2) => { for (let j = 0; j < ny; j++) if (z[j * nx + i] !== z[j * nx + i2]) return false; return true; };
+    const sameRow = (j, j2) => { for (let i = 0; i < nx; i++) if (z[j * nx + i] !== z[j2 * nx + i]) return false; return true; };
+    const strip = (n, same, markLine) => {                        // duplicates counted inward from each end of an axis of n lines
+      for (const [start, step] of [[n - 1, -1], [0, 1]]) {
+        let r = 1; while (r < n && same(start + step * r, start)) r++;
+        if (r >= EDGE_RUN && r <= n * 0.4) for (let q = 0; q < r - 1; q++) markLine(start + step * q);
+      }
+    };
+    strip(nx, sameCol, i => { for (let j = 0; j < ny; j++) mark(j, i); });
+    strip(ny, sameRow, j => { for (let i = 0; i < nx; i++) mark(j, i); });
+    if (!m) return null;
+    for (let pass = 0; pass < 2; pass++) {                          // soften the mask: the fade runs over a couple of cells
+      const o = new Float32Array(nx * ny);
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { let a = 0, c = 0; for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const jj = j + dj, ii = i + di; if (jj >= 0 && jj < ny && ii >= 0 && ii < nx) { a += m[jj * nx + ii]; c++; } } o[j * nx + i] = a / c; }
+      m = o;
+    }
+    for (let i = 0; i < m.length; i++) m[i] = 1 - m[i];
+    return m;
+  }
+  // The interpolated slope at ground point (x, y), written to out[0], out[1].
+  function slopeAt(T, S, x, y, out) {
+    let u = (x - T.x0) / T.dx, v = (y - T.y0) / T.dy;
+    u = u < 0 ? 0 : (u > T.nx - 1 ? T.nx - 1 : u); v = v < 0 ? 0 : (v > T.ny - 1 ? T.ny - 1 : v);
+    const i = Math.min(T.nx - 2, Math.floor(u)), j = Math.min(T.ny - 2, Math.floor(v)), fu = u - i, fv = v - j, k = j * T.nx + i, nx = T.nx;
+    const w00 = (1 - fu) * (1 - fv), w10 = fu * (1 - fv), w01 = (1 - fu) * fv, w11 = fu * fv;
+    out[0] = S.gx[k] * w00 + S.gx[k + 1] * w10 + S.gx[k + nx] * w01 + S.gx[k + nx + 1] * w11;
+    out[1] = S.gy[k] * w00 + S.gy[k + 1] * w10 + S.gy[k + nx] * w01 + S.gy[k + nx + 1] * w11;
+  }
+  // Fills a triangle of a grey buffer (W x H, one byte per pixel) with the shade interpolated between its three corners (Gouraud). The triangle is grown by half a
+  // pixel, so neighbouring triangles leave no cracks (they are drawn far to near, so the overlap is covered).
+  const mSqrt = Math.sqrt, mCeil = Math.ceil, mFloor = Math.floor, mMin = Math.min, mMax = Math.max;      // local names: a global lookup of Math is slow in a vm context, and this runs per row
+  function shadeTri(buf, W, H, x0, y0, g0, x1, y1, g1, x2, y2, g2) {
+    const area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0); if (area > -1e-6 && area < 1e-6) return;
+    const f = (area < 0 ? -1 : 1) / (area < 0 ? -area : area);            // sign / |area|: the corner weights are the three edge functions over the area
+    // w0 = A0 x + B0 y + C0 (1 at corner 0, 0 along the opposite edge), w1 likewise, w2 = 1 - w0 - w1; the shade is the plane G = Ag x + Bg y + Cg
+    const A0 = -f * (y2 - y1), B0 = f * (x2 - x1), C0 = f * (y1 * (x1 - x2) + x1 * (y2 - y1)), A1 = -f * (y0 - y2), B1 = f * (x0 - x2), C1 = f * (y2 * (x2 - x0) + x2 * (y0 - y2));
+    const A2 = -A0 - A1, B2 = -B0 - B1, C2 = 1 - C0 - C1, Ag = g2 * A2 + g0 * A0 + g1 * A1, Bg = g2 * B2 + g0 * B0 + g1 * B1, Cg = g2 * C2 + g0 * C0 + g1 * C1;
+    const E0 = 0.5 * mSqrt(A0 * A0 + B0 * B0), E1 = 0.5 * mSqrt(A1 * A1 + B1 * B1), E2 = 0.5 * mSqrt(A2 * A2 + B2 * B2);     // half a pixel of growth, in weight units
+    const ya = mMax(0, mCeil(mMin(y0, y1, y2) - 1)), yb = mMin(H - 1, mFloor(mMax(y0, y1, y2) + 0.5));
+    for (let y = ya; y <= yb; y++) {
+      const py = y + 0.5; let lo = 0, hi = W - 1, t;                       // each weight must stay at or above -E: a half-plane in x on this row
+      const K0 = B0 * py + C0 + E0, K1 = B1 * py + C1 + E1, K2 = B2 * py + C2 + E2;
+      if (A0 > 1e-12) { t = mCeil(-K0 / A0 - 0.5); if (t > lo) lo = t; } else if (A0 < -1e-12) { t = mFloor(-K0 / A0 - 0.5); if (t < hi) hi = t; } else if (K0 < 0) continue;
+      if (A1 > 1e-12) { t = mCeil(-K1 / A1 - 0.5); if (t > lo) lo = t; } else if (A1 < -1e-12) { t = mFloor(-K1 / A1 - 0.5); if (t < hi) hi = t; } else if (K1 < 0) continue;
+      if (A2 > 1e-12) { t = mCeil(-K2 / A2 - 0.5); if (t > lo) lo = t; } else if (A2 < -1e-12) { t = mFloor(-K2 / A2 - 0.5); if (t < hi) hi = t; } else if (K2 < 0) continue;
+      if (lo > hi) continue;
+      let G = Ag * (lo + 0.5) + Bg * py + Cg + 0.5, o = y * W + lo;
+      for (let x = lo; x <= hi; x++, o++, G += Ag) buf[o] = G;
+    }
+  }
   const RELIEF_GAIN = 24, RELIEF_AMP = 90;          // a 4% slope facing the sun lifts the grey by about 85 of 255 (the shading is stylised: real slopes are gentle)
   function* drawTerrain(ctx, view, T, rl, th, B) {
     const A = A_(), q = A.sprites.dpr || 1, F = A.sprites.factory;
-    let sc = null, sg = null;
-    if (F) { sc = F(Math.ceil(view.w * q), Math.ceil(view.h * q)); sg = sc.getContext('2d'); sg.scale(q, q); sg.fillStyle = 'rgb(128,128,128)'; sg.fillRect(0, 0, view.w, view.h); }
+    // the shade is rasterised into a grey buffer at css resolution (50% grey = flat), then put on a canvas the caller lays over the ground with soft-light
+    const BW = Math.ceil(view.w), BH = Math.ceil(view.h), grey = F ? new Uint8ClampedArray(BW * BH).fill(128) : null;
+    const finish = () => {
+      if (!grey) return null;
+      const sc = F(Math.ceil(view.w * q), Math.ceil(view.h * q)), sg = sc.getContext('2d'), same = q === 1 && sc.width === BW && sc.height === BH;
+      const t = same ? sc : F(BW, BH), tg = same ? sg : t.getContext('2d'), im = tg.createImageData(BW, BH), d = im.data;
+      for (let i = 0, o = 0; i < grey.length; i++, o += 4) { d[o] = d[o + 1] = d[o + 2] = grey[i]; d[o + 3] = 255; }
+      tg.putImageData(im, 0, 0);
+      if (!same) { sg.imageSmoothingEnabled = true; sg.drawImage(t, 0, 0, sc.width, sc.height); }
+      return sc;
+    };
+    const sg = grey;
     // cells of about 18 px a side or less, so a close view is smooth and a far one costs one polygon per grid cell. Neighbouring cells are drawn a hair
     // too big (0.8 px) instead of being outlined: they are painted far to near, so the overlap is covered, and a stroke would double the cost.
     const sub = Math.max(1, Math.min(8, Math.ceil(Math.min(T.dx, T.dy) * view.scale / 18))), cw = T.dx / sub, ch = T.dy / sub;
     const gi0 = Math.floor((B[0] - T.x0) / cw), gi1 = Math.ceil((B[2] - T.x0) / cw), gj0 = Math.floor((B[1] - T.y0) / ch), gj1 = Math.ceil((B[3] - T.y0) / ch);
     const i0 = Math.max(0, gi0), i1 = Math.min((T.nx - 1) * sub, gi1), j0 = Math.max(0, gj0), j1 = Math.min((T.ny - 1) * sub, gj1);
     const pad = 4, W = view.w, H = view.h, k = view.scale, grow = 1 + 0.8 / Math.max(1, cw * k * C30);
-    const LX = 0.94, LY = -0.34, n = i1 - i0 + 1;
+    const LX = 0.94, LY = -0.34, n = i1 - i0 + 1, shadeOf = (gx, gy) => 128 + Math.max(-1, Math.min(1, -(gx * LX + gy * LY) * RELIEF_GAIN)) * RELIEF_AMP;
     ctx.fillStyle = th.ground;
-    if (n < 2 || j1 <= j0) return sc;
+    if (n < 2 || j1 <= j0) return finish();
     let prev = new Float32Array(n), next = new Float32Array(n);
-    const row = (arr, j) => { const y = T.y0 + j * ch; for (let i = 0; i < n; i++) arr[i] = T.at(T.x0 + (i0 + i) * cw, y); };     // true heights (metres) of one row of corners
-    row(prev, j0);
+    const cellPx = Math.min(T.dx, T.dy) * view.scale, S = sg ? terrainSlopes(T, cellPx < 12 ? 2 : (cellPx < 30 ? 1 : 0)) : null, sl = [0, 0];
+    let pgx = new Float32Array(n), pgy = new Float32Array(n), ngx = new Float32Array(n), ngy = new Float32Array(n);      // slopes at the corners of the row, interpolated from the grid's
+    const row = (arr, j, gxa, gya) => { const y = T.y0 + j * ch; for (let i = 0; i < n; i++) { const x = T.x0 + (i0 + i) * cw; arr[i] = T.at(x, y); if (S) { if (sub === 1) { const kk = j * T.nx + i0 + i; gxa[i] = S.gx[kk]; gya[i] = S.gy[kk]; } else { slopeAt(T, S, x, y, sl); gxa[i] = sl[0]; gya[i] = sl[1]; } } } };     // true heights (metres) of one row of corners
+    row(prev, j0, pgx, pgy);
     for (let j = j0; j < j1; j++) {
-      row(next, j + 1);
+      row(next, j + 1, ngx, ngy);
       const y0 = T.y0 + j * ch, y1 = y0 + ch;
       for (let i = 0; i < n - 1; i++) {
         const x0 = T.x0 + (i0 + i) * cw, x1 = x0 + cw, h00 = prev[i], h10 = prev[i + 1], h01 = next[i], h11 = next[i + 1];
@@ -719,17 +829,15 @@
         const mx = (ax + bx + cx + dx) / 4, my = (ay + by + cy + dy) / 4;
         const pa = [mx + (ax - mx) * grow, my + (ay - my) * grow], pb = [mx + (bx - mx) * grow, my + (by - my) * grow], pc = [mx + (cx - mx) * grow, my + (cy - my) * grow], pd = [mx + (dx - mx) * grow, my + (dy - my) * grow];
         ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); ctx.lineTo(pc[0], pc[1]); ctx.lineTo(pd[0], pd[1]); ctx.closePath(); ctx.fill();
-        if (sg) {
-          const gx = ((h10 + h11) - (h00 + h01)) / (2 * cw), gy = ((h01 + h11) - (h00 + h10)) / (2 * ch);            // slope east and south, from the four corners
-          const sh = Math.max(-1, Math.min(1, -(gx * LX + gy * LY) * RELIEF_GAIN)), g = Math.round(128 + sh * RELIEF_AMP);
-          sg.fillStyle = 'rgb(' + g + ',' + g + ',' + g + ')';
-          sg.beginPath(); sg.moveTo(pa[0], pa[1]); sg.lineTo(pb[0], pb[1]); sg.lineTo(pc[0], pc[1]); sg.lineTo(pd[0], pd[1]); sg.closePath(); sg.fill();
+        if (grey) {                                                      // each corner is shaded from its own slope; the cell is two triangles with the shade interpolated across them
+          const g00 = shadeOf(pgx[i], pgy[i]), g10 = shadeOf(pgx[i + 1], pgy[i + 1]), g11 = shadeOf(ngx[i + 1], ngy[i + 1]), g01 = shadeOf(ngx[i], ngy[i]);
+          shadeTri(grey, BW, BH, ax, ay, g00, bx, by, g10, cx, cy, g11); shadeTri(grey, BW, BH, ax, ay, g00, cx, cy, g11, dx, dy, g01);
         }
       }
-      const t = prev; prev = next; next = t;
+      let t = prev; prev = next; next = t; t = pgx; pgx = ngx; ngx = t; t = pgy; pgy = ngy; ngy = t;
       if (((j - j0) & 7) === 7) yield;
     }
-    return sc;
+    return finish();
   }
 
   function buildingDepth(b) {
