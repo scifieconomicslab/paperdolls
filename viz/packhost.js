@@ -76,12 +76,14 @@
   }
 
   // ---- controller: owns the runtime, re-runs it, plays the timeline ----
-  // The runtime is either the synchronous adapter (PackRuntime.create) or the asynchronous one (PackWorker.create, runtime.async === true). With the second a
+  // With the policy 'continue' (runtime.on_params) a parameter change does not start a run: the model keeps its state and uses the new values for the frames it makes from
+  // then on. The asynchronous controller makes those frames when the clock or a scrub reaches them (pull: one step request at a time, never past the horizon); the frames
+  // already made stay as they are. The runtime is either the synchronous adapter (PackRuntime.create) or the asynchronous one (PackWorker.create, runtime.async === true). With the second a
   // re-run is a request that streams its frames back in chunks; a newer parameter change cancels it, and its late chunks are dropped (ctl.gen). The frames of the
   // run being replaced stay on screen until the new run has reached the time being looked at, so a slider moves the map without a flicker back to time 0.
   function createController(o) {
     const { manifest, runtime, store } = o, horizon = manifest.time.steps, isAsync = !!runtime.async;
-    const ctl = { wall: 0, dirty: false, runs: 0, lastRunMs: 0, error: null, acc: 0, gen: 0, shown: 0, shownParams: null, runParams: null, running: false, notice: null, async: isAsync, get mode() { return runtime.mode || 'inline'; } };
+    const ctl = { wall: 0, dirty: false, runs: 0, lastRunMs: 0, error: null, acc: 0, gen: 0, shown: 0, shownParams: null, runParams: null, running: false, pulling: false, notice: null, async: isAsync, get mode() { return runtime.mode || 'inline'; } };
     const clock = () => (root.performance && root.performance.now ? root.performance.now() : Date.now());
     const fail = e => { ctl.error = (e && e.message) || String(e); if (root.console) root.console.error(e); };
     let retried = 0;
@@ -109,8 +111,24 @@
       // a run that is not cancelled must deliver all of its frames: the horizon and frame 0; a chunk that went missing is a failure, not a shorter timeline
       return runtime.run(horizon, fr => put(fr, false)).then(r => { if (!r.cancelled) { put([], true); if (gen === ctl.gen && got !== horizon + 1) throw new Error('the run delivered ' + got + ' of ' + (horizon + 1) + ' frames'); } });
     }
+    const cont = isAsync && runtime.policy === 'continue';
+    // continue, asynchronous: make the frames up to time `upto` (one request in flight; a start or restart in between drops the answer, as the model began again)
+    function pull(upto) {
+      if (!cont || ctl.pulling || ctl.error) return;
+      const have = store.length(); if (!have || have > horizon || have > upto) return;
+      const gen = ctl.gen, n = Math.min(horizon + 1 - have, upto - have + 1);
+      ctl.pulling = true;
+      runtime.step(n).then(frames => { ctl.pulling = false; if (gen === ctl.gen) { store.pushFrames(frames); pullMore(); } }, e => { ctl.pulling = false; if (gen === ctl.gen) { fail(e); if (store.time().playing) store.setPlaying(false); } });
+    }
+    let wanted = 0;                                                    // the furthest time anything asked for
+    function pullMore() { if (store.length() <= wanted) pull(wanted); }
     function rerun() {
       const t0 = clock();
+      if (cont) {                                                       // no run: the model goes on with the new values, from the next frame it makes
+        const gen = ctl.gen; ctl.running = true; ctl.runParams = store.params();
+        runtime.setParams(ctl.runParams).then(() => { if (gen === ctl.gen) { ctl.error = null; finish(t0); pullMore(); } }, e => failed(gen, t0, e));
+        return;
+      }
       if (isAsync) {
         const gen = ++ctl.gen; ctl.running = true; const want = store.time().t; ctl.runParams = store.params();
         runtime.setParams(ctl.runParams).then(res => {
@@ -146,7 +164,10 @@
     store.subscribe('params', () => { ctl.dirty = true; if (o.immediate) ctl.flush(); else if (o.schedule) o.schedule(); });
     ctl.flush = () => { if (!ctl.dirty) return false; ctl.dirty = false; rerun(); return true; };
     // "continue" models make a frame only when the clock reaches it (the asynchronous adapter streams a whole run instead)
-    ctl.ensure = t => { while (!isAsync && runtime.policy === 'continue' && store.length() <= t && runtime.t < horizon) store.pushFrames(runtime.step(1)); };
+    ctl.ensure = t => {
+      while (!isAsync && runtime.policy === 'continue' && store.length() <= t && runtime.t < horizon) store.pushFrames(runtime.step(1));
+      if (cont) { wanted = Math.max(wanted, Math.min(horizon, t)); pull(wanted); }
+    };
     ctl.advance = dt => {
       const tm = store.time(); if (!tm.playing) return;
       ctl.acc += dt * tm.speed;
@@ -154,7 +175,12 @@
         ctl.acc -= 1;
         const next = store.time().t + 1;
         if (next > horizon) { store.setPlaying(false); ctl.acc = 0; break; }
-        if (isAsync && next >= store.length()) { ctl.acc = 0; if (!ctl.running) store.setPlaying(false); break; }       // the clock waits for the frame to arrive; when none is coming the timeline is over
+        if (isAsync && next >= store.length()) {                                          // the clock waits for the frame to arrive
+          if (cont) {                                                                     // the model makes the frame the clock has reached; the step owed is kept, so the pace is the clock's
+            if (ctl.error) { ctl.acc = 0; store.setPlaying(false); } else { ctl.acc = Math.min(ctl.acc + 1, 2); ctl.ensure(next); }
+          } else { ctl.acc = 0; if (!ctl.running) store.setPlaying(false); }              // when no run is coming the timeline is over
+          break;
+        }
         ctl.ensure(next); store.setTime(next);
       }
     };

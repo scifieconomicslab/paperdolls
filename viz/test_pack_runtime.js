@@ -260,6 +260,53 @@ test('#5 r08: a start that throws leaves the adapter\'s parameters with its hand
 });
 
 // =====================================================================================================================================================
+// Issue #6: on_params "continue" works on the page: frames are made as the clock (or a scrub) reaches them, a moved parameter changes the frames made after it
+// =====================================================================================================================================================
+const play = async (env, ctl, ticks, dt) => { for (let i = 0; i < ticks; i++) { ctl.advance(dt || 0.05); await env.drain(); } };
+test('#6 r01: with continue, Play makes the frames as the clock reaches them', async () => {
+  const { env, store, ctl, runtime } = H.makePage({ continue: true });
+  assert.strictEqual(runtime.policy, 'continue');
+  const p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  assert.strictEqual(store.length(), 1, 'lazy: only frame 0 until the clock asks');
+  store.setPlaying(true); await play(env, ctl, 100);                    // five seconds at speed 4
+  assert(store.time().t >= 15 && store.time().t <= 21, 't=' + store.time().t); assert(store.length() <= store.time().t + 2, 'no frames beyond the one the clock asked for: ' + store.length());
+  assert.strictEqual(env.impl.steps, store.length() - 1, 'the model ran only for the frames asked for');
+  assert.strictEqual(store.time().playing, true); assert.strictEqual(ctl.error, null);
+  await play(env, ctl, 300);                                           // on to the horizon
+  assert.strictEqual(store.time().t, 40); assert.strictEqual(store.length(), 41); assert.strictEqual(store.time().playing, false, 'the clock stops at the horizon'); assert.strictEqual(env.impl.steps, 40);
+});
+test('#6 r01: with continue, a moved slider changes the frames made from then on, and keeps the ones already made', async () => {
+  const { env, store, ctl } = H.makePage({ continue: true });
+  const p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  store.setPlaying(true); await play(env, ctl, 40);
+  const t0 = store.length() - 1; assert(t0 >= 5);
+  store.setParam('rate', 0.8); ctl.flush(); await env.drain();
+  assert.strictEqual(ctl.error, null); assert.strictEqual(ctl.running, false); assert.strictEqual(store.length(), t0 + 1, 'nothing is thrown away or re-run');
+  await play(env, ctl, 60);
+  assert(store.length() > t0 + 3); assert.strictEqual(H.frameLoad(store, t0), 500 + t0, 'frames made before the move keep their run'); assert.strictEqual(H.frameLoad(store, t0 + 2), 802 + t0, 'frames made after it use the new value');
+  assert.strictEqual(env.impl.inits, 1, 'one model start, no re-run');
+});
+test('#6 r01: with continue, a scrub (slider, chart click) asks for the frames up to it', async () => {
+  const { env, store, ctl } = H.makePage({ continue: true });
+  const p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  ctl.ensure(30); await env.drain();
+  assert.strictEqual(store.length(), 31); store.setTime(30); assert.strictEqual(store.time().t, 30); assert.strictEqual(H.frameLoad(store, 30), 530);
+  ctl.ensure(99); await env.drain(); assert.strictEqual(store.length(), 41, 'never past the horizon');
+});
+test('#6 r01: with continue, a model that fails on a step is reported and stops Play there', async () => {
+  quiet(); const impl = H.makeImpl({ throwAtStep: 10 }); impl.setParams = (h, p) => { h.p = Object.assign({}, p); return h; };
+  const env = H.makeEnv({ impl }); env.manifest.runtime.on_params = 'continue'; const store = G.PackStore.create(env.manifest), ctl = G.PackHost.createController({ manifest: env.manifest, runtime: env.worker(), store });
+  const p = ctl.start(); await env.drain(); await env.yieldAll(); await p;
+  store.setPlaying(true); await play(env, ctl, 150);
+  assert(/exploded at step 10/.test(ctl.error), String(ctl.error)); assert.strictEqual(store.time().playing, false); assert.strictEqual(store.length(), 10);
+  const calls = impl.steps; await play(env, ctl, 20); assert.strictEqual(impl.steps, calls, 'the failed step is not retried on every tick');
+});
+test('#6 r01: with rerun the controller still makes the whole timeline at once (continue changed nothing for it)', async () => {
+  const { env, store, ctl } = H.makePage({ chunk: 8 });
+  const p = ctl.start(); await env.drain(); await env.yieldAll(); await p; assert.strictEqual(store.length(), 41);
+});
+
+// =====================================================================================================================================================
 (async () => {
   for (const [name, fn] of queue) {
     let timer; const guard = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('hang: the test never finished (a promise that is never settled)')), 4000); });
