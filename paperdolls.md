@@ -822,7 +822,7 @@ You can also run it unattended by giving the agent a brief with your answers to 
 - Draw identity. People are paper dolls, in one neutral tone, with no skin, hair or other identity signals. That is where the name comes from.
 - Use a red-to-green scale, for anything.
 - Need the internet to view. No fonts, CDNs or tracking at view time.
-- Pass its own work. Every gate shows you something before it closes, and the beauty review is scored by a reviewer that did not build the world.
+- Pass its own work. 
 
 ## 16. Glossary
 
