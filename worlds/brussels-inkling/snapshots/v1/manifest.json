@@ -1,0 +1,40 @@
+{
+  "world": "brussels-inkling",
+  "version": "v1",
+  "date": "2026-11-11",
+  "family": "real",
+  "palette": "nw",
+  "source": "osm",
+  "files": [
+    {
+      "file": "scene.json",
+      "source": "map-data/scene.json",
+      "sha256": "64f17620d21b66cbe1099a8865f1d2d9bab15f7e42cfe50882d825c68650ecec",
+      "bytes": 9517315
+    },
+    {
+      "file": "extract.json",
+      "source": "map-data/extract.json",
+      "sha256": "a16db8de706cee21525da6cd6f3a681f719ad161ed479d003317c4943c02ea14",
+      "bytes": 14413728
+    },
+    {
+      "file": "model.ts",
+      "source": "sim-code/model.ts",
+      "sha256": "70fa1e9d84919730182c207abd98d32481b54b440da8258bc2da4da3d6c92cee",
+      "bytes": 46742
+    },
+    {
+      "file": "model-binding.json",
+      "source": "sim-code/model-binding.json",
+      "sha256": "38abf30e856e13a67a89c26ee61ae60aa7419dde220ee3a01b78b1da44e43a4b",
+      "bytes": 3273
+    },
+    {
+      "file": "brussels-inkling.md",
+      "source": "brussels-inkling.md",
+      "sha256": "a3b9a9007129f2eda63c3021d3b9aa50a59380e00e085862407129f3647e6a06",
+      "bytes": 15144
+    }
+  ]
+}

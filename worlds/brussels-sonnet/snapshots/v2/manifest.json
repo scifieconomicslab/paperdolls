@@ -1,0 +1,40 @@
+{
+  "world": "brussels-sonnet",
+  "version": "v2",
+  "date": "2026-11-11",
+  "family": "real",
+  "palette": "nw",
+  "source": "osm",
+  "files": [
+    {
+      "file": "scene.json",
+      "source": "map-data/scene.json",
+      "sha256": "990a487cabbee6ba7fbf2e977f220b9d4abae871c197cf01d08f9c4723d4fe10",
+      "bytes": 9517315
+    },
+    {
+      "file": "extract.json",
+      "source": "map-data/extract.json",
+      "sha256": "019bb1426696f13e33c56cd24d9863e4ba26fa6de84590bc8ff430f4fa1653ef",
+      "bytes": 14413728
+    },
+    {
+      "file": "model.ts",
+      "source": "sim-code/model.ts",
+      "sha256": "dac40d902ecc292a29bad3acdce11a2bc12ca3270cff1b7da70032962e195335",
+      "bytes": 35467
+    },
+    {
+      "file": "model-binding.json",
+      "source": "sim-code/model-binding.json",
+      "sha256": "aeba5134f54246234c9112e55eca46501313b5daf209a0f1d32b3b17fc51d57d",
+      "bytes": 3978
+    },
+    {
+      "file": "brussels-sonnet.md",
+      "source": "brussels-sonnet.md",
+      "sha256": "094ea02feb096182ace658178ab551216da442cb00a33d2ddeeafd0a0f343dd0",
+      "bytes": 12510
+    }
+  ]
+}

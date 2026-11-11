@@ -1,0 +1,223 @@
+{
+  "family": "real",
+  "region": "nw",
+  "look": "house",
+  "palette_look": "brick",
+  "model_licence": "The Great Retrofit v3 \u2014 NetLogo port, CC BY 4.0, Sci-Fi Economics Lab (every number is a placeholder)",
+  "model_version": "great-retrofit-v3.nlogox (NetLogo 7.0.4) \u2192 TypeScript, 2026-11-11",
+  "dashboard": {
+    "outputs": [
+      "monitor:adopted_units",
+      "monitor:public_cost",
+      "monitor:bills_saved",
+      "monitor:cost_per_retrofit",
+      "monitor:can_front_share",
+      "monitor:shared_approved",
+      "monitor:state_retrofitted",
+      "monitor:households"
+    ]
+  },
+  "bindings": [
+    {
+      "entity": "buildings",
+      "layer": "structures",
+      "match": {
+        "rule": "anchored by scene index; the model selects the 5,403 dwelling buildings (residential, dwelling class)",
+        "count": 5403
+      },
+      "top_color": {
+        "field": "retrofit_state",
+        "domain": [
+          0,
+          2
+        ],
+        "reverse": false,
+        "ramp": {
+          "name": "plum",
+          "kind": "sequential",
+          "stops": [
+            [
+              0.63,
+              0.035,
+              300
+            ],
+            [
+              0.5,
+              0.065,
+              320
+            ],
+            [
+              0.38,
+              0.1,
+              340
+            ]
+          ]
+        },
+        "label": "Retrofit state",
+        "unit": ""
+      }
+    }
+  ],
+  "architecture": [
+    {
+      "entity": "buildings",
+      "field": "approved",
+      "treatment": "mark",
+      "preset": "flag",
+      "scale": {
+        "type": "categorical",
+        "palette": {
+          "true": "#007c7c",
+          "false": "#6f7276"
+        }
+      },
+      "colour": "#007c7c",
+      "label": "Shared measure passed"
+    },
+    {
+      "entity": "buildings",
+      "field": "adoption",
+      "treatment": "extent",
+      "preset": "segments",
+      "scale": {
+        "type": "sequential",
+        "ramp": [
+          "#b6c2af",
+          "#9aab95"
+        ]
+      },
+      "colour": "#b6c2af",
+      "label": "Adoption progress \u2014 share of homes done"
+    }
+  ],
+  "causal_graph": {
+    "confirmed": true,
+    "source": "llm-proposed from the model's procedures; user-confirmed in the brief",
+    "nodes": [
+      "delivery-mode",
+      "credit-access",
+      "means-test",
+      "deduction-rate",
+      "rebate-lag-months",
+      "energy-scenario",
+      "household-upfront-cost",
+      "financing-capacity",
+      "rebate-pv",
+      "savings-pv",
+      "npv",
+      "adoption",
+      "bills-saved",
+      "public-cost",
+      "canvass-hours",
+      "shared-approval"
+    ],
+    "edges": [
+      [
+        "delivery-mode",
+        "household-upfront-cost"
+      ],
+      [
+        "delivery-mode",
+        "public-cost"
+      ],
+      [
+        "credit-access",
+        "financing-capacity"
+      ],
+      [
+        "means-test",
+        "financing-capacity"
+      ],
+      [
+        "deduction-rate",
+        "rebate-pv"
+      ],
+      [
+        "rebate-lag-months",
+        "rebate-pv"
+      ],
+      [
+        "energy-scenario",
+        "savings-pv"
+      ],
+      [
+        "household-upfront-cost",
+        "npv"
+      ],
+      [
+        "financing-capacity",
+        "npv"
+      ],
+      [
+        "rebate-pv",
+        "npv"
+      ],
+      [
+        "savings-pv",
+        "npv"
+      ],
+      [
+        "npv",
+        "adoption"
+      ],
+      [
+        "canvass-hours",
+        "shared-approval"
+      ],
+      [
+        "shared-approval",
+        "adoption"
+      ],
+      [
+        "adoption",
+        "bills-saved"
+      ],
+      [
+        "adoption",
+        "public-cost"
+      ]
+    ],
+    "note": "A scenario change is a new run from month 0 with the same seed, not an in-run intervention. The graph states the model's declared procedures, not a claim about the world."
+  },
+  "scenarios": [
+    {
+      "id": "baseline",
+      "label": "Baseline",
+      "interventions": [],
+      "params": {}
+    },
+    {
+      "id": "public-service",
+      "label": "Public service",
+      "interventions": [],
+      "params": {
+        "delivery-mode": "public_service"
+      }
+    },
+    {
+      "id": "passthrough",
+      "label": "Pass-through",
+      "interventions": [],
+      "params": {
+        "delivery-mode": "passthrough"
+      }
+    },
+    {
+      "id": "open-credit",
+      "label": "Open credit",
+      "interventions": [],
+      "params": {
+        "credit-access": "open",
+        "refundable?": true
+      }
+    },
+    {
+      "id": "energy-shock",
+      "label": "Energy shock",
+      "interventions": [],
+      "params": {
+        "energy-scenario": "shock"
+      }
+    }
+  ]
+}

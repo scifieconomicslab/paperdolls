@@ -1,0 +1,66 @@
+{
+  "family": "real",
+  "region": "nw",
+  "look": "house",
+  "model_licence": "not stated in great-retrofit-v3.nlogox",
+  "dashboard": {
+    "outputs": [
+      "Adoption by quintile", "State spend (cumulative)", "Bills saved (cumulative)", "Cost per retrofit",
+      "month", "adopted units", "public cost", "bills saved", "cost per retrofit", "cost parts",
+      "tenures", "building states", "adoption by quintile", "can front cost by quintile",
+      "rebate per euro by quintile", "net cash by quintile"
+    ]
+  },
+  "bindings": [
+    {
+      "entity": "households",
+      "layer": "structures",
+      "match": {
+        "scene": "map-data/scene.composed.json",
+        "structures": { "residential": ["residential", "probable"], "count": 8105 },
+        "units_rule": "round(area * storeys * 0.8 / 80), min 1 (model placeholder rule; storeys assumed)",
+        "tenure": "model's seeded draw (simulated)",
+        "unbound": "1,111 other buildings are scenery"
+      },
+      "displayed_fields": {
+        "building": ["tenure", "units", "adopted units", "shared-measure status"],
+        "household": ["quintile", "area", "income", "savings", "horizon", "retrofit state"]
+      },
+      "top_color": {
+        "field": "building retrofit state",
+        "domain": [0, 2],
+        "reverse": false,
+        "ramp": {
+          "name": "heather",
+          "kind": "sequential",
+          "stops": [[0.93, 0.03, 285], [0.66, 0.10, 307], [0.38, 0.12, 330]]
+        },
+        "label": "Building retrofit state: none / partial / done (rental = not modelled, grey hatch)",
+        "unit": "state"
+      }
+    }
+  ],
+  "architecture": [
+    { "entity": "households", "field": "shared-measure status", "treatment": "mark", "preset": "flag", "scale": { "kind": "categorical", "values": ["pending", "approved"] }, "label": "Shared measure: pending / approved" },
+    { "entity": "households", "field": "adoption progress", "treatment": "extent", "preset": "segments", "scale": { "kind": "sequential", "domain": [0, 1] }, "label": "Units retrofitted (storeys clad from the bottom)" }
+  ],
+  "causal_graph": {
+    "confirmed": true,
+    "source": "llm-proposed from the model code, user-confirmed 2026-11-11",
+    "nodes": ["energy-scenario", "cost-per-m2", "delivery-mode", "deduction-rate", "rebate-lag-months", "loan-rate", "credit-access", "income", "savings", "npv", "can-finance", "consider-prob", "neighbour-adoption", "canvassing", "shared-support", "shared-approved", "adoption", "public-cost", "bills-saved"],
+    "edges": [
+      ["energy-scenario", "npv"], ["cost-per-m2", "npv"], ["cost-per-m2", "can-finance"], ["delivery-mode", "npv"], ["delivery-mode", "can-finance"],
+      ["deduction-rate", "can-finance"], ["rebate-lag-months", "can-finance"], ["loan-rate", "can-finance"], ["credit-access", "can-finance"], ["income", "can-finance"], ["savings", "can-finance"],
+      ["npv", "adoption"], ["can-finance", "adoption"], ["neighbour-adoption", "consider-prob"], ["canvassing", "consider-prob"], ["consider-prob", "adoption"],
+      ["consider-prob", "shared-support"], ["shared-support", "shared-approved"], ["shared-approved", "adoption"], ["adoption", "public-cost"], ["adoption", "bills-saved"]
+    ]
+  },
+  "scenarios": [
+    { "id": "baseline", "label": "Baseline", "interventions": [] },
+    { "id": "public-service", "label": "Public service", "interventions": [{ "name": "delivery-mode", "value": "public_service" }] },
+    { "id": "means-tested-refundable", "label": "Means-tested refundable rebate", "interventions": [{ "name": "means-test?", "value": true }, { "name": "refundable?", "value": true }, { "name": "means-test-max-quintile", "value": 2 }] },
+    { "id": "energy-shock", "label": "Energy price shock", "interventions": [{ "name": "energy-scenario", "value": "shock" }] },
+    { "id": "no-credit", "label": "No credit", "interventions": [{ "name": "credit-access", "value": "none" }] }
+  ],
+  "compare": { "runs": 2, "against": "baseline" }
+}

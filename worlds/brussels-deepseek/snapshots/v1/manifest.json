@@ -1,0 +1,40 @@
+{
+  "world": "brussels-deepseek",
+  "version": "v1",
+  "date": "2026-11-11",
+  "family": "real",
+  "palette": "nw",
+  "source": "osm",
+  "files": [
+    {
+      "file": "scene.json",
+      "source": "map-data/scene.json",
+      "sha256": "4f8afad51b9b1ce42a6f1a27be46165373efbef461bb46b0e10a6335ea427c9b",
+      "bytes": 9733798
+    },
+    {
+      "file": "extract.json",
+      "source": "map-data/extract.json",
+      "sha256": "def859dd90a7a4f23bf3c49f8aa53fceba7221cf9fd368da93718cf476a39d40",
+      "bytes": 14413728
+    },
+    {
+      "file": "model.ts",
+      "source": "sim-code/model.ts",
+      "sha256": "433146d4d0727301efc8007dee3048a3a98f5a6a2675c20e7e4eefb5b4705969",
+      "bytes": 40002
+    },
+    {
+      "file": "model-binding.json",
+      "source": "sim-code/model-binding.json",
+      "sha256": "bbae64bcb6d61d69efbd34303e9816d207f8331dcd741f949ea830eef231224b",
+      "bytes": 4678
+    },
+    {
+      "file": "brussels-deepseek.md",
+      "source": "brussels-deepseek.md",
+      "sha256": "ad1731901ff0ccbab69366033a333aa14a1b4d260ff3f9a656eefa1bce974cd9",
+      "bytes": 10940
+    }
+  ]
+}

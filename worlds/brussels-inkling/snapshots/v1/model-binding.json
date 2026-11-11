@@ -1,0 +1,83 @@
+{
+  "family": "real",
+  "region": "nw",
+  "look": "house",
+  "palette_look": "brick",
+  "model_licence": "CC BY 4.0, The Great Retrofit v3 (NetLogo port), Sci-Fi Economics Lab — every number in the model is a placeholder; nothing computed here is a finding",
+  "dashboard": {
+    "outputs": [
+      "Adoption by quintile",
+      "State spend (cumulative)",
+      "Bills saved (cumulative)",
+      "Cost per retrofit",
+      "month",
+      "adopted units",
+      "public cost",
+      "bills saved",
+      "cost per retrofit",
+      "cost parts — base",
+      "cost parts — markup",
+      "tenures — owner-occupied",
+      "tenures — condo",
+      "tenures — rental",
+      "building states — no retrofit",
+      "building states — partial",
+      "building states — done",
+      "building states — rental (not modelled)",
+      "shared measures pending",
+      "shared measures approved",
+      "shared-measure votes passed"
+    ]
+  },
+  "bindings": [
+    {
+      "entity": "households",
+      "layer": "buildings",
+      "match": { "by": "anchor" },
+      "top_color": {
+        "field": "retrofit_share",
+        "domain": [0, 1],
+        "reverse": false,
+        "ramp": {
+          "name": "plum",
+          "kind": "sequential",
+          "stops": [[0.93, 0.025, 318], [0.64, 0.115, 340], [0.35, 0.13, 352]]
+        },
+        "label": "Retrofit share",
+        "unit": "share of units complete"
+      }
+    }
+  ],
+  "architecture": [
+    {
+      "entity": "households",
+      "field": "shared_pending",
+      "treatment": "mark",
+      "preset": "flag",
+      "scale": { "type": "categorical", "palette": { "true": "#398ccc" } },
+      "label": "Shared-measure vote pending"
+    },
+    {
+      "entity": "households",
+      "field": "retrofit_share",
+      "treatment": "extent",
+      "preset": "segments",
+      "scale": { "type": "sequential" },
+      "label": "Retrofit progress (storeys clad)"
+    }
+  ],
+  "causal_graph": {
+    "confirmed": true,
+    "source": "llm-proposed + user-confirmed",
+    "nodes": ["delivery-mode", "deduction-rate", "credit-access", "shared-measure?", "n-complete", "public-cost", "bills-saved"],
+    "edges": [["delivery-mode", "n-complete"], ["deduction-rate", "n-complete"], ["credit-access", "n-complete"], ["shared-measure?", "n-complete"], ["n-complete", "public-cost"], ["n-complete", "bills-saved"]],
+    "note": "n-complete is the model's count of completed units; delivery-mode is the named chooser. Proposed from the model; confirmed by the brief (accept the derived graph)."
+  },
+  "scenarios": [
+    { "id": "baseline", "label": "Baseline", "interventions": [] },
+    { "id": "generous-rebate", "label": "Generous rebate", "interventions": [{ "name": "preset", "args": { "deduction-rate": 0.6, "rebate-lag-months": 6 } }] },
+    { "id": "public-service", "label": "Public service", "interventions": [{ "name": "preset", "args": { "delivery-mode": "public_service", "public-capacity": 0.1 } }] },
+    { "id": "means-tested", "label": "Means-tested, refundable", "interventions": [{ "name": "preset", "args": { "means-test?": true, "refundable?": true } }] },
+    { "id": "passthrough", "label": "Passthrough", "interventions": [{ "name": "preset", "args": { "delivery-mode": "passthrough" } }] }
+  ]
+}
