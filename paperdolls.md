@@ -1,10 +1,10 @@
 # Paperdolls: the manual
 
-Paperdolls takes a NetLogo agent-based model and turns it into a small city you can explore in a browser. You look down on it at an angle, the way you would in a city-building game. The buildings, streets and parks come from a real map (or from a description of an invented place), and the model's agents live in them. Press play and the model runs in the streets instead of in a plot window.
+Paperdolls turns a NetLogo agent-based model into an interactive 3D city in the browser. Viewed from an isometric angle similar to a city-building game, the environment generates buildings, streets, and parks from OpenStreetMap data or text descriptions, placing simulation agents directly into the map. Running the model animates these agents throughout the city streets rather than in a standard plot window.
 
-What comes out is one HTML file. It opens offline, needs nothing installed, and can be emailed, put on a website or shown in a meeting.
+Every run outputs a single, fully offline HTML file that requires no installation and can be shared via email, hosted on a web server, or presented directly in meetings.
 
-This manual explains how all of that works.
+This manual documents the architecture, file formats, and workflow of the framework.
 
 ## Contents
 
@@ -29,7 +29,7 @@ This manual explains how all of that works.
 
 ## 1. The idea in one picture
 
-A game engine hardcodes how its world works, and we need to try out economies that no single engine would anticipate. So instead of an engine, Paperdolls is a factory for making small engines. It is a written method that an AI coding agent follows, step by step, with a person approving each stage. Every run produces a new, self-contained simulation.
+Commercial game engines hardcode their underlying world logic, making them ill-suited for custom economic models. Paperdolls acts as a factory for generating targeted simulation engines. It provides a structured workflow that an AI coding agent executes step by step, requiring human approval at designated checkpoints to produce a self-contained simulation file.
 
 ```mermaid
 flowchart LR
@@ -40,17 +40,15 @@ flowchart LR
     S["Skills, tools,<br/>reference material"] -.read by.-> A
 ```
 
-The agent can be any coding agent that reads files and runs commands. So far Paperdolls has been run by Claude (Sonnet 5.5) in Claude Code, DeepSeek 4.1 Flash in Command Code, and Inkling 2 Small in OpenChamber.
+The process works with any file-capable coding agent that can execute terminal commands. Paperdolls has been run using Claude (Sonnet 5.5) via Claude Code, DeepSeek 4.1 Flash via Command Code, and Inkling 2 Small via OpenChamber.
 
 ## 2. A primer on the web pieces
 
-You can skip this section if you build web front ends for a living.
+A generated world builds into a standard web bundle: HTML for structure, CSS for layout, and JavaScript for runtime logic. Paperdolls inlines all three components, alongside the spatial map data and simulation model, into a single file.
 
-A finished world is a web page, and a web page is three things: HTML (the structure), CSS (the styling) and JavaScript (the code). Paperdolls bundles all three into one file, along with the map data and the model.
+The application source is written in TypeScript and compiled down to JavaScript during the build process. TypeScript enforces static typing (`let height: number = 3.1` instead of `let height = 3.1`), validating types prior to compilation before stripping them for execution.
 
-The code is written in TypeScript and turned into JavaScript at build time. TypeScript is JavaScript with type annotations: `let height: number = 3.1` instead of `let height = 3.1`. The types are checked before the code runs and then stripped away. If you know Python with type hints, the experience is close.
-
-These are the other names you will meet:
+Key components and their roles in the stack:
 
 | name | what it is | rough equivalent |
 |---|---|---|
@@ -62,7 +60,7 @@ These are the other names you will meet:
 | Web Worker | a second thread inside the page; the model runs there so the drawing never stalls | a background thread |
 | JSON | the text format for data files such as `scene.json` | a Python dict written to disk |
 
-A page has one main thread that both draws and responds to the mouse. If the model ran there, every simulated month would freeze the picture. So every world runs its model in a worker and sends results back to the main thread, which only draws them.
+Browser tabs run UI updates and user inputs on a single main thread. Running complex model iterations directly on this thread would introduce frame drops and freeze the canvas. Consequently, Paperdolls offloads model calculations to a dedicated Web Worker thread, which streams state frames back to the main rendering thread.
 
 ```mermaid
 flowchart LR
@@ -94,7 +92,7 @@ netlogomodels/      models to run
 worlds/             one folder per finished world
 ```
 
-The repository holds three kinds of material, and each does a different job.
+Repository assets are divided into three operational categories:
 
 ```mermaid
 flowchart TB
@@ -119,11 +117,11 @@ flowchart TB
     Worlds -->|"skill-gaps.md after each run"| Method
 ```
 
-The rule we use to decide where something goes: if two good runs should produce the same thing, it belongs in a tool. If two good runs should produce different but equally good things, it belongs in prose.
+Asset placement rule: components requiring strictly identical output across independent runs belong in shared tooling (`tools/`). Tasks permitting stylistic variations belong in written guidelines (`skills/`).
 
-By size, the hand-written part of the repository is roughly 31% prose, 42% code, 14% tests and 14% reference data. That count leaves out the test fixtures recorded from NetLogo and OpenStreetMap, the exemplar screenshots, and the worlds.
+By codebase size, hand-authored files consist of approximately 31% documentation, 42% source code, 14% tests, and 14% reference datasets. This excludes recorded test fixtures, reference screenshots, and generated output folders.
 
-The eight skills each own one part of the job:
+Responsibility matrix for the eight core skill modules:
 
 | skill | owns |
 |---|---|
@@ -136,11 +134,11 @@ The eight skills each own one part of the job:
 | `paperdolls-interface-ui` | the panels around the city |
 | `paperdolls-technology` | versions, the offline build, the worker, performance budgets |
 
-`skill.md` routes the agent to one skill at a time, so it only reads what the current gate needs.
+The entry router `skill.md` selectively loads only the specific skill required for the active build gate.
 
 ## 4. A run, gate by gate
 
-You start the agent on `skill.md` and hand it a NetLogo model. It runs a preflight check, then works through eight gates. At each one it shows you something and waits for your answer. A "yes" applies to the thing it showed; if it edits that thing afterwards, it has to ask again.
+Execution begins by initializing the agent against `skill.md` with a target NetLogo model. Following an automated preflight check, the process advances through eight sequential approval gates. A "yes" approval applies strictly to the current artifact state; subsequent modifications require re-approval.
 
 ```mermaid
 sequenceDiagram
@@ -163,7 +161,7 @@ sequenceDiagram
     Agent->>You: the finished page and the final report
 ```
 
-What each gate produces:
+Gate artifacts and validation steps:
 
 | gate | you are asked | the agent writes | checked by |
 |---|---|---|---|
@@ -177,9 +175,9 @@ What each gate produces:
 | 6. Parity | before long runs: whether to start them | `sim-code/model.ts`, `sim-code/parity.md` | the parity harness |
 | 7. Sign-off | does it work for you? | `visual/index.html` and `final-report.md` | ui-rules, beauty review, FPS, single-file check |
 
-Every decision goes into the world record's decisions log as one dated line. The log is append-only. Anything the agent had to guess is labelled as a guess, both in the record and on the page.
+Decisions append to an immutable log within the world record. Inferred parameters are logged and tagged explicitly as guesses both in documentation and within the rendered interface.
 
-At the end, a world folder looks like this:
+Output directory structure upon completion:
 
 ```text
 worlds/<name>/
@@ -197,7 +195,7 @@ worlds/<name>/
 
 ## 5. The three contracts
 
-Three inputs meet in the page: the model, the map and the art bible. They meet only through written files with fixed shapes. The page never reads the NetLogo file or OpenStreetMap directly.
+The client application integrates three primary sources: the compiled model, the scene map, and the aesthetic parameters defined in the art bible. These components interact strictly via structured data files. The application never directly reads raw `.nlogox` files or OpenStreetMap XML.
 
 ```mermaid
 flowchart LR
@@ -216,7 +214,7 @@ flowchart LR
 
 ### The scene: `map-data/scene.json`
 
-The scene is the place, in metres, with the origin near its centre. Its shape is fixed by `schemas/scene.json`, but its vocabulary is open: a new kind of building is a new value, not a schema change. A trimmed example:
+Scene geometry is defined in meters relative to a central origin point. Structure definitions adhere strictly to `schemas/scene.json`, while building attributes accept open taxonomy values. Truncated scene data example:
 
 ```json
 {
@@ -238,16 +236,16 @@ The scene is the place, in metres, with the origin near its centre. Its shape is
 }
 ```
 
-A few fields need explaining:
+Field semantics:
 
-- `boundary` is the edge of the place (for Jette, the commune). The plinth, the ground and the camera's overview shot all use it.
-- `levels_assumed: true` means OpenStreetMap had no storey count, so the ingest used a default. In Jette, 99% of storeys are assumed.
-- `residential` is `residential` when the data says it is a home, `probable` when its type and size suggest a home, and `other` otherwise. A model's households live in the first two.
-- `kind` on land use is coarse (park, garden, water, square, rail, bare). `cover` is finer (wood, pitch, cemetery and so on) and tells the page which surface to draw.
+- `boundary` establishes the spatial boundary polygon (e.g., commune limits) used by ground meshes, boundary plinths, and camera overview framing.
+- `levels_assumed: true` indicates that height data was omitted from OpenStreetMap and calculated using fallback heuristics (e.g., 99% of structures in Jette).
+- `residential` marks verified residences as `residential`, inferred residences as `probable`, and commercial/industrial structures as `other`. Simulation agents are assigned exclusively to the first two types.
+- `kind` assigns structural land use categories (e.g., park, water, rail), whereas `cover` dictates fine-grained surface shader selection (e.g., wood, pitch, cemetery).
 
 ### The binding: `sim-code/model-binding.json`
 
-The binding says how the model sits in the place. A trimmed version of the DeepSeek Jette world's binding:
+The binding maps internal model variables to physical geometry. Truncated sample configuration from the DeepSeek Jette build:
 
 ```json
 {
@@ -268,19 +266,19 @@ The binding says how the model sits in the place. A trimmed version of the DeepS
 }
 ```
 
-`top_color` is the one model variable the roofs show. `architecture` lists the "structural readings": model variables drawn into the buildings themselves, such as a flag on a roof or cladding that climbs a facade as a building is retrofitted. The ramp's `stops` are colours in OKLCH (lightness, chroma, hue), which section 8 explains.
+`top_color` designates the model variable mapped directly to roof surfaces. `architecture` defines structural indicators: physical scene modifications like roof flags or retrofitting facade progress. Color stops are defined in OKLCH space (lightness, chroma, hue).
 
 ### The world record: `<name>.md`
 
-The world record is the human-readable twin of the other two, plus the decisions log and the attribution. It is a markdown file built from `reference/templates/world.md`. `tools/check-world.py` checks that it has every section in order, that every gate has a dated log line, and that it agrees with the binding.
+The world record acts as a human-readable counterpart to the scene and binding contracts while tracking decision logs and attribution. Built from `reference/templates/world.md`, `tools/check-world.py` validates section ordering, dated gate entries, and schema parity against binding files.
 
 ## 6. From NetLogo to TypeScript
 
 ### The runtime
 
-A converted model is written against a small library in `tools/agents/` that provides NetLogo's verbs in TypeScript: `ask`, `createTurtles`, `oneOf`, `random`, `tick` and so on. The converted model keeps NetLogo's procedure names and order, with the NetLogo source in a comment above each function. That keeps the two easy to compare line by line.
+Transpiled models run against a core TypeScript emulation layer in `tools/agents/` that mirrors NetLogo primitives: `ask`, `createTurtles`, `oneOf`, `random`, `tick`, and related execution methods. Converted files maintain original procedure names and execution sequences, embedding original NetLogo source blocks directly within code comments.
 
-Here is one procedure from Wolf Sheep Predation, the worked example in `tools/agents/examples/wolf-sheep.ts`:
+Implementation example taken from the Wolf-Sheep Predation reference (`tools/agents/examples/wolf-sheep.ts`):
 
 ```text
 NetLogo:     to move
@@ -295,13 +293,13 @@ NetLogo:     to move
 function move(m: Ctx, t: AnyAgent) { t.rt(m.random(50)); t.lt(m.random(50)); t.fd(1); }
 ```
 
-`m` is the model's context: the world, the random number generator, the parameters. `t` is the turtle. `m: Ctx` and `t: AnyAgent` are type annotations; they say what kind of thing each argument is, and they disappear in the built page.
+`m` references simulation context (world bounds, RNG states, live parameters), while `t` targets the individual agent instance. Type signatures (`m: Ctx`, `t: AnyAgent`) are stripped at build time.
 
-The whole model is one call to `defineModel({...})`, which declares the parameters (the sliders), the breeds, `setup`, `go`, the plots and monitors, and any interventions a user can trigger mid-run.
+The complete model logic wraps inside a single `defineModel({...})` invocation specifying parameter definitions, agent breeds, setup steps, execution loops, UI monitors, and mid-run intervention parameters.
 
 ### How the page talks to a model
 
-Every converted model has the same small interface, whatever it simulates:
+All transpiled simulation modules implement a uniform runtime interface:
 
 ```mermaid
 classDiagram
@@ -323,13 +321,13 @@ classDiagram
     Run --> Frame : step()
 ```
 
-- `describe()` lists the parameters, their ranges, the outputs and the time unit. The page builds its sliders and charts from this, so it never hardcodes a model's controls.
-- `start()` begins a run from tick 0 with given parameters and a seed.
-- `step()` advances one tick and returns a frame. A frame carries the tick, the plotted series, and each breed's variables as columns: one array per variable, one entry per agent. Columns are typed arrays (packed numbers, like a NumPy array), which a worker can hand to the main thread cheaply.
+- `describe()` returns parameter schemas, value constraints, registered monitors, and temporal metrics, allowing the UI to render control panels without hardcoded bindings.
+- `start()` instantiates a simulation run at tick 0 using provided slider parameters and seed values.
+- `step()` advances state execution by one tick and returns frame output. Each frame packs tick indices, plot arrays, and agent attribute tables into typed numerical arrays to enable zero-copy transfers between the worker and main threads.
 
 ### Parity: proving the port matches NetLogo
 
-A port that is almost right is worse than none, because it looks authoritative. So Gate 6 proves the TypeScript version behaves like the original, in three layers:
+Gate 6 verifies that converted TypeScript code replicates original NetLogo behavior across three test tiers:
 
 ```mermaid
 flowchart TB
@@ -349,15 +347,15 @@ flowchart LR
     CMP --> PL["sim-code/parity.md"]
 ```
 
-For a model whose randomness flows through its own seed slider (as in the Brussels retrofit model, which carries its own random number generator), both sides vary that slider per run. All results are written into the world's `sim-code/parity/results/`, never into `tools/`.
+Models driving randomness via internal seed parameters (e.g., the Brussels retrofit model) vary seed values across execution runs. Test outputs write strictly to `sim-code/parity/results/` inside the active world folder.
 
-There is one limit. Parity is run on the configuration NetLogo can run: the model's own synthetic world, with its generated table of buildings. The page's real-map run uses the same code fed with map-derived inputs (real footprints, assumed storeys), and NetLogo has no equivalent of it. The page, `parity.md` and the final report all say this. The arithmetic is verified; the Jette numbers are illustrative.
+Parity verification evaluates the model against NetLogo's native synthetic world grid. Web application runs process real-world map geometries, which have no native equivalent in NetLogo. Verification documentation highlights this distinction: arithmetic logic is formally verified, while real-world geographic runs remain illustrative.
 
-Some models keep their places as a table of records with no coordinates (the retrofit model keeps buildings this way). That still counts as spatial. At Gate 5 each record becomes one real building from the scene, taking its floor area and storeys from the map.
+Relational model entities lacking explicit spatial coordinates (such as tabular building records) undergo spatial mapping at Gate 5, inheriting concrete surface areas and storey counts directly from real-world scene geometry.
 
 ## 7. From OpenStreetMap to a scene
 
-`tools/ingest` (Python) turns OpenStreetMap data into `scene.json`. It does computation only, and every guess it makes is counted in a report.
+The Python utility `tools/ingest` processes raw OpenStreetMap data into `scene.json`, logging all heuristic assignments to an output report.
 
 ```mermaid
 flowchart TB
@@ -371,7 +369,7 @@ flowchart TB
     OUT["scene.json + scene_report.md"]
 ```
 
-The building classification follows a fixed order, set out in `reference/building-archetypes.md`:
+Structural classification evaluates attributes in priority sequence as specified in `reference/building-archetypes.md`:
 
 ```mermaid
 flowchart LR
@@ -381,40 +379,38 @@ flowchart LR
     T4 -->|no| T5["seeded guess from<br/>the local mix of tagged buildings"]
 ```
 
-In Jette, 93% of buildings reach the last step. OpenStreetMap there mostly says `building=yes` and nothing else. The report says so, the agent reads the number out at Gate 3, and the page labels the classes as guesses.
+In the Jette dataset, 93% of structures trigger step 5 fallback heuristics due to generic `building=yes` OpenStreetMap tags. The ingestion report flags these fallback rates for human review during Gate 3.
 
-The other path is `tools/construct`, which generates a scene for an invented place from a written spec. It writes the same `scene.json`, so everything downstream works the same way.
+Alternatively, `tools/construct` generates synthetic `scene.json` files for hypothetical maps, maintaining identical compatibility with downstream processing pipelines.
 
 ## 8. Deciding the look
 
 ### The art bible
 
-At Gate 2b the agent and you agree on what the world should look like, in words, before any map is fetched. The art bible (`art-bible.md`) records:
+Gate 2b establishes visual rules within `art-bible.md` prior to geographic ingestion:
 
-- the moment: time of day, season, weather ("3 pm in late May, sunny");
-- the palette, as numbers;
-- the light: the sun's direction, warmth and strength;
-- density and skyline;
-- one signature motif, a detail that makes the place itself (crow-stepped gables, limestone bands in brick);
-- what life is on the streets;
-- how data is shown;
-- "not this": what the world must not look like.
+- Environmental context: time of day, season, weather ("3 pm in late May, sunny").
+- Palette definitions in explicit color space values.
+- Lighting parameters: sun vector, color temperature, illuminance.
+- Structural density and skyline constraints.
+- Signature architectural motif (e.g., stepped gables, masonry bands).
+- Street-level activity density.
+- Data visualization overlays.
+- Explicit style constraints ("not this").
 
-At Gate 4 the first render is checked against it.
+Render passes at Gate 4 are benchmarked directly against this document.
 
 ### Colour in OKLCH
 
-Palettes are written in OKLCH: lightness (0 to 1), chroma (how colourful) and hue (0 to 360 degrees). Unlike RGB, equal steps in OKLCH look equal to the eye, so lightness rules can be written as numbers and checked.
-
-The palette is built from lightness bands first and hue second. The order is what makes a city read clearly when you squint at it:
+Color palettes use OKLCH values (lightness 0–1, chroma 0–0.32, hue 0–360°). Equal mathematical steps in OKLCH correspond to equal perceptual steps, allowing automated style validation via lightness boundaries:
 
 ```text
 lightness (OKLCH L)
 1.00 ┤
-     │  ground, pavements   0.90–0.96   ← lightest surface
+     │  ground, pavements    0.90–0.96   ← lightest surface
 0.90 ┤
      │
-0.80 ┤  walls               0.60–0.82
+0.80 ┤  walls                0.60–0.82
      │
 0.60 ┤                                  ← roofs at least 0.15 below the wall average
      │  roofs              0.30–0.48
@@ -424,11 +420,11 @@ lightness (OKLCH L)
 0.00 ┤
 ```
 
-There is also a chroma budget. World surfaces stay muted (chroma at most 0.08), one accent family may go up to 0.16, and the data ramp is kept distinct from both.
+Chroma limits enforce visual hierarchy: background surfaces cap at 0.08 chroma, primary architectural accents cap at 0.16, and data color ramps occupy distinct, non-overlapping color space bands.
 
-### Why the Brussels worlds came out purple
+### Palette and Data Ramp Allocation
 
-The roofs show one model variable on a colour ramp. Red-to-green is banned, because colour-blind viewers cannot read it. The ramp has to stay at least 60 degrees of hue away from the walls, the accent and the sky, and out of the greens so data never looks like grass. In a brick town the walls sit around hue 25–50 and the accent opposite them around 205–235 (blue), so the only gap left is purple to magenta:
+Roof surfaces encode simulation parameters along sequential color ramps. Red-to-green ramps are prohibited to maintain accessibility for color-blind viewers. Color ramps maintain at least a 60° hue separation from building walls, accent trims, sky gradients, and vegetation channels. In brick-dominated environments (wall hues 25–50°, accent hues 205–235°), data ramps allocate exclusively within remaining purple-to-magenta bands:
 
 ```text
 hue  0        60       120      180      240      300      360
@@ -439,11 +435,11 @@ hue  0        60       120      180      240      300      360
                                                     [ free: data ramp ]
 ```
 
-That is the rule working, not a default. To get a different ramp, free its hues first: move the accent to ochre or teal, and blue becomes available for data. The agent offers this at Gate 2b.
+Shifting data ramps to alternative color bands requires altering secondary accent channels during Gate 2b art direction setup.
 
 ### The house style in numbers
 
-Some things are the same in every world. They are written as numbers in `skills/paperdolls-scene-craft/SKILL.md`:
+Base visual parameters configured across all environments within `skills/paperdolls-scene-craft/SKILL.md`:
 
 | lever | value |
 |---|---|
@@ -480,11 +476,11 @@ flowchart TB
     page --> BUILD
 ```
 
-Most of the page is the world's own code, written fresh each run from the recipes. The exception is the stage.
+Application files are generated per build run using skill recipes, with the exception of the core rendering stage.
 
 ### The stage
 
-`tools/stage/` holds the parts every world needs and no world should rewrite. They have one right answer, yet the first three runs each rebuilt them differently, and two of the three skipped the worker. It is about 700 lines of TypeScript, written against three.js r180, in four files:
+Shared renderer components reside in `tools/stage/`. Consisting of ~700 lines of TypeScript targeting three.js r180 across four core modules, this infrastructure provides standardized application mechanics:
 
 | file | contains |
 |---|---|
@@ -493,7 +489,7 @@ Most of the page is the world's own code, written fresh each run from the recipe
 | `snapshot.ts` | the URL parameters the capture tools use, and the "ready" signal |
 | `sim.ts` | the model worker: `serveModel` inside the worker, `SimClient` on the page |
 
-The stage decides nothing visual. Every colour, light strength and haze amount comes in from the art bible through two settings objects, `StageLook` and `PlinthLook`:
+The rendering stage isolates structural engine code from visual styling. Visual parameters import directly from art bible definitions through structured configuration objects (`StageLook` and `PlinthLook`):
 
 ```ts
 const stage = createStage(canvas, {
@@ -505,11 +501,11 @@ const stage = createStage(canvas, {
 });
 ```
 
-An earlier version of Paperdolls shipped a kit of buildings and materials, and every world was capped at the kit's quality. The stage avoids that by owning no geometry and no materials.
+Decoupling renderer logic from model geometry allows custom asset generation for each environment without reliance on static asset libraries.
 
 ### How a frame is drawn
 
-Each frame goes through a fixed sequence of passes. A pass draws the scene, or an image of it, into an off-screen buffer that the next pass reads.
+Render passes execute sequentially using off-screen framebuffers:
 
 ```mermaid
 flowchart LR
@@ -521,7 +517,7 @@ flowchart LR
     OUT["output<br/>(tone mapping, sRGB)"] --> SCREEN[screen]
 ```
 
-The haze needs a word of explanation. With an orthographic camera there is no perspective, so ordinary fog barely changes from front to back. The stage fades the upper part of the frame toward the horizon colour instead, which the eye reads as distance. The amount depends on zoom: 0.10 at street level, 0.28 at neighbourhood, 0.40 at overview.
+Orthographic projection lacks perspective-based depth falloff. To simulate spatial depth, upper viewport regions blend gradually into horizon sky tones, scaling haze intensity based on active zoom levels (0.10 street, 0.28 neighbourhood, 0.40 overview).
 
 ### The camera
 
@@ -544,7 +540,7 @@ The haze needs a word of explanation. With an orthographic camera there is no pe
             S     camera
 ```
 
-The camera is orthographic: parallel lines stay parallel and nothing shrinks with distance, as in a classic city builder. One number, the view width in metres, drives everything that changes with zoom: ink width, haze, the ambient occlusion radius, the shadow area and which details are drawn.
+Orthographic rendering maintains parallel lines across all distance scales. Viewport width in meters governs scale-dependent rendering values, including outline thickness, haze density, ambient occlusion radius, shadow map bounds, and geometric detail levels.
 
 | shot | view width | what it must show |
 |---|---|---|
@@ -552,13 +548,11 @@ The camera is orthographic: parallel lines stay parallel and nothing shrinks wit
 | neighbourhood (the opening shot) | about 220 m | window rhythm, pavements, tree canopies, moving traffic |
 | street | about 62 m | framed windows, doors and shopfronts, people, lamps, benches, the signature motif |
 
-The overview fits the boundary as it appears on screen at the current angle, so the city fills the frame whichever way it is rotated. Before the stage, each run wrote its own fit; in one of them Jette filled 16% of the frame.
-
-Controls: drag to pan, scroll or pinch to zoom around the pointer, A/D and the arrow keys to pan, W/S to zoom, Q and E to rotate, F to fit. Camera moves ease over 250–450 ms, and happen instantly when the viewer has asked their system for reduced motion.
+Overview framing fits the perimeter bounds based on current rotation angles. Camera interactions support cursor-centered zooming, panning (drag, WASD, arrows), and stepped rotations (Q/E). Motion easing transitions run across 250–450 ms and disable automatically when system-level reduced motion preferences are detected.
 
 ### The snapshot contract
 
-The review tools need to load a page and get the same picture every time. So every page understands these URL parameters:
+Automated testing tools interface with generated web pages via URL parameters:
 
 | parameter | effect |
 |---|---|
@@ -584,11 +578,11 @@ sequenceDiagram
     Tool->>Tool: screenshot
 ```
 
-When the URL gives no `t`, the page picks the tick where the roof variable is most varied. For a number that is the widest spread between quartiles; for a state such as none/partial/done, the most even mix of states. A frame where every roof is the same colour shows nothing.
+If the parameter `t` is omitted, the application evaluates model frames and selects the tick exhibiting maximum variance across roof data variables (measured via interquartile spread or discrete state distribution).
 
 ### Getting the stage into a world
 
-The stage is copied into each world rather than shared, so that a world's snapshot contains exactly the stage it was built with.
+Stage code imports into individual world projects as isolated local files to lock snapshot behavior to the build version.
 
 ```mermaid
 flowchart LR
@@ -605,15 +599,15 @@ node tools/stage/vendor.mjs worlds/<name>           # create the page project an
 node tools/stage/vendor.mjs worlds/<name> --check   # confirm the copy is unedited
 ```
 
-To change the stage, edit `tools/stage/`, bump its `VERSION` file and copy it into the worlds that want the change.
+Updates to stage logic modify source files in `tools/stage/`, increment `VERSION`, and propagate to target world directories via vendor commands.
 
 ## 10. The world's own scene code
 
-Everything you judge with your eyes is written per world from the recipes in `skills/paperdolls-scene-craft/recipes/`. Two worlds share techniques, not code, so neither is capped at the quality of a shared kit.
+Visual elements build from procedural recipes in `skills/paperdolls-scene-craft/recipes/`. Implementations remain isolated within individual world folders without relying on shared runtime styling classes.
 
 ### Build order
 
-The agent builds in a fixed order and checks the picture after each step. Problems with light and value are cheap to fix early and expensive once facades exist.
+Scene generation follows a sequential execution pipeline, evaluating intermediate outputs at each stage:
 
 ```mermaid
 flowchart TB
@@ -642,9 +636,9 @@ flowchart TB
 | `camera.md` | the stage's camera, and choosing what the shots frame |
 | `performance.md` | draw-call and triangle budgets, instancing, level of detail |
 
-### An example: long terraces
+### Terraced Housing Segmentation
 
-Real maps throw up problems a grid never has. A row of terraced houses is often mapped as one footprint 40 to 120 metres long. Drawn as one building with one roof, it looks like a barracks. The buildings recipe splits it first:
+OpenStreetMap frequently represents continuous terraced housing blocks as single contiguous polygons spanning 40 to 120 meters. Rendering these directly produces uniform, repetitive geometry. The building recipe splits contiguous footprints into distinct sub-plots prior to mesh generation:
 
 ```text
 one OSM footprint, 62 m long
@@ -656,19 +650,19 @@ one OSM footprint, 62 m long
 split into plots of 5–7.5 m along the street
 ┌──────┬──────┬───────┬──────┬──────┬───────┬──────┬──────┬───┐
 │      │      │       │      │      │       │      │      │   │
-└──────┴──────┴───────┴──────┴──────┴───────┴──────┴──────┴───┘
+└──────┴──────┴───────┴──────┴──────┴───────┴──────┴──────┴───┐
  each plot gets its own wall colour, door and ground floor;
  eave height steps every 1–3 plots; 30–50% get a dormer;
  chimneys sit on the party walls
 ```
 
-All the plots still belong to the one original building, so they show the same data value and highlight together on hover.
+Sub-plots retain parent metadata associations to preserve uniform data overlay rendering and hover states across the original entity footprint.
 
-The same recipe cleans ragged footprints first (OpenStreetMap walls often arrive as dozens of 1-metre segments), and sets rules for picking and drawing a landmark: a church with nave, tower and spire, a town hall with a clock tower, a station hall on the railway.
+The recipe also simplifies dense vertex boundaries (resolving high-density 1-meter polygon segments) and formats landmark structures, such as churches, municipal halls, and transit terminals.
 
-### Data in the world
+### Data Visualization Overlays
 
-The roof variable is not painted over whole roofs, which would turn the city into a heat map. The normal view shows it as accents. The data lens, toggled with `L`, shows it fully.
+In default rendering mode, roof data fields apply selectively to structural accents to preserve overall scene contrast. Toggling the data lens (`L`) renders raw data values across all roof surfaces at full intensity.
 
 ```text
 normal view                            data lens (L)
@@ -679,13 +673,13 @@ normal view                            data lens (L)
 │ ▯ │                                  │ ▯ │
 ```
 
-Missing data is a named state, drawn as a neutral colour with a 45° hatch. It never borrows the low end of the ramp, because "no data" and "zero" mean different things.
+Missing data attributes display as a neutral grey value with a 45° hatch pattern, keeping unrecorded fields visually distinct from zero values.
 
-Structural readings draw a variable into the building itself: a pennant on the roof, scaffolding that rises as work proceeds, cladding that climbs storey by storey. A mark such as a pennant goes on the exception. If more than 30% of buildings would carry one, the page marks the minority instead or leaves it to the lens.
+Structural indicators encode specific variables directly into building geometry—such as roof flags, dynamic scaffolding, or floor-by-floor wall cladding. High-frequency metrics exceeding 30% spatial density invert to highlight minority states or yield rendering priority to the data lens.
 
 ## 11. The interface
 
-The panels are built with Mantine, a React component library. The layout is fixed so every world reads the same way:
+The interface builds on Mantine (a React component framework) using a standardized structural layout across all environments:
 
 ```text
 ┌─────────────────────────────────────────────────────┬───────────────┐
@@ -703,18 +697,18 @@ The panels are built with Mantine, a React component library. The layout is fixe
                                    assumptions, model version, raw data export
 ```
 
-- The sidebar holds only what you can change.
-- The bottom dock holds what the model reports. The main chart is the largest data object on the page.
-- The impact view draws the causal graph you confirmed at Gate 5, and nothing else.
-- The analyst drawer is for people who want to check the work: the parity log, where every number came from, what was guessed.
+- The control sidebar manages user inputs, parameters, and preset scenario selections.
+- The bottom dock displays live model metrics, simulation control tools, and primary chart outputs.
+- The impact view visualizes confirmed causal graphs established during Gate 5 setup.
+- The slide-out analyst drawer exposes verification metrics, including parity logs, data provenance, assumptions, model versions, and CSV exports.
 
-A parameter change starts a new run from tick 0 with the same seed. When a model declares no interventions, the scenarios are named sets of parameters, and the page presents them as comparisons, not as actions taken mid-run.
+Modifying parameter inputs reinitializes execution at tick 0 using the set seed value. For models without mid-run intervention routines, scenarios present as static parameter comparison profiles.
 
 ## 12. Checking the work
 
 ### The beauty review
 
-Every model draws a city differently, and models grade their own pictures too kindly. In the first Brussels test both cheaper models scored themselves 4 out of 5 on every criterion, while their pictures were visibly below the exemplar. The review is built around that.
+Visual evaluation uses automated screenshot verification tools combined with an isolated evaluation agent to ensure consistent grading standards against benchmark exemplars.
 
 ```mermaid
 flowchart TB
@@ -731,7 +725,7 @@ flowchart TB
     SC -->|"none worse, average ≥ 3.8, no FLAG"| DONE[pass]
 ```
 
-`review.py pack` measures what a script can measure, so the reviewer doesn't have to:
+Quantitative metrics captured via `review.py pack`:
 
 | check | what it catches | how |
 |---|---|---|
@@ -742,13 +736,13 @@ flowchart TB
 | flat patches | bare ground or a land use with no surface | the largest connected patch of near-identical colour |
 | motion | nothing moving on the streets | pixels that change across the clip frames |
 
-Each is compared with the exemplar, and anything that falls short prints a `FLAG`. The reviewer looks at one board image (two at Gate 7), never the individual screenshots. A FLAG caps its criterion at "worse": the reviewer may explain a measured problem but cannot overrule it.
+Automated script failures output explicit `FLAG` markers, which cap the corresponding evaluation score to "worse". The evaluation agent reviews single consolidated board images (`board.png`, `extras.png`) containing direct visual comparisons against reference benchmarks.
 
-The ten criteria are value structure, palette harmony, data restraint, silhouette and skyline, facade detail, street and ground, life, light and depth, edge and framing, and fidelity to the art bible. The bar is the exemplar, `reference/exemplars/real-nw-ashford`, which you accepted as good enough. It averages 3.8. A world passes when no criterion is worse than the exemplar's, the average is at least 3.8, and nothing is flagged. Gate 4 allows one round; Gate 7 allows three, and after that the agent reports what is left and you decide.
+The evaluation criteria cover value structure, palette harmony, data restraint, silhouette/skyline, facade detail, street/ground, life elements, lighting/depth, framing, and art bible fidelity. Targets benchmark against `reference/exemplars/real-nw-ashford` (mean score 3.8). Passing requires no sub-benchmark scores, zero script `FLAG` entries, and an overall mean score ≥ 3.8. Gate 4 permits one evaluation iteration; Gate 7 permits up to three iterations.
 
-### The interface and honesty rules
+### Interface rules
 
-`reference/ui-rules/paperdolls-gates/` holds ten blocking checks, run at Gate 7:
+Gate 7 executes ten automated validation rules defined in `reference/ui-rules/paperdolls-gates/`:
 
 | gate | rule |
 |---|---|
@@ -763,9 +757,9 @@ The ten criteria are value structure, palette harmony, data restraint, silhouett
 | G9 | keyboard access, visible focus, reduced motion, readable contrast |
 | G10 | nothing is fetched from the network when the page is viewed |
 
-After those, a craft pass in `reference/ui-rules/` checks spacing, type, colour and charts.
+Subsequent craft passes evaluate UI spacing, typography, palette usage, and chart layouts.
 
-### Every check, by gate
+### Verification Matrix by Gate
 
 | when | check | tool |
 |---|---|---|
@@ -778,7 +772,7 @@ After those, a craft pass in `reference/ui-rules/` checks spacing, type, colour 
 
 ## 13. Getting better between runs
 
-Every run writes `skill-gaps.md`: each time a skill was unclear, wrong, missing a file or forced a guess, along with what the agent did about it. After a batch of runs we read them side by side.
+Build executions log operational bottlenecks, missing references, and ambiguous instructions to `skill-gaps.md`. Completed logs are analyzed across runs to refine framework tools and guidelines.
 
 ```mermaid
 flowchart LR
@@ -793,17 +787,17 @@ flowchart LR
     RULE --> NEXT
 ```
 
-The first batch was three runs of the Jette retrofit model, in November 2026. All three produced a working world with NetLogo parity, and their 81 skill-gap entries produced the current version:
+Initial test runs of the Jette retrofit model yielded standard updates that shaped the current platform architecture:
 
-- the stage, after each run rebuilt the camera and pipeline differently;
-- the slimmer review, built around one board and a separate reviewer, after self-grading turned out to be unreliable;
-- an ingest that keeps the boundary, the railways and finer land cover, after every run worked these out by hand;
-- the recipes for terraces, ragged footprints and landmarks;
-- rules for questions every run answered for itself: parity scope on a real map, scenarios for a model with no interventions, places kept in a table, marks on the exception.
+- Standardizing the `tools/stage/` framework to eliminate divergent camera and rendering pipeline implementations across builds.
+- Refactoring visual evaluations around single consolidated image boards and isolated reviewer contexts.
+- Automating geographic clipping, rail extraction, and land-use parsing directly within `tools/ingest`.
+- Writing explicit recipes for terrace splitting, boundary segment reduction, and landmark rendering.
+- Defining strict guidelines for edge cases: geographic parity bounds, static model scenario representations, spatial binding of tabular records, and minority data marking.
 
 ## 14. Running it yourself
 
-You need Python 3, Node 20 or later, a Chromium-family browser for the screenshots and frame-rate test, and NetLogo 7.0.4 for parity (in `tools/NetLogo` or wherever `NETLOGO_HOME` points). Without NetLogo everything except Gate 6 still works.
+Environment prerequisites include Python 3, Node 20+, a Chromium-based browser (for screenshot rendering and FPS benchmarking), and NetLogo 7.0.4 (located via `NETLOGO_HOME` or placed within `tools/NetLogo`). Omitting NetLogo bypasses Gate 6 parity checking while leaving all other build stages fully functional.
 
 ```bash
 python3 -m venv .venv
@@ -811,18 +805,18 @@ python3 -m venv .venv
 .venv/bin/python tools/check-env.py
 ```
 
-Then start your agent in the repository and tell it to read `skill.md` and run the pipeline on a model in `netlogomodels/`. It will ask you questions one at a time. The three Jette runs each took between one and a half and two hours.
+To run an interactive build, initialize an agent within the repository, load `skill.md`, and target a NetLogo model file inside `netlogomodels/`. The agent prompts for gate decisions sequentially throughout execution.
 
-You can also run it unattended by giving the agent a brief with your answers to the gate questions written out. The DeepSeek and Inkling Jette worlds were made that way. The brief has to say what to do when a question isn't covered (take the skill's recommendation and log it), and has to forbid edits outside the world's folder.
+For unattended batch generation, provide a configuration brief containing pre-formulated responses to gate decisions. Unattended configurations must define explicit fallback behaviors (e.g., accepting default skill recommendations while logging entries) and restrict file operations exclusively to target world directories.
 
 ## 15. What it will not do
 
-- Invent data. The model is the source of truth. A building only changes because the model says so.
-- Hide a guess. Storeys nobody measured, homes inferred from building size, the colours themselves: all of it is labelled.
-- Draw identity. People are paper dolls, in one neutral tone, with no skin, hair or other identity signals. That is where the name comes from.
-- Use a red-to-green scale, for anything.
-- Need the internet to view. No fonts, CDNs or tracking at view time.
-- Pass its own work. 
+- Fabricate data variables. State modifications occur strictly when driven by underlying model outputs.
+- Conceal heuristic fallbacks. Assumed heights, inferred building usage, and synthetic palette allocations are logged and labeled.
+- Render demographic identity markers. Pedestrian entities use unified, neutral paper doll geometries.
+- Use red-to-green color ramps under any configuration.
+- Require external network access during client viewing. Assets, fonts, and scripts compile completely offline.
+- Allow self-approval of build artifacts. Gates require explicit user sign-off, and visual reviews execute via independent sub-agents.
 
 ## 16. Glossary
 
