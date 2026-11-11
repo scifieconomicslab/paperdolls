@@ -4,9 +4,9 @@
 
 ![screenshot](docs/screenshot.jpg)
 
-Paperdolls is a toolbox for turning NetLogo agent-based models into interactive isometric city-builder simulations. It converts a Netlogo ABM into a single offline HTML file built with three.js and Mantine.
+Paperdolls is a toolbox for turning NetLogo agent-based models into interactive isometric city-builder simulations. It converts a [NetLogo](https://ccl.northwestern.edu/netlogo/) ABM into a single offline HTML file built with [three.js](https://threejs.org) and [Mantine](https://mantine.dev).
 
-This world available at: worlds/brussels-sonnet/visual/index.html
+This world is available at [worlds/brussels-sonnet/visual/index.html](worlds/brussels-sonnet/visual/index.html)
 
 This simulation is interactive and runs in a browser. When a household in the model decides to insulate its home, that building changes on screen. Cars and people move through the streets. You can press play, change a policy, and watch the neighbourhood respond over the years.
 
@@ -24,7 +24,7 @@ These visual metaphors are readily found in the field of isometric citybuilding 
 
 ![pharaoh](docs/pharaoh.jpg)
 
-Unfortunately, building an engine for the Lab at this stage is difficult. We have to be able to experiment with alternate economies and prototyping radical ideas. Game engines and their hardcoded rules mean that we would either have to laboriously create the one engine that can emulate everything possible, a la Dwarf Fortress (hyperlink: https://youtu.be/VAhHkJQ3KgY) or converge on some universal meta-grammar or Turing machine for all economics. 
+Unfortunately, building an engine for the Lab at this stage is difficult. We have to be able to experiment with alternate economies and prototyping radical ideas. Game engines and their hardcoded rules mean that we would either have to laboriously create the one engine that can emulate everything possible, a la [Dwarf Fortress](https://youtu.be/VAhHkJQ3KgY) or converge on some universal meta-grammar or Turing machine for all economics. 
 
 In the meantime, the slightest "what if we did x differently" means a total rebuild and much frustration, akin to building the Sistine chapel while someone is carting away the foundation. Paperdolls is an attempt to solve this.
 
@@ -39,17 +39,17 @@ You can think of Paperdolls as AI-driven factory for building self-contained sim
 ![dashboard](docs/dashboard.jpg)
 
  - Structured reference data: palettes, building families, schema (Roughly 13%)
- - Code for processing OSM data and NetLogo
+ - Code for processing [OpenStreetMap](https://www.openstreetmap.org) data and NetLogo
  - Code for staging, rendering, camera and viewport controls
  - Code for testing the whole lot at each stage, like do rail lines clip through buildings? does this render smoothly on the browser?
 
-Paperdolls has harness-like components that steer an AI agent into reading your your Netlogo file, converting it into Typescript, testing parity, and then reasoning through how you want the simulation to be visually represented. It has tooling to download Netlogo and real-world reference data from OpenStreetMaps. 
+Paperdolls has harness-like components that steer an AI agent into reading your NetLogo file, converting it into TypeScript, testing parity, and then reasoning through how you want the simulation to be visually represented. It has tooling to download NetLogo and real-world reference data from [OpenStreetMap](https://www.openstreetmap.org). 
 
 ![neighborhood](docs/neighborhood.jpg)
 
 It has visual design guides that force an agent to examine its creation to ensure that it meets a consistent visual standard. It has some components of a lightweight game engine (like a standardized renderer) so we don't have to reinvent the wheel each time.
 
-When an agent (Claude Code, Command Code, OpenChamber, Hermes) uses Paperdolls (using skill.md), it effectively turns into a factory for producing simulation engines. 
+When an agent ([Claude Code](https://claude.com/claude-code), Command Code, OpenChamber, Hermes) uses Paperdolls (using [skill.md](skill.md)), it effectively turns into a factory for producing simulation engines. 
 
 Step by step, asking questions and the approval of a human at each stage, it guides an AI model to:
 
@@ -70,13 +70,13 @@ Each new world it outputs is thus a self-contained simulation engine, being abou
 
 Because we also have lots of explicit logging and reporting baked in, every run also becomes data for improving the next batch of runs.
 
-As a result, paperdolls is flexible: you can use it to simulating housing in Brussels or the collapse of a bank in Westeros. 
+As a result, paperdolls is flexible: you can use it to simulate housing in Brussels or the collapse of a bank in Westeros. 
 
-To read the manual, see paperdolls.md. 
+To read the manual, see [paperdolls.md](paperdolls.md). 
 
 ## What a run looks like
 
-You start the agent on `skill.md` and hand it a NetLogo model. From there it works through eight "gates". At each, it stops at each one for your answer:
+You start the agent on [`skill.md`](skill.md) and hand it a NetLogo model. From there it works through eight "gates". At each, it stops at each one for your answer:
 
 1. Model brief. It reads the model and proposes which sliders become controls and which outputs go on the dashboard.
 2. World record. You name the world and describe it in a paragraph. 
@@ -89,7 +89,7 @@ You start the agent on `skill.md` and hand it a NetLogo model. From there it wor
 
 ## What you get
 
-Each world lives in `worlds/<name>/`:
+Each world lives in [`worlds/<name>/`](worlds/) (for example [`worlds/brussels-sonnet/`](worlds/brussels-sonnet/)):
 
 - `<name>.md`: the world record, with the description, every decision and the attribution.
 - `art-bible.md`: what the world should look like.
@@ -101,20 +101,20 @@ Each world lives in `worlds/<name>/`:
 
 ## Updates
 
-- v 0.11 (Nov 11, 2026): improved rendering pipeline after observing failure modes and outputs of Deepseek 4.1 Flash and Inklin v2 Small Free.
+- v 0.11 (Nov 11, 2026): improved rendering pipeline after observing failure modes and outputs of DeepSeek 4.1 Flash and Inkling v2 Free.
 
 ## Models and agents
 
 These are runs for which I've verified the results and collected the interaction metadata:
 
 **Model: Claude 5.5 Sonnet, via Claude Desktop**
-Verdict: Excellent. About 1.5 hours of overall processing, does not go over the 5-hour limit window of Anthropic's $20 plan. worlds/conformance and worlds/brussels-sonnet are Sonnet worlds. A specialty of Sonnet is that it automatically gets clickable buildings correct.
+Verdict: Excellent. About 1.5 hours of overall processing, does not go over the 5-hour limit window of [Anthropic](https://www.anthropic.com)'s $20 plan. [worlds/conformance](worlds/conformance/) and [worlds/brussels-sonnet](worlds/brussels-sonnet/) are Sonnet worlds. A specialty of Sonnet is that it automatically gets clickable buildings correct.
 
-**Model: Inkling v2 Free, via OpenCode**
+**Model: Inkling v2 Free, via [OpenCode](https://opencode.ai)**
 Verdict: Slightly messier than Sonnet 5.5, but very good for a free model. Ran into
-_Opencode failed to send message with error: Upstream request failed: [airlock_error] inlined media_
-removed some of the generated png files via file manager and used another model (LongCat) to run /compact on the session before resuming with Inkling Free. See worlds/brussels-inkling.
+`Opencode failed to send message with error: Upstream request failed: [airlock_error] inlined media`
+removed some of the generated image files via file manager and used another model (LongCat) to run /compact on the session before resuming with Inkling Free. See [worlds/brussels-inkling](worlds/brussels-inkling/).
 
 **Model: DeepSeek 4.1 Flash, via Command Code**
-Verdict: Gets by with zero issues. Comparable to Sonnet; slightly less quality in the fine details. See worlds/brussels-deepseek. Seems to be slightly better at interface design, imputing variable names, but often fails the graph.
+Verdict: Gets by with zero issues. Comparable to Sonnet; slightly less quality in the fine details. See [worlds/brussels-deepseek](worlds/brussels-deepseek/). Seems to be slightly better at interface design, imputing variable names, but often fails the graph.
 
