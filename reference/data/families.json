@@ -1,0 +1,1071 @@
+{
+  "note": "Machine-readable world-family menu from ../families.md and ../family-packs.json. The real family is the 12 authored palette families; the other menus are proposals, and only roman, high-pastoral and cyberpunk currently have a palette.",
+  "world_families": {
+    "real": {
+      "palette_families": [
+        "nw",
+        "uk",
+        "ws",
+        "md",
+        "ce",
+        "sa",
+        "se",
+        "ea",
+        "me",
+        "sb",
+        "la",
+        "na"
+      ],
+      "status": "authored",
+      "structure_kinds": [
+        "building",
+        "wall",
+        "ruin",
+        "habitat",
+        "infrastructure",
+        "other"
+      ],
+      "building_archetypes": [
+        "terrace",
+        "shophouse",
+        "block",
+        "villa",
+        "tower",
+        "shed"
+      ],
+      "fleet_regions": [
+        "nw",
+        "uk",
+        "ws",
+        "md",
+        "ce",
+        "sa",
+        "se",
+        "ea",
+        "me",
+        "sb",
+        "la",
+        "na"
+      ],
+      "people_mix": "catalogue",
+      "tree_regions": [
+        "nw",
+        "uk",
+        "ws",
+        "md",
+        "ce",
+        "sa",
+        "se",
+        "ea",
+        "me",
+        "sb",
+        "la",
+        "na"
+      ],
+      "treatments": [
+        "band",
+        "scaffold",
+        "wrap",
+        "panels",
+        "flag",
+        "tint",
+        "outline",
+        "overlay",
+        "segments"
+      ]
+    },
+    "historical": {
+      "genres": [
+        {
+          "id": "roman",
+          "label": "Roman Empire",
+          "status": "authored palette proposal",
+          "palette": "roman",
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored; the catalogue has no cart or litter class yet",
+          "people_mix": "catalogue",
+          "tree_mix": "md",
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "byzantine",
+          "label": "Byzantine Empire",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "ottoman",
+          "label": "Ottoman Empire",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "persian",
+          "label": "Persian empires",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "mughal",
+          "label": "Mughal Empire",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "han",
+          "label": "Han / Tang China",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "edo",
+          "label": "Edo Japan",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "khmer",
+          "label": "Khmer Empire",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "mesoamerican",
+          "label": "Aztec / Maya",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "andean",
+          "label": "Inca",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "egyptian",
+          "label": "Ancient Egypt",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "sahelian",
+          "label": "Mali / Songhai",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "norse",
+          "label": "Norse",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "srivijayan",
+          "label": "Srivijaya / Majapahit",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        }
+      ]
+    },
+    "fantasy": {
+      "genres": [
+        {
+          "id": "high-pastoral",
+          "label": "high fantasy",
+          "status": "authored palette proposal",
+          "palette": "high-pastoral",
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored; the catalogue has no cart or horse class yet",
+          "people_mix": "catalogue",
+          "tree_mix": "nw",
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "dark-gothic",
+          "label": "dark fantasy",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "desert-nights",
+          "label": "Arabian Nights",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "wuxia",
+          "label": "eastern fantasy",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "nordic-frost",
+          "label": "Nordic fantasy",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "elven-tropical",
+          "label": "tropical fantasy",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "dwarven-volcanic",
+          "label": "volcanic fantasy",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "necropolis",
+          "label": "undead",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "fae-bioluminescent",
+          "label": "fae",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "steampunk",
+          "label": "gaslamp / steampunk",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "sunken",
+          "label": "flooded",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "arcane-crystal",
+          "label": "crystal / arcane",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "sky-isles",
+          "label": "floating",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "wasteland",
+          "label": "barbarian",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "wall",
+            "ruin",
+            "habitat"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        }
+      ]
+    },
+    "scifi": {
+      "genres": [
+        {
+          "id": "cyberpunk",
+          "label": "neon cyberpunk",
+          "status": "authored palette proposal",
+          "palette": "cyberpunk",
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored; the catalogue has no hover car or drone class yet",
+          "people_mix": "catalogue",
+          "tree_mix": "nw",
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "brutalist",
+          "label": "brutalist / industrial",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "solarpunk",
+          "label": "solarpunk",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "desert-scifi",
+          "label": "desert colony",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "orbital",
+          "label": "orbital station",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "alien-bioluminescent",
+          "label": "alien biosphere",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "post-apocalyptic",
+          "label": "post-apocalyptic",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "retro-futurist",
+          "label": "atompunk",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "arctic",
+          "label": "ice world",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "corporate",
+          "label": "corporate clean",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "aquatic",
+          "label": "underwater",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "megastructure",
+          "label": "megastructure",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "biopunk",
+          "label": "organic / biopunk",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        },
+        {
+          "id": "space-western",
+          "label": "frontier",
+          "status": "not-authored",
+          "palette": null,
+          "structure_kinds": [
+            "building",
+            "habitat",
+            "infrastructure"
+          ],
+          "fleet": [],
+          "fleet_status": "not authored",
+          "people_mix": "catalogue",
+          "tree_mix": null,
+          "treatments": [
+            "mark",
+            "overlay",
+            "replacement",
+            "growth",
+            "state",
+            "extent"
+          ]
+        }
+      ]
+    }
+  }
+}

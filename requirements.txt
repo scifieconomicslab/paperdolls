@@ -1,0 +1,5 @@
+numpy>=1.26
+pillow>=10
+pytest>=8
+jsonschema>=4
+shapely>=2

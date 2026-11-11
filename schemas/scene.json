@@ -1,0 +1,462 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "scene.json",
+  "title": "paperdolls scene.json",
+  "description": "The output of tools/ingest or tools/construct; the renderer's input. Shape is enforced; vocabulary is OPEN. A scene declares structures by kind and a roles map, not by a closed archetype enum. Coordinates are metres. A scene must carry at least one of `structures` or the legacy `buildings`.",
+  "type": "object",
+  "required": [
+    "area",
+    "roads",
+    "landuse",
+    "trees"
+  ],
+  "anyOf": [
+    {
+      "required": [
+        "structures"
+      ]
+    },
+    {
+      "required": [
+        "buildings"
+      ]
+    }
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "area": {
+      "type": "object",
+      "required": [
+        "name",
+        "source",
+        "rotation_deg",
+        "extent_m",
+        "family",
+        "palette"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "osm",
+            "constructed"
+          ]
+        },
+        "osm_relation": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "attribution": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "lat",
+            "lon"
+          ],
+          "properties": {
+            "lat": {
+              "type": "number"
+            },
+            "lon": {
+              "type": "number"
+            }
+          }
+        },
+        "rotation_deg": {
+          "type": "number"
+        },
+        "north_on_screen_deg": {
+          "type": "number"
+        },
+        "extent_m": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "generated": {
+          "type": "string"
+        },
+        "ingest_version": {
+          "type": "string"
+        },
+        "family": {
+          "type": "string",
+          "description": "world family id; open. Suggested: real, historical, fantasy, scifi"
+        },
+        "palette": {
+          "type": "string",
+          "description": "palette family / genre id; open"
+        },
+        "boundary": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "number"
+            }
+          },
+          "description": "the clip polygon (boundary relation and/or bbox) in scene metres: the world's edge for the plinth, the ground and the camera fit. Absent when nothing was clipped."
+        }
+      }
+    },
+    "structures": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/structure"
+      }
+    },
+    "buildings": {
+      "type": "array",
+      "description": "Legacy array; accepted when `structures` is absent. Building entries do not require a kind.",
+      "items": {
+        "$ref": "#/definitions/building"
+      }
+    },
+    "roads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "pts"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string",
+            "description": "open; suggested avenue, local, pedestrian, cycle, tramway"
+          },
+          "pts": {
+            "type": "array",
+            "items": {
+              "type": "array"
+            },
+            "minItems": 2
+          },
+          "tram": {
+            "type": "boolean"
+          },
+          "cycle": {
+            "type": "boolean"
+          },
+          "width": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "z": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "landuse": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "footprint"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "park | garden | water | square | rail | bare; open: the renderer maps known kinds and reports unknown ones"
+          },
+          "footprint": {
+            "type": "array",
+            "minItems": 3
+          },
+          "cover": {
+            "type": "string",
+            "description": "the finer surface (wood, scrub, grass, meadow, pitch, playground, cemetery, allotments, orchard, railway, brownfield, ...). Open; absent when nothing finer is known. Give each cover its own surface (nature-and-water)."
+          }
+        }
+      }
+    },
+    "trees": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 5,
+        "items": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          {
+            "type": "number"
+          }
+        ]
+      }
+    },
+    "terrain": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x0": {
+          "type": "number"
+        },
+        "y0": {
+          "type": "number"
+        },
+        "dx": {
+          "type": "number"
+        },
+        "dy": {
+          "type": "number"
+        },
+        "nx": {
+          "type": "integer"
+        },
+        "ny": {
+          "type": "integer"
+        },
+        "z": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "rails": {
+      "type": "array",
+      "description": "above-ground railway lines (rail, light_rail, narrow_gauge), cut to the boundary. Trams stay in roads.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "pts"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "pts": {
+            "type": "array",
+            "minItems": 2
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "building": {
+      "type": "object",
+      "description": "Legacy building entry: no kind required; the vocabulary stays open.",
+      "required": [
+        "id",
+        "footprint"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "footprint": {
+          "type": "array",
+          "minItems": 3
+        },
+        "kind": {
+          "type": "string"
+        },
+        "levels": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "archetype": {
+          "type": "string"
+        },
+        "roles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "residential": {
+          "type": "string"
+        },
+        "economic_class": {
+          "type": "string"
+        },
+        "economic_class_source": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "investor": {
+          "type": "boolean"
+        },
+        "area": {
+          "type": "number"
+        },
+        "centroid": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "height": {
+          "type": "number"
+        },
+        "levels_assumed": {
+          "type": "boolean"
+        },
+        "neighbours": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "osm": {
+          "type": "object"
+        },
+        "z": {
+          "type": "number"
+        }
+      }
+    },
+    "structure": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "footprint"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "description": "open; suggested building, wall, habitat, ruin, infrastructure, other"
+        },
+        "footprint": {
+          "type": "array",
+          "minItems": 3
+        },
+        "levels": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "archetype": {
+          "type": "string",
+          "description": "open grammar row; see reference/structure-grammar.md"
+        },
+        "roles": {
+          "type": "object",
+          "description": "surface -> material role; the renderer's colour contract. A new kind declares roles instead of a new enum value.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "residential": {
+          "type": "string",
+          "description": "open; suggested residential, probable, other"
+        },
+        "economic_class": {
+          "type": "string"
+        },
+        "economic_class_source": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "investor": {
+          "type": "boolean"
+        },
+        "area": {
+          "type": "number"
+        },
+        "centroid": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "height": {
+          "type": "number"
+        },
+        "levels_assumed": {
+          "type": "boolean"
+        },
+        "neighbours": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "osm": {
+          "type": "object"
+        },
+        "z": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,1058 @@
+<?xml version="1.0" encoding="utf-8"?>
+<model version="NetLogo 7.0.4" snapToGrid="false">
+  <code>;; =============================================================================
+;; The Great Retrofit v3 — NetLogo port (single file)
+;;
+;; Faithful port of v3/src/retrofit_v3 (Python) and its JavaScript port.
+;; Monthly household retrofit decisions by NPV and ability to finance, three
+;; ownership types (owner-occupied, condo with shared-parts vote, rental stub)
+;; and three delivery modes (rebate_market, passthrough, public_service).
+;;
+;; EVERY NUMBER IN THIS MODEL IS A PLACEHOLDER. The defaults make the structure
+;; run; nothing computed from them is a finding. See the Info tab.
+;;
+;; Timing within a month t (ticks = months):
+;;   1. rebates due this month arrive; loan payments fall due; bills saved accrue
+;;   2. snapshot of building adoption shares and canvassing pressure (nobody
+;;      reacts to a same-month decision; the order of agents is irrelevant)
+;;   3. each household that is not finished, can adopt, and is within its
+;;      horizon "considers" with a monthly chance; it evaluates its own part
+;;      (NPV + financing) and, if its building has a pending shared measure,
+;;      whether it supports it (also NPV + financing on its share)
+;;   4. in public_service mode, capacity slots (whole slots per month, remainder
+;;      carried, unused whole slots are lost) are rationed among candidates by a
+;;      fixed per-household draw
+;;   5. a shared measure passes in the first month its floor-area support
+;;      reaches the threshold, provided every owner can finance their share
+;;      (and, in public_service mode, ceil(units x shared_share) slots remain);
+;;      all owners then pay their share
+;;   6. monitors, plots and the map update
+;;
+;; All randomness goes through a mulberry32 PRNG ported from v3/common/rng.py
+;; (plus a stateless hash_uniform for per-agent, per-month draws, so changing a
+;; policy lever never reshuffles another household's draws). Deterministic
+;; given the seed. Iteration is always in unit order (who order), the same
+;; order the Python model uses.
+;; =============================================================================
+
+breed [ households household ]
+
+households-own [
+  uid             ; stable id, == who
+  bidx            ; building index (0 .. n-buildings - 1)
+  b-tenure        ; tenure of the household's building ("owner_occupied" | "condo" | "rental")
+  area            ; floor area, m2
+  income          ; euros / year
+  savings         ; euros, liquid
+  horizon         ; months the household expects to stay
+  queue-draw      ; fixed draw in [0,1) for the public-service queue
+  quintile        ; 1..5 over all units in the scene
+  free-hours      ; weekly free hours (time budget)
+  tax-left        ; tax capacity not yet used by a rebate
+  unit-base       ; base cost of the unit's own part (or of the whole retrofit)
+  shared-base     ; base cost of this unit's floor-area share of the shared measure
+  needs-shared    ; does this unit owe a share of a shared measure?
+  unit-done       ; own part paid?
+  shared-paid     ; share of the shared measure paid?
+  supporter       ; supports the pending shared measure (permanent)
+  complete?       ; all parts paid
+  paid-any        ; ever paid for any part
+  saving-frac     ; accumulated saved fraction (unit part + shared part)
+  paid-price      ; total price paid so far
+  paid-base       ; total base cost of parts paid so far
+  cash-net        ; cumulative net cash position
+  loans           ; list of [monthly payment  last month it falls due]
+]
+
+globals [
+  ;; --- building data, parallel lists indexed by building index ---
+  b-id b-tenure-l b-nuits b-floor b-needs-shared b-approved b-adopted b-areas
+  u-by-b          ; one list of unit agents per building
+  n-units
+  ;; --- aggregates ---
+  public-cost bills-saved price-sum base-sum n-complete votes-passed units-cannot-front
+  q-total q-price q-trans q-adopt
+  carry quota     ; fractional public-service slots carried / monthly slots
+  pending         ; list of [arrival month  unit uid  amount]
+  m-discount m-growth   ; monthly discount / energy-growth rates (fixed at setup)
+  rng-state
+  ;; --- series metrics (computed each tick) ---
+  adoption-by-quintile rebate-per-euro can-front-cost
+  cost-per-retrofit cost-parts-base cost-parts-markup
+  canvass-hours leisure-hours net-cash-by-quintile
+  shared-pending shared-approved
+  state-not-retrofitted state-partial state-retrofitted state-not-modelled
+  tenure-owner tenure-condo tenure-rental
+]
+
+;; ---------------------------------------------------------------------------
+;; PRNG: mulberry32 + hash_uniform, byte-compatible port of v3/common/rng.py
+;; Everything stays in [0, 2^32); NetLogo's `mod` is floored, like Python's.
+;; 32x32 -&gt; low-32-bit multiply is done in 16-bit limbs to avoid 64-bit overflow.
+;; ---------------------------------------------------------------------------
+
+;; NetLogo has no bitwise primitives, so `and`/`or` are done arithmetically
+to-report nl-bit-and [a b]
+  let result 0
+  let bit 1
+  let aa a
+  let bb b
+  while [ bit &lt; 4294967296 ] [
+    if aa = 0 or bb = 0 [ report result ]        ;; higher bits are 0 in both
+    if (aa mod 2 = 1) and (bb mod 2 = 1) [ set result result + bit ]
+    set aa int (aa / 2)
+    set bb int (bb / 2)
+    set bit bit * 2
+  ]
+  report result
+end
+
+to-report nl-bit-or [a b]                       ;; or(a,b) = a + b - and(a,b)
+  report a + b - nl-bit-and a b
+end
+
+to-report imul [a b]   ;; (a * b) mod 2^32
+  let a0 a mod 65536
+  let a1 int (a / 65536) mod 65536
+  let b0 b mod 65536
+  let b1 int (b / 65536) mod 65536
+  let lo a0 * b0
+  let mid (a0 * b1 + a1 * b0) mod 65536
+  report (lo + mid * 65536) mod 4294967296
+end
+
+to-report xor32 [a b]  ;; xor of non-negative 32-bit values, via arithmetic identity
+  report (a + b - 2 * (nl-bit-and a b)) mod 4294967296
+end
+
+to-report mix32 [h0]   ;; murmur3 fmix32 finaliser
+  let h h0 mod 4294967296
+  set h xor32 h int (h / 65536)          ;; h &gt;&gt; 16 (logical; h is non-negative)
+  set h imul h 2246822507                ;; 0x85EBCA6B
+  set h xor32 h int (h / 8192)           ;; h &gt;&gt; 13
+  set h imul h 3266489909                ;; 0xC2B2AE35
+  set h xor32 h int (h / 65536)
+  report h
+end
+
+to-report hash-uniform [s i j]   ;; stateless uniform in [0,1) keyed by (seed, i, j)
+  let h mix32 (xor32 (s mod 4294967296) (imul (i mod 4294967296) 2654435761))  ;; 0x9E3779B1
+  set h mix32 (xor32 h (imul (j mod 4294967296) 2246822507))
+  report h / 4294967296
+end
+
+;; mulberry32 generator (stateful), for the scene/population draws
+to-report rng-next-u32
+  set rng-state (rng-state + 1831565813) mod 4294967296   ;; 0x6D2B79F5
+  let t rng-state
+  set t imul (xor32 t int (t / 32768)) (nl-bit-or t 1)       ;; t ^ (t &gt;&gt; 15), t | 1
+  set t xor32 t ((t + imul (xor32 t int (t / 128)) (nl-bit-or t 61)) mod 4294967296)
+  report xor32 t int (t / 16384)                          ;; t ^ (t &gt;&gt; 14)
+end
+
+to-report rng-random
+  report rng-next-u32 / 4294967296
+end
+
+to-report rng-randint [n]                                  ;; integer in [0, n)
+  report int (rng-random * n)
+end
+
+to-report rng-gaussian                                     ;; Box-Muller, 2 uniforms, no cache
+  let u1 1.0 - rng-random                                  ;; (0, 1]
+  let u2 rng-random
+  report sqrt (-2.0 * ln u1) * cos (360.0 * u2)   ;; NetLogo cos takes DEGREES: 360 * u2 is 2*pi*u2 radians
+end
+
+to-report rng-lognormal [mu sigma]
+  report exp (mu + sigma * rng-gaussian)
+end
+
+to-report rng-uniform [lo hi]
+  report lo + (hi - lo) * rng-random
+end
+
+;; ---------------------------------------------------------------------------
+;; Pure economics
+;; ---------------------------------------------------------------------------
+
+to-report monthly-rate [annual]                            ;; compound-equivalent monthly rate
+  report (1.0 + annual) ^ (1.0 / 12.0) - 1.0
+end
+
+to-report annuity-pv [first-payment rate n-months growth]
+  ;; PV of a (growing) annuity paid at the end of months 1..n
+  if n-months &lt;= 0 or first-payment = 0.0 [ report 0.0 ]
+  let q (1.0 + growth) / (1.0 + rate)
+  if abs (q - 1.0) &lt; 1e-12 [ report first-payment / (1.0 + rate) * n-months ]
+  report first-payment / (1.0 + rate) * (1.0 - q ^ n-months) / (1.0 - q)
+end
+
+to-report npv-retrofit [monthly-saving n-months m-disc m-gr cash loan-pay loan-months rebate rebate-lag]
+  ;; NPV = PV(energy savings over horizon) + PV(rebate) - cash spent now - PV(loan payments)
+  let pv-savings annuity-pv monthly-saving m-disc n-months m-gr
+  let pv-rebate 0.0
+  if rebate &gt; 0.0 [ set pv-rebate rebate / (1.0 + m-disc) ^ rebate-lag ]
+  let pv-loan annuity-pv loan-pay m-disc loan-months 0.0
+  report pv-savings + pv-rebate - cash - pv-loan
+end
+
+to-report loan-payment [principal annual-rate months]      ;; level monthly annuity
+  if principal &lt;= 0 or months &lt;= 0 [ report 0.0 ]
+  let r monthly-rate annual-rate
+  if r = 0.0 [ report principal / months ]
+  report principal * r / (1.0 - (1.0 + r) ^ (- months))
+end
+
+to-report plan-financing [upfront liquid limit usable-share]
+  ;; savings first, remainder by loan; feasible iff the loan fits the limit
+  let usable max (list 0.0 liquid) * usable-share
+  let from-savings min (list usable upfront)
+  let loan upfront - from-savings
+  report (sentence from-savings loan (loan &lt;= limit + 1e-9))
+end
+
+to-report rebate-amount [cost rate tax-capacity refund-flag]
+  ;; non-refundable: min(rate*cost, tax capacity, cost); refundable: min(rate*cost, cost)
+  let gross max (list 0.0 (rate * cost))
+  if refund-flag [ report min (list gross cost) ]
+  report min (list (min (list gross (max (list 0.0 tax-capacity)))) cost)
+end
+
+to-report credit-limit-of [inc]
+  if credit-access = "none" [ report 0.0 ]
+  if credit-access = "open" [ report credit-loan-to-income * inc ]
+  ;; income_tested
+  report ifelse-value (inc &gt;= credit-income-threshold)
+    [ credit-loan-to-income * inc ] [ 0.0 ]
+end
+
+to-report loan-rate-of [inc]
+  report loan-rate + (ifelse-value (inc &lt; credit-income-threshold) [loan-rate-risk-premium] [0.0])
+end
+
+to-report energy-growth-annual
+  if energy-scenario = "flat"   [ report 0.0 ]   ;; PLACEHOLDER flat
+  if energy-scenario = "rising" [ report 0.03 ]  ;; PLACEHOLDER rising (default)
+  report 0.08                                     ;; PLACEHOLDER shock
+end
+
+;; Quote: what the household pays now, what the state pays, when.
+;; [eligible price household-upfront requires-financing state-pays-now rebate rebate-lag capacity-limited?]
+;; A household outside the means test buys on the market: full price with
+;; vendor margin, own financing, no subsidy, no public capacity.
+to-report quote-of [u base-cost]
+  let eligible (not means-test?) or ([quintile] of u &lt;= means-test-max-quintile)
+  if not eligible [
+    let price base-cost * (1.0 + vendor-margin)
+    report (sentence false price price true 0.0 0.0 0 false)
+  ]
+  if delivery-mode = "rebate_market" [
+    let price base-cost * (1.0 + vendor-margin)
+    let reb rebate-amount price deduction-rate [tax-left] of u refundable?
+    report (sentence true price price true 0.0 reb rebate-lag-months false)
+  ]
+  if delivery-mode = "passthrough" [
+    let price base-cost * (1.0 + vendor-margin)
+    report (sentence true price 0.0 false price 0.0 0 false)
+  ]
+  ;; public_service
+  let price base-cost * (1.0 + public-overhead)
+  report (sentence true price 0.0 false price 0.0 0 true)
+end
+
+;; Evaluate paying for a part (quote + financing + NPV).
+;; `false` if the household cannot finance it. Otherwise:
+;; [u eligible price household-upfront from-savings loan limit rate npv
+;;  state-pays-now rebate rebate-lag capacity-limited?]
+to-report evaluate [u base-cost frac t level]
+  let q quote-of u base-cost
+  let lim 0.0
+  let from-sav 0.0
+  let loan 0.0
+  let rate loan-rate-of [income] of u
+  if item 3 q [                       ;; requires financing
+    set lim credit-limit-of [income] of u
+    let plan plan-financing (item 2 q) [savings] of u lim savings-usable-share
+    if not item 2 plan [ report false ]
+    set from-sav item 0 plan
+    set loan item 1 plan
+  ]
+  let monthly-saving [area] of u * saving-per-m2-year / 12.0 * frac * level
+  let npv npv-retrofit monthly-saving ([horizon] of u - t) m-discount m-growth
+      from-sav (loan-payment loan rate loan-term-months) loan-term-months
+      (item 5 q) (item 6 q)
+  report (sentence u (item 0 q) (item 1 q) (item 2 q) from-sav loan lim rate npv
+                (item 4 q) (item 5 q) (item 6 q) (item 7 q))
+end
+
+;; candidate = evaluate record ++ [base-cost saved-fraction kind]
+to-report make-candidate [ev kind base frac]
+  report lput kind (lput frac (lput base ev))
+end
+
+to-report ownership-can-adopt [bi]
+  report (item bi b-tenure-l) != "rental"
+end
+
+to-report ownership-shared-parts [bi]        ;; condo with 2+ units
+  report (item bi b-tenure-l) = "condo" and (item bi b-nuits) &gt;= 2
+end
+
+;; weekly canvassing hours of a household: advocates in shared-parts
+;; buildings, limited by their free time
+to-report advocate? [u]
+  report [supporter] of u or [paid-any] of u
+end
+
+to-report spend-of [u]
+  if not advocate? u [ report 0.0 ]
+  if not ownership-shared-parts [bidx] of u [ report 0.0 ]
+  report min (list [free-hours] of u canvass-target-hours)
+end
+
+;; =============================================================================
+;; Setup
+;; =============================================================================
+
+;; synthetic building table (PLACEHOLDER rules) + scene derivation,
+;; deterministic given scene-seed
+to-report split-areas [k n gross]
+  let old-state rng-state
+  set rng-state int (hash-uniform scene-seed k 2 * 4294967296)
+  let raws []
+  let i 0
+  while [ i &lt; n ] [
+    set raws lput (1.0 + 0.2 * (2.0 * rng-random - 1.0)) raws   ;; PLACEHOLDER spread 0.2
+    set i i + 1
+  ]
+  set rng-state old-state
+  let s sum raws
+  report map [ r -&gt; gross * r / s ] raws
+end
+
+to build-scene
+  set b-id []  set b-tenure-l []  set b-nuits []  set b-floor []
+  set b-needs-shared []  set b-approved []  set b-adopted []  set b-areas []
+  set rng-state scene-seed mod 4294967296
+  let k 0
+  while [ k &lt; n-buildings ] [
+    let footprint rng-lognormal 4.7 0.4                 ;; PLACEHOLDER footprint (lognormal)
+    let storeys item (rng-randint 8) [1 2 2 3 3 4 5 6]   ;; PLACEHOLDER
+    let gross footprint * storeys * 0.8                  ;; PLACEHOLDER usable fraction
+    let nu max (list 1 round (gross / 80.0))            ;; PLACEHOLDER avg unit area 80 m2
+    if nu &gt; 1000 [ set nu 1000 ]                        ;; MAX_UNITS_PER_BUILDING
+    let share ifelse-value (nu = 1) [rental-share-single] [rental-share-multi]
+    let draw hash-uniform scene-seed k 1
+    let tenure "owner_occupied"
+    if draw &lt; share [ set tenure "rental" ]
+    if tenure != "rental" and nu &gt; 1 [ set tenure "condo" ]
+    ;; split gross area over units, deterministically, preserving the total
+    let areas split-areas k nu gross
+    set b-id lput (word "b" k) b-id
+    set b-tenure-l lput tenure b-tenure-l
+    set b-nuits lput nu b-nuits
+    set b-floor lput (sum areas) b-floor
+    set b-areas lput areas b-areas
+    set b-needs-shared lput (shared-measure? and tenure = "condo" and nu &gt;= 2) b-needs-shared
+    set b-approved lput false b-approved
+    set b-adopted lput 0 b-adopted
+    set k k + 1
+  ]
+end
+
+
+;; PLACEHOLDER household population, drawn in unit order (rng seeded by `seed`)
+to draw-population
+  set rng-state seed mod 4294967296
+  let k 0
+  while [ k &lt; n-buildings ] [
+    let nu item k b-nuits
+    let areas-list item k b-areas
+    let i 0
+    while [ i &lt; nu ] [
+      create-households 1 [
+        set uid who
+        set bidx k
+        set b-tenure item k b-tenure-l
+        set area item i areas-list
+        set income rng-lognormal 10.3 0.5                ;; PLACEHOLDER income distribution
+        let sav (rng-lognormal 0.0 0.8) * savings-scale * savings-months-of-income * income / 12.0
+        set savings sav
+        let yrs rng-uniform years-in-dwelling-min years-in-dwelling-max
+        set queue-draw rng-random
+        set horizon int round (yrs * 12.0)
+        set tax-left max (list 0.0 (0.25 * (income - 10000.0)))  ;; PLACEHOLDER flat tax + allowance
+        set unit-done false  set shared-paid false  set supporter false
+        set complete? false  set paid-any false
+        set saving-frac 0.0  set paid-price 0.0  set paid-base 0.0  set cash-net 0.0
+        set loans []
+        set needs-shared false  set unit-base 0.0  set shared-base 0.0
+        set quintile 0  set free-hours 0.0
+      ]
+      set i i + 1
+    ]
+    set k k + 1
+  ]
+  set n-units count households
+end
+
+to compute-quintiles
+  ;; rank of income over ALL units in the scene (rental included); ties by unit id
+  let order sort-by [[a b] -&gt;
+    ([income] of a &lt; [income] of b) or (([income] of a = [income] of b) and ([who] of a &lt; [who] of b))]
+    sort households
+  let n length order
+  let rank 0
+  foreach order [ u -&gt;
+    ask u [ set quintile (min (list 5 (1 + int (rank * 5 / n)))) ]
+    set rank rank + 1
+  ]
+end
+
+to compute-free-hours
+  ;; PLACEHOLDER: long hours at both ends of the income scale, shorter in the middle
+  foreach sort households [ u -&gt;
+    ask u [
+      let base max (list 0.0 (112.0 - 50.0 - item (quintile - 1) [42.0 38.0 36.0 40.0 48.0]))
+      let spread 1.0 + free-time-spread * (2.0 * hash-uniform seed uid 1073741825 - 1.0)
+      set free-hours max (list 0.0 (base * spread))
+    ]
+  ]
+end
+
+to prepare-costs
+  let k 0
+  while [ k &lt; n-buildings ] [
+    let floorv item k b-floor
+    let shared-total shared-share * cost-per-m2 * floorv
+    foreach (item k u-by-b) [ u -&gt;
+      ask u [
+        set needs-shared (item k b-needs-shared)
+        ifelse needs-shared [
+          set unit-base area * cost-per-m2 * (1.0 - shared-share)
+          set shared-base shared-total * area / floorv
+        ] [
+          set unit-base area * cost-per-m2
+        ]
+      ]
+    ]
+    set k k + 1
+  ]
+end
+
+to setup
+  clear-all
+  reset-ticks
+  clear-all-plots
+  ask patches [ set pcolor 3 ]
+  build-scene
+  draw-population
+  set u-by-b (map [ i -&gt; filter [ u -&gt; [bidx] of u = i ] sort households ] (range n-buildings))
+  compute-quintiles
+  compute-free-hours
+  prepare-costs
+  ;; aggregates
+  set q-total (sentence 0 0 0 0 0)
+  foreach sort households [ u -&gt;
+    let k [quintile] of u - 1
+    set q-total replace-item k q-total (item k q-total + 1)
+  ]
+  set q-price (sentence 0.0 0.0 0.0 0.0 0.0)
+  set q-trans (sentence 0.0 0.0 0.0 0.0 0.0)
+  set q-adopt (sentence 0 0 0 0 0)
+  set public-cost 0.0  set bills-saved 0.0  set price-sum 0.0  set base-sum 0.0  set n-complete 0
+  set pending []
+  set votes-passed 0
+  set units-cannot-front 0
+  set quota public-capacity * n-units / 12.0
+  set carry 0.0
+  set m-discount monthly-rate discount-rate
+  set m-growth monthly-rate energy-growth-annual
+  compute-series-metrics
+  color-buildings
+  refresh-plots
+end
+
+;; =============================================================================
+;; One month (one tick)
+;; =============================================================================
+
+to go
+  if ticks &gt;= horizon-months [ stop ]
+  let t ticks
+  let level (1.0 + m-growth) ^ t
+  ;; --- 1. cash arriving and leaving ---
+  cash-phase t
+  ;; bills saved accrue (only while the household expects to stay)
+  foreach sort households [ u -&gt;
+    if [saving-frac] of u &gt; 0.0 and t &lt; [horizon] of u [
+      let bill [area] of u * saving-per-m2-year / 12.0 * [saving-frac] of u * level
+      set bills-saved bills-saved + bill
+      ask u [ set cash-net cash-net + bill ]
+    ]
+  ]
+  ;; --- 2. snapshot: adoption shares and canvassing pressure read as they stood
+  ;;        at the start of the month
+  let adopted-snap b-adopted
+  let sh (sort households)
+  let spends (map spend-of sh)
+  let canv-tot (map [ i -&gt; 0.0 ] (range n-buildings))
+  let si 0
+  foreach sh [ u -&gt;
+    let s item si spends
+    set canv-tot replace-item [bidx] of u canv-tot (item [bidx] of u canv-tot + s)
+    set si si + 1
+  ]
+  ;; --- 3. considerations ---
+  let candidates []
+  let ui 0
+  foreach sh [ u -&gt;
+    let bi [bidx] of u
+    if (not [complete?] of u) and ownership-can-adopt bi and (t &lt; [horizon] of u) [
+      let my-spend item ui spends
+      let others max (list 0.0 ((item bi canv-tot) - my-spend))
+      let pressure min (list 1.0 (others / canvass-saturation-hours))
+      let achare-frac ifelse-value (item bi b-nuits &gt; 0) [ (item bi adopted-snap) / (item bi b-nuits) ] [ 0.0 ]
+      let base consider-prob-base
+      let prob base
+      if (item bi b-tenure-l) = "condo" [
+        let nb (ifelse-value (peer-effect?) [neighbour-boost] [0.0])
+        set prob min (list 1.0 (base + nb * achare-frac + canvass-boost * pressure))
+      ]
+      let draw hash-uniform seed [uid] of u t
+      if draw &lt; prob [
+        ;; (a) own part: NPV and financing must both pass
+        if not [unit-done] of u [
+          let frac (ifelse-value ([needs-shared] of u) [1.0 - shared-share] [1.0])
+          let kind (ifelse-value ([needs-shared] of u) ["unit"] ["whole"])
+          let ev evaluate u [unit-base] of u frac t level
+          if ev != false and (item 8 ev) &gt; 0.0 [   ;; NPV &gt; 0
+            set candidates lput (make-candidate ev kind [unit-base] of u frac) candidates
+          ]
+        ]
+        ;; (b) shared measure: support it (permanent) if your share works
+        if (item bi b-needs-shared) and (not item bi b-approved) and (not [supporter] of u) [
+          let ev evaluate u [shared-base] of u shared-share t level
+          if ev != false and (item 8 ev) &gt; 0.0 [
+            ask u [ set supporter true ]
+          ]
+        ]
+      ]
+    ]
+    set ui ui + 1
+  ]
+  ;; --- 4. public-service capacity, then payment ---
+  ;; candidate record indices after make-candidate:
+  ;; 0 u  1 eligible  2 price  3 household-upfront  4 from-savings  5 loan  6 limit
+  ;; 7 rate  8 npv  9 state-pays-now  10 rebate  11 rebate-lag  12 capacity-limited?
+  ;; 13 base  14 saving-fraction  15 kind
+  let slots-left -1                       ;; -1 = not applicable (not public_service)
+  if delivery-mode = "public_service" [
+    let slots int (quota + carry)
+    set carry quota + carry - slots
+    ;; capacity-limited candidates, ordered by their fixed draw, only as many as slots accept
+    let cap-lim filter [ c -&gt; item 12 c ] candidates
+    let sorted-cl sort-by [[a b] -&gt;
+      ([queue-draw] of item 0 a &lt; [queue-draw] of item 0 b)
+      or (([queue-draw] of item 0 a = [queue-draw] of item 0 b)
+          and ([uid] of item 0 a &lt; [uid] of item 0 b))] cap-lim
+    let nallow min (list slots (length sorted-cl))
+    let allowed map [ c -&gt; item 0 c ] sublist sorted-cl 0 nallow
+    set candidates filter [ c -&gt; (not item 12 c) or member? (item 0 c) allowed ] candidates
+    set slots-left slots - length allowed
+  ]
+  foreach candidates [ c -&gt; pay-part c t ]
+  ;; --- 5. shared-measure votes ---
+  let bi 0
+  while [ bi &lt; n-buildings ] [
+    if (item bi b-needs-shared) and (not item bi b-approved) [
+      let floorv item bi b-floor
+      let yes 0.0
+      foreach (item bi u-by-b) [ u -&gt;
+        if [supporter] of u [ set yes yes + [area] of u ]
+      ]
+      let yes-share ifelse-value (floorv &gt; 0.0) [ yes / floorv ] [ 0.0 ]
+      if yes-share + 1e-9 &gt;= vote-threshold [
+        let need 0
+        let fits true
+        if slots-left != -1 [
+          ;; the public service does the shared work too: it needs capacity
+          set need ceiling (item bi b-nuits * shared-share - 1e-9)
+          if need &gt; slots-left [ set fits false ]
+        ]
+        if fits [
+          let evs []
+          let blocked false
+          foreach (item bi u-by-b) [ u -&gt;
+            if not blocked [
+              let evl evaluate u [shared-base] of u shared-share t level
+              ifelse evl = false [ set blocked true ] [ set evs lput (list u evl) evs ]
+            ]
+          ]
+          if not blocked [                  ;; every owner can pay: the measure passes
+            set b-approved replace-item bi b-approved true
+            if slots-left != -1 [ set slots-left slots-left - need ]
+            set votes-passed votes-passed + 1
+            foreach evs [ ue -&gt;
+              pay-part (make-candidate (item 1 ue) "shared" [shared-base] of (item 0 ue) shared-share) t
+            ]
+          ]
+        ]
+      ]
+    ]
+    set bi bi + 1
+  ]
+  tick
+  color-buildings
+  compute-series-metrics
+  refresh-plots
+end
+
+to go-to-end
+  repeat max (list 0 (horizon-months - ticks)) [ go ]
+end
+
+;; apply a payment for one part (kind = "unit" | "whole" | "shared")
+to pay-part [rec t]
+  let u item 0 rec
+  let price item 2 rec
+  let from-sav item 4 rec
+  let loan item 5 rec
+  let rate item 7 rec
+  let state-pays item 9 rec
+  let rebate item 10 rec
+  let lag item 11 rec
+  let base item 13 rec
+  let frac item 14 rec
+  let kind item 15 rec
+  set public-cost public-cost + state-pays
+  if rebate &gt; 0.0 [
+    ifelse lag = 0 [
+      ;; lag 0: paid in the month of the retrofit
+      set public-cost public-cost + rebate
+      ask u [ set cash-net cash-net + rebate ]
+    ] [
+      ;; lag &gt;= 1: arrives in phase 1 of month t + lag
+      set pending lput (sentence (t + lag) u rebate) pending
+    ]
+  ]
+  let k [quintile] of u - 1
+  set q-price replace-item k q-price (item k q-price + price)
+  set q-trans replace-item k q-trans (item k q-trans + state-pays + rebate)
+  ask u [
+    set savings savings - from-sav
+    set cash-net cash-net - from-sav
+    set tax-left max (list 0.0 (tax-left - rebate))
+    if loan &gt; 0.0 [
+      set loans lput (sentence (loan-payment loan rate loan-term-months) (t + loan-term-months)) loans
+    ]
+    set paid-any true
+    set paid-price paid-price + price
+    set paid-base paid-base + base
+    set saving-frac saving-frac + frac
+    if kind = "shared" [ set shared-paid true ]
+    if kind != "shared" [ set unit-done true ]
+    if unit-done and ((shared-paid) or (not needs-shared)) and (not complete?) [
+      set complete? true
+      set b-adopted replace-item bidx b-adopted (item bidx b-adopted + 1)
+      set q-adopt replace-item k q-adopt (item k q-adopt + 1)
+      set price-sum price-sum + paid-price
+      set base-sum base-sum + paid-base
+      set n-complete n-complete + 1
+    ]
+  ]
+end
+
+;; rebates due this month arrive; loan payments fall due
+to cash-phase [t]
+  let due filter [ r -&gt; item 0 r = t ] pending
+  set pending filter [ r -&gt; item 0 r != t ] pending
+  foreach due [ r -&gt;
+    set public-cost public-cost + item 2 r
+    ask item 1 r [ set cash-net cash-net + item 2 r ]
+  ]
+  foreach sort households [ u -&gt;
+    foreach [loans] of u [ l -&gt;
+      if t &lt;= item 1 l [
+        ask u [ set cash-net cash-net - item 0 l ]
+      ]
+    ]
+  ]
+end
+
+;; =============================================================================
+;; Metrics, map and plots
+;; =============================================================================
+
+to-report front-feasible? [u upfront]
+  let plan plan-financing upfront [savings] of u (credit-limit-of [income] of u) savings-usable-share
+  report item 2 plan
+end
+
+to compute-series-metrics
+  ;; adoption by quintile (rental units in the denominator)
+  set adoption-by-quintile (map
+    [ [a tot] -&gt; ifelse-value (tot &gt; 0) [a / tot] [0.0] ] q-adopt q-total)
+  ;; rebate per euro of price, by quintile (false = no data)
+  set rebate-per-euro (map
+    [ [tr pr] -&gt; ifelse-value (pr &gt; 0) [tr / pr] [false] ] q-trans q-price)
+  ;; can this quintile's not-yet-retrofitted, modelled units front the remaining cost now?
+  let front-ok (sentence 0 0 0 0 0)
+  let front-tot (sentence 0 0 0 0 0)
+  set units-cannot-front 0
+  foreach sort households [ u -&gt;
+    if (not [complete?] of u) and ownership-can-adopt [bidx] of u [
+      let remaining ((ifelse-value ([unit-done] of u) [0.0] [[unit-base] of u])
+                     + (ifelse-value (([needs-shared] of u) and not ([shared-paid] of u))
+                                     [[shared-base] of u] [0.0]))
+      let q quote-of u remaining
+      let ok (not item 3 q) or front-feasible? u (item 2 q)
+      let k [quintile] of u - 1
+      set front-tot replace-item k front-tot (item k front-tot + 1)
+      ifelse ok [ set front-ok replace-item k front-ok (item k front-ok + 1) ]
+                [ set units-cannot-front units-cannot-front + 1 ]
+    ]
+  ]
+  set can-front-cost (map
+    [ [ok tot] -&gt; ifelse-value (tot &gt; 0) [ok / tot] [false] ] front-ok front-tot)
+  ;; cost per retrofit (false = none yet); base + markup = cost per retrofit
+  set cost-per-retrofit (ifelse-value (n-complete &gt; 0) [price-sum / n-complete] [false])
+  set cost-parts-base   (ifelse-value (n-complete &gt; 0) [base-sum / n-complete] [false])
+  set cost-parts-markup (ifelse-value (n-complete &gt; 0) [(price-sum - base-sum) / n-complete] [false])
+  ;; canvassing and leisure hours per quintile; net cash over households that paid
+  let canv-sums (sentence 0.0 0.0 0.0 0.0 0.0)
+  let leis-sums (sentence 0.0 0.0 0.0 0.0 0.0)
+  let cash-sums (sentence 0.0 0.0 0.0 0.0 0.0)
+  let cash-n (sentence 0 0 0 0 0)
+  foreach sort households [ u -&gt;
+    let k [quintile] of u - 1
+    let s spend-of u
+    set canv-sums replace-item k canv-sums (item k canv-sums + s)
+    set leis-sums replace-item k leis-sums (item k leis-sums + ([free-hours] of u - s))
+    if [paid-any] of u [
+      set cash-sums replace-item k cash-sums (item k cash-sums + [cash-net] of u)
+      set cash-n replace-item k cash-n (item k cash-n + 1)
+    ]
+  ]
+  set canvass-hours (map [ [s n] -&gt; ifelse-value (n &gt; 0) [s / n] [0.0] ] canv-sums q-total)
+  set leisure-hours (map [ [s n] -&gt; ifelse-value (n &gt; 0) [s / n] [0.0] ] leis-sums q-total)
+  set net-cash-by-quintile (map
+    [ [s n] -&gt; ifelse-value (n &gt; 0) [s / n] [false] ] cash-sums cash-n)
+  ;; shared-measure counts
+  set shared-pending 0
+  set shared-approved 0
+  let bi 0
+  while [ bi &lt; n-buildings ] [
+    if item bi b-needs-shared [
+      ifelse item bi b-approved [ set shared-approved shared-approved + 1 ]
+                                [ set shared-pending shared-pending + 1 ]
+    ]
+    set bi bi + 1
+  ]
+  ;; building states and tenure counts
+  set state-not-retrofitted 0  set state-partial 0  set state-retrofitted 0  set state-not-modelled 0
+  set tenure-owner 0  set tenure-condo 0  set tenure-rental 0
+  set bi 0
+  while [ bi &lt; n-buildings ] [
+    ifelse not ownership-can-adopt bi
+      [ set state-not-modelled state-not-modelled + 1 ]
+      [ ifelse item bi b-adopted = 0
+          [ set state-not-retrofitted state-not-retrofitted + 1 ]
+          [ ifelse item bi b-adopted &lt; item bi b-nuits
+              [ set state-partial state-partial + 1 ]
+              [ set state-retrofitted state-retrofitted + 1 ] ] ]
+    if (item bi b-tenure-l) = "owner_occupied" [ set tenure-owner tenure-owner + 1 ]
+    if (item bi b-tenure-l) = "condo"          [ set tenure-condo tenure-condo + 1 ]
+    if (item bi b-tenure-l) = "rental"         [ set tenure-rental tenure-rental + 1 ]
+    set bi bi + 1
+  ]
+end
+
+to color-buildings
+  ;; one patch = one building; row-major from the top-left
+  let bi 0
+  while [ bi &lt; n-buildings ] [
+    let p patch (min-pxcor + bi mod 25) (max-pycor - int (bi / 25))
+    ifelse (item bi b-tenure-l) = "rental" [
+      ask p [ set pcolor 8 ]
+    ] [
+      ifelse item bi b-adopted = 0 [ ask p [ set pcolor red ] ] [
+        ifelse item bi b-adopted &lt; item bi b-nuits [ ask p [ set pcolor orange ] ]
+                                                   [ ask p [ set pcolor green ] ]
+      ]
+    ]
+    set bi bi + 1
+  ]
+end
+
+;; plots read the global metric lists; called at setup (t = 0) and after each tick
+to refresh-plots
+  print ""
+end
+
+;; ---------------------------------------------------------------------------
+;; Monitor reporters (formatting helpers)
+;; ---------------------------------------------------------------------------
+
+to-report quintile-string [xs]
+  ;; "[Q1 Q2 Q3 Q4 Q5]" with 2 decimals; n/a where undefined
+  let s "["
+  let i 0
+  while [ i &lt; 5 ] [
+    let x item i xs
+    ifelse is-number? x [ set s (word s (precision x 2) "  ") ]
+                        [ set s (word s "n/a  ") ]
+    set i i + 1
+  ]
+  report (word (substring s 0 ((length s) - 2)) "]")
+end
+
+to-report adoption-string   report quintile-string adoption-by-quintile  end
+to-report can-front-string  report quintile-string can-front-cost       end
+to-report rebate-string     report quintile-string rebate-per-euro      end
+to-report net-cash-string   report quintile-string net-cash-by-quintile end
+to-report canvass-string    report quintile-string canvass-hours        end
+to-report leisure-string    report quintile-string leisure-hours        end
+
+to-report cost-retrofit-string
+  ifelse is-number? cost-per-retrofit [
+    report (word "€" precision cost-per-retrofit 0)
+  ] [
+    report "no retrofits yet"
+  ]
+end
+
+to-report cost-parts-string
+  ifelse is-number? cost-parts-base [
+    report (word "base €" precision cost-parts-base 0 " + markup €" precision cost-parts-markup 0)
+  ] [
+    report "no retrofits yet"
+  ]
+end
+
+to-report tenure-string
+  report (word "owner-occupied: " tenure-owner " | condo: " tenure-condo " | rental: " tenure-rental)
+end
+
+to-report state-string
+  report (word "no retrofit: " state-not-retrofitted " | partial: " state-partial
+               " | done: " state-retrofitted " | rental (not modelled): " state-not-modelled)
+end
+</code>
+  <widgets>
+    <view x="800" wrappingAllowedX="false" y="5" frameRate="30.0" minPycor="0" height="212" showTickCounter="true" patchSize="13.0" fontSize="10" wrappingAllowedY="false" width="329" tickCounterLabel="month" maxPycor="15" updateMode="1" maxPxcor="24" minPxcor="0"></view>
+    <note x="5" y="5" backgroundDark="0" fontSize="12" width="770" markdown="false" height="44" textColorDark="-1" textColorLight="-16777216" backgroundLight="0">THE GREAT RETROFIT v3 — EVERY NUMBER IN THIS MODEL IS A PLACEHOLDER. No result produced here is a finding. See the Info tab.</note>
+    <button x="5" y="58" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="100" display="setup">setup</button>
+    <button x="110" y="58" height="40" disableUntilTicks="true" forever="true" kind="Observer" width="90" display="go">go</button>
+    <button x="205" y="58" height="40" disableUntilTicks="true" forever="false" kind="Observer" width="150" display="go to end">go-to-end</button>
+    <slider x="5" step="1" y="110" max="999" width="200" display="seed" height="50" min="0" direction="Horizontal" default="0" variable="seed"></slider>
+    <slider x="5" step="1" y="166" max="999" width="200" display="scene-seed" height="50" min="0" direction="Horizontal" default="0" variable="scene-seed"></slider>
+    <slider x="5" step="10" y="222" max="400" width="200" display="n-buildings" height="50" min="10" direction="Horizontal" default="200" variable="n-buildings"></slider>
+    <slider x="5" step="12" y="278" max="360" width="200" display="horizon-months" height="50" min="12" direction="Horizontal" default="180" variable="horizon-months"></slider>
+    <chooser x="5" y="334" height="60" variable="delivery-mode" current="0" width="200" display="delivery-mode">
+      <choice type="string" value="rebate_market"></choice>
+      <choice type="string" value="passthrough"></choice>
+      <choice type="string" value="public_service"></choice>
+    </chooser>
+    <chooser x="5" y="400" height="60" variable="credit-access" current="0" width="200" display="credit-access">
+      <choice type="string" value="income_tested"></choice>
+      <choice type="string" value="open"></choice>
+      <choice type="string" value="none"></choice>
+    </chooser>
+    <chooser x="5" y="466" height="60" variable="energy-scenario" current="1" width="200" display="energy-scenario">
+      <choice type="string" value="flat"></choice>
+      <choice type="string" value="rising"></choice>
+      <choice type="string" value="shock"></choice>
+    </chooser>
+    <switch x="5" y="532" height="40" on="false" variable="refundable?" width="120" display="refundable?"></switch>
+    <switch x="5" y="578" height="40" on="false" variable="means-test?" width="120" display="means-test?"></switch>
+    <slider x="5" step="1" y="624" max="5" width="200" display="means-test-max-quintile" height="50" min="1" direction="Horizontal" default="2" variable="means-test-max-quintile"></slider>
+    <slider x="225" step="0.01" y="110" max="1" width="200" display="deduction-rate" height="50" min="0" direction="Horizontal" default="0.3" variable="deduction-rate"></slider>
+    <slider x="225" step="1" y="166" max="36" width="200" display="rebate-lag-months" height="50" min="0" direction="Horizontal" default="12" variable="rebate-lag-months"></slider>
+    <slider x="225" step="0.001" y="222" max="0.2" width="200" display="loan-rate" height="50" min="0" direction="Horizontal" default="0.04" variable="loan-rate"></slider>
+    <slider x="225" step="0.001" y="278" max="0.1" width="200" display="loan-rate-risk-premium" height="50" min="0" direction="Horizontal" default="0.02" variable="loan-rate-risk-premium"></slider>
+    <slider x="225" step="0.01" y="334" max="1" width="200" display="vendor-margin" height="50" min="0" direction="Horizontal" default="0.15" variable="vendor-margin"></slider>
+    <slider x="225" step="0.01" y="390" max="1" width="200" display="public-overhead" height="50" min="0" direction="Horizontal" default="0.1" variable="public-overhead"></slider>
+    <slider x="225" step="0.005" y="446" max="0.2" width="200" display="public-capacity" height="50" min="0" direction="Horizontal" default="0.05" variable="public-capacity"></slider>
+    <switch x="225" y="502" height="40" on="true" variable="shared-measure?" width="150" display="shared-measure?"></switch>
+    <slider x="225" step="0.01" y="548" max="1" width="200" display="shared-share" height="50" min="0" direction="Horizontal" default="0.4" variable="shared-share"></slider>
+    <slider x="225" step="0.01" y="604" max="1" width="200" display="vote-threshold" height="50" min="0" direction="Horizontal" default="0.67" variable="vote-threshold"></slider>
+    <slider x="445" step="0.01" y="110" max="1" width="200" display="consider-prob-base" height="50" min="0" direction="Horizontal" default="0.05" variable="consider-prob-base"></slider>
+    <slider x="445" step="0.01" y="166" max="1" width="200" display="neighbour-boost" height="50" min="0" direction="Horizontal" default="0.3" variable="neighbour-boost"></slider>
+    <switch x="445" y="222" height="40" on="true" variable="peer-effect?" width="120" display="peer-effect?"></switch>
+    <slider x="445" step="0.05" y="268" max="1" width="200" display="free-time-spread" height="50" min="0" direction="Horizontal" default="0.3" variable="free-time-spread"></slider>
+    <slider x="445" step="0.5" y="324" max="6" width="200" display="canvass-target-hours" height="50" min="0" direction="Horizontal" default="2.0" variable="canvass-target-hours"></slider>
+    <slider x="445" step="0.01" y="380" max="1" width="200" display="canvass-boost" height="50" min="0" direction="Horizontal" default="0.2" variable="canvass-boost"></slider>
+    <slider x="445" step="0.5" y="436" max="12" width="200" display="canvass-saturation-hours" height="50" min="1" direction="Horizontal" default="6.0" variable="canvass-saturation-hours"></slider>
+    <slider x="445" step="10" y="492" max="1000" width="200" display="cost-per-m2" height="50" min="50" direction="Horizontal" default="300" variable="cost-per-m2"></slider>
+    <slider x="445" step="1" y="548" max="100" width="200" display="saving-per-m2-year" height="50" min="1" direction="Horizontal" default="20" variable="saving-per-m2-year"></slider>
+    <slider x="445" step="0.001" y="604" max="0.2" width="200" display="discount-rate" height="50" min="0" direction="Horizontal" default="0.04" variable="discount-rate"></slider>
+    <slider x="665" step="12" y="110" max="360" width="200" display="loan-term-months" height="50" min="12" direction="Horizontal" default="120" variable="loan-term-months"></slider>
+    <slider x="665" step="1000" y="166" max="100000" width="200" display="credit-income-threshold" height="50" min="0" direction="Horizontal" default="25000" variable="credit-income-threshold"></slider>
+    <slider x="665" step="0.1" y="222" max="3" width="200" display="credit-loan-to-income" height="50" min="0" direction="Horizontal" default="1.0" variable="credit-loan-to-income"></slider>
+    <slider x="665" step="0.1" y="278" max="3" width="200" display="savings-scale" height="50" min="0" direction="Horizontal" default="1.0" variable="savings-scale"></slider>
+    <slider x="665" step="0.05" y="334" max="1" width="200" display="savings-usable-share" height="50" min="0" direction="Horizontal" default="1.0" variable="savings-usable-share"></slider>
+    <slider x="665" step="0.5" y="390" max="12" width="200" display="savings-months-of-income" height="50" min="0" direction="Horizontal" default="3.0" variable="savings-months-of-income"></slider>
+    <slider x="665" step="1" y="446" max="25" width="200" display="years-in-dwelling-min" height="50" min="1" direction="Horizontal" default="5" variable="years-in-dwelling-min"></slider>
+    <slider x="665" step="1" y="502" max="40" width="200" display="years-in-dwelling-max" height="50" min="1" direction="Horizontal" default="25" variable="years-in-dwelling-max"></slider>
+    <slider x="665" step="0.01" y="558" max="1" width="200" display="rental-share-single" height="50" min="0" direction="Horizontal" default="0.1" variable="rental-share-single"></slider>
+    <slider x="665" step="0.01" y="614" max="1" width="200" display="rental-share-multi" height="50" min="0" direction="Horizontal" default="0.3" variable="rental-share-multi"></slider>
+    <monitor x="800" precision="0" y="232" height="52" fontSize="11" width="158" display="month">ticks</monitor>
+    <monitor x="969" precision="0" y="232" height="52" fontSize="11" width="160" display="adopted units">n-complete</monitor>
+    <monitor x="800" precision="0" y="292" height="52" fontSize="11" width="158" display="public cost">public-cost</monitor>
+    <monitor x="969" precision="0" y="292" height="52" fontSize="11" width="160" display="bills saved">bills-saved</monitor>
+    <monitor x="800" precision="0" y="352" height="52" fontSize="12" width="329" display="cost per retrofit">cost-retrofit-string</monitor>
+    <monitor x="800" precision="0" y="412" height="44" fontSize="10" width="329" display="cost parts">cost-parts-string</monitor>
+    <monitor x="800" precision="0" y="464" height="44" fontSize="10" width="329" display="tenures">tenure-string</monitor>
+    <monitor x="800" precision="0" y="516" height="44" fontSize="10" width="329" display="building states">state-string</monitor>
+    <note x="800" y="568" backgroundDark="0" fontSize="9" width="329" markdown="false" height="74" textColorDark="-1" textColorLight="-16777216" backgroundLight="0">Map: one patch = one building. red = no unit done, orange = partial, green = fully retrofitted, gray = rental (not modelled). 2+ unit condos carry a shared-parts vote.</note>
+    <plot x="5" autoPlotX="false" yMax="1.0" autoPlotY="false" yAxis="share retrofitted" y="660" xMin="0.0" height="190" legend="true" xMax="180.0" yMin="0.0" width="330" xAxis="month" display="Adoption by quintile">
+      <setup>set-plot-x-range 0 horizon-months</setup>
+      <update></update>
+      <pen interval="1.0" mode="0" display="Q1" color="14" legend="true">
+        <setup></setup>
+        <update>plot item 0 adoption-by-quintile</update>
+      </pen>
+      <pen interval="1.0" mode="0" display="Q2" color="28" legend="true">
+        <setup></setup>
+        <update>plot item 1 adoption-by-quintile</update>
+      </pen>
+      <pen interval="1.0" mode="0" display="Q3" color="46" legend="true">
+        <setup></setup>
+        <update>plot item 2 adoption-by-quintile</update>
+      </pen>
+      <pen interval="1.0" mode="0" display="Q4" color="66" legend="true">
+        <setup></setup>
+        <update>plot item 3 adoption-by-quintile</update>
+      </pen>
+      <pen interval="1.0" mode="0" display="Q5" color="95" legend="true">
+        <setup></setup>
+        <update>plot item 4 adoption-by-quintile</update>
+      </pen>
+    </plot>
+    <plot x="345" autoPlotX="false" yMax="0.0" autoPlotY="true" yAxis="euros" y="660" xMin="0.0" height="190" legend="true" xMax="180.0" yMin="0.0" width="260" xAxis="month" display="State spend (cumulative)">
+      <setup>set-plot-x-range 0 horizon-months</setup>
+      <update></update>
+      <pen interval="1.0" mode="0" display="public cost" color="95" legend="true">
+        <setup></setup>
+        <update>plot public-cost</update>
+      </pen>
+    </plot>
+    <plot x="615" autoPlotX="false" yMax="0.0" autoPlotY="true" yAxis="euros" y="660" xMin="0.0" height="190" legend="true" xMax="180.0" yMin="0.0" width="260" xAxis="month" display="Bills saved (cumulative)">
+      <setup>set-plot-x-range 0 horizon-months</setup>
+      <update></update>
+      <pen interval="1.0" mode="0" display="bills saved" color="66" legend="true">
+        <setup></setup>
+        <update>plot bills-saved</update>
+      </pen>
+    </plot>
+    <plot x="885" autoPlotX="false" yMax="0.0" autoPlotY="true" yAxis="euros" y="660" xMin="0.0" height="190" legend="true" xMax="180.0" yMin="0.0" width="260" xAxis="month" display="Cost per retrofit">
+      <setup>set-plot-x-range 0 horizon-months</setup>
+      <update></update>
+      <pen interval="1.0" mode="0" display="price" color="46" legend="true">
+        <setup></setup>
+        <update>if is-number? cost-per-retrofit [ plot cost-per-retrofit ]</update>
+      </pen>
+    </plot>
+    <monitor x="5" precision="0" y="864" height="54" fontSize="10" width="275" display="adoption by quintile">adoption-string</monitor>
+    <monitor x="290" precision="0" y="864" height="54" fontSize="10" width="275" display="can front cost by quintile">can-front-string</monitor>
+    <monitor x="575" precision="0" y="864" height="54" fontSize="10" width="275" display="rebate per euro by quintile">rebate-string</monitor>
+    <monitor x="860" precision="0" y="864" height="54" fontSize="10" width="285" display="net cash by quintile">net-cash-string</monitor>
+  </widgets>
+  <info><![CDATA[## THE GREAT RETROFIT v3 — NetLogo port
+
+**Every number in this model is a placeholder.** The defaults make the structure run and keep the tests meaningful; nothing computed from them is a finding (which households benefit, how much the state spends, how the delivery modes rank). Do not quote any output of this model as a result.
+
+This is a single-file NetLogo 7 port of `v3/src/retrofit_v3/` (the Python reference; `packs/great-retrofit/runtime.js` mirrors it). It asks: *given who can pay, who gets the subsidy, and how the work is delivered, which households retrofit, and what does the state spend?* Households retrofit when the NPV over the time they expect to stay is positive and when they can finance the upfront cost. There is no ideology or solidarity premium; regressivity is meant to *emerge* from credit access plus tax capacity.
+
+### HOW TO USE
+
+1. Press **setup**. The synthetic scene is built (placeholder rules: lognormal footprints, random tenure, unit sizes split deterministically) and one building is placed per patch, row-major from the top-left.
+2. Press **go** (monthly step) or **go to end** (runs all remaining months).
+3. Slides, choosers and switches on the left/centre are the policy levers and household parameters. Everything resets on **setup**.
+
+Map legend: red = no unit done, orange = partly done, green = fully retrofitted, gray = rental flat (not modelled, never adopts, never votes). Condos with two or more units carry a shared-parts vote (floor-area weighted, default threshold 2/3).
+
+### WHAT IS MODELLED
+
+- Owner-occupied homes, condos (unit decision + shared parts by vote), rental stub (never retrofits).
+- Three delivery modes: `rebate_market` (market vendor, price + vendor margin, rebate after a lag, capped by remaining tax capacity unless refundable), `passthrough` (state pays the whole price at adoption, vendor margin applies), `public_service` (state pays, public overhead instead of margin, capacity-limited: `public-capacity` share of all units per year, fractional slots carried; when more candidates than slots, a fixed per-household draw orders the queue; a shared measure uses ceil(units x shared_share) slots).
+- Means test: when on, only households in the bottom `means-test-max-quintile` quintiles are in the scheme (rebate, passthrough or public service); everyone else buys on the market with no subsidy.
+- Household finances: savings first (scaled by `savings-usable-share`), remainder by a level-annuity loan over `loan-term-months` at `loan-rate` (+ `loan-rate-risk-premium` below the credit income threshold). Credit: `income_tested` (threshold + loan-to-income cap), `open`, or `none`.
+- NPV with perfect foresight: PV of energy savings over the remaining stay (growth `rising` by default) + PV of rebate − cash from savings − PV of loan payments. No resale value, no altruism, no partial measures.
+- Condo canvassing: advocates (supporters or payers) spend min(free hours, `canvass-target-hours`) per week, limited by a weekly time budget (long hours at both ends of the income scale — a placeholder hypothesis). Pressure raises a neighbour's monthly consideration chance (neighbour effect + canvass effect, both capped at 1).
+- Shared-measure voting: support is permanent and is granted when a household's own share of the shared measure is financeable and NPV-positive. The measure passes in the first month the floor-area share of supporters reaches `vote-threshold`, and only if **every** owner can finance their share; once passed, all owners pay, supporter or not.
+- Tax capacity: a non-refundable rebate is capped by the household's remaining tax capacity (`tax-left`), which each rebate reduces. One year of capacity serves all of a household's payments; no carry-forward.
+
+### DETERMINISM
+
+All randomness flows through a mulberry32 PRNG ported from `v3/common/rng.py`, including a stateless `hash_uniform(seed, agent, month)` for per-household, per-month draws (changing a policy lever never shifts another household's draws). The same seed reproduces the same history. Agent iteration is in unit-id order throughout, as in the Python model.
+
+Known differences from the Python/JS ports (ulp-level, may accumulate): `round()` here rounds half away from zero, Python rounds half to even; `^` and `ln`/`exp`/`cos` agree to ~1 ulp across engines. NetLogo integers are 64-bit, so the 32-bit multiply was done in 16-bit limbs (`imul`) to stay byte-identical to the Python PRNG.
+
+### NOT MODELLED
+
+Rental landlord logic (split incentives), energy communities, moving/inheritance, phasing, vendor capacity or price response, collective loans or reserve funds (a single owner who cannot pay blocks a shared measure), the state's budget constraint, behavioural effects beyond the monthly consideration draw, anything social — no ideology, no solidarity lever. Non-refundable rebates with no tax payable give nothing, by construction.
+
+### OUTPUTS
+
+Plots: adoption by quintile (1 = lowest income; rental units count in denominators), cumulative state spend (vendor payments at adoption + rebates when they arrive), cumulative household bills saved, cost per retrofit. Monitors: month, adopted units, public cost, bills saved, cost per retrofit, cost decomposition (base + markup), tenure and building-state counts, and by quintile: adoption, can-front-cost (could still finance what they owe now), rebate per euro, net cash, canvass and leisure hours. One patch per building is coloured by adoption state.
+
+Frame semantics match `v3/docs/frame-schema.md`. Events (one row per retrofit) and votes are counted (`votes-passed`) but not recorded as a log.
+
+### PARAMETERS
+
+Widgets set the run's parameters at **setup**. Household demographics (income log-normal(10.3, 0.5), flat 25% tax above a €10,000 allowance, log-normal savings with 3-month-income mean, 5–25 year stays, the quintile work-hour profile, waking/committed hours, free-time spread, canvassing parameters, energy growth 0/3/8% p.a., scene rules) are code constants, clearly marked PLACEHOLDER in the code; edit the code to change them. `horizon-months` bounds both the simulation length and the consideration rule (households past their stay do not consider; their savings are still counted while they stay).
+
+An experiment named **smoke-test** is embedded (full 180-month run, reports adoptions, state cost and bills saved) so the file can be checked headless with:
+`netlogo-headless.sh --model great-retrofit-v3.nlogox --experiment smoke-test --table -`
+]]></info>
+  <turtleShapes>
+    <shape name="default" rotatable="true" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="5"></point>
+        <point x="40" y="250"></point>
+        <point x="150" y="205"></point>
+        <point x="260" y="250"></point>
+      </polygon>
+    </shape>
+  </turtleShapes>
+  <linkShapes>
+    <shape name="default" curviness="0.0">
+      <lines>
+        <line x="-0.2" visible="false">
+          <dash value="0.0"></dash>
+          <dash value="1.0"></dash>
+        </line>
+        <line x="0.0" visible="true">
+          <dash value="1.0"></dash>
+          <dash value="0.0"></dash>
+        </line>
+        <line x="0.2" visible="false">
+          <dash value="0.0"></dash>
+          <dash value="1.0"></dash>
+        </line>
+      </lines>
+      <indicator>
+        <shape name="link direction" rotatable="true" editableColorIndex="0">
+          <line endX="90" startY="150" marked="true" color="-1920102913" endY="180" startX="150"></line>
+          <line endX="210" startY="150" marked="true" color="-1920102913" endY="180" startX="150"></line>
+        </shape>
+      </indicator>
+    </shape>
+  </linkShapes>
+  <previewCommands>setup repeat 24 [ go ]</previewCommands>
+  <experiments>
+    <experiment name="smoke-test" repetitions="1" sequentialRunOrder="true" runMetricsEveryStep="false" timeLimit="180">
+      <setup>setup</setup>
+      <go>go</go>
+      <metrics>
+        <metric>n-complete</metric>
+        <metric>public-cost</metric>
+        <metric>bills-saved</metric>
+        <metric>votes-passed</metric>
+      </metrics>
+    </experiment>
+  </experiments>
+</model>

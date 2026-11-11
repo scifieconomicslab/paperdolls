@@ -1,0 +1,324 @@
+{
+  "note": "Nine kinds and twelve regional species mixes. Mixes are proposals to check with local authors.",
+  "kinds": [
+    {
+      "id": "broadleaf",
+      "label": "Broadleaf tree",
+      "height_m": 8
+    },
+    {
+      "id": "oak",
+      "label": "Large spreading tree",
+      "height_m": 10
+    },
+    {
+      "id": "plane",
+      "label": "Street plane tree",
+      "height_m": 9.5
+    },
+    {
+      "id": "columnar",
+      "label": "Columnar tree (poplar, cypress)",
+      "height_m": 11
+    },
+    {
+      "id": "conifer",
+      "label": "Conifer",
+      "height_m": 9
+    },
+    {
+      "id": "umbrella",
+      "label": "Umbrella tree (acacia, pine)",
+      "height_m": 8
+    },
+    {
+      "id": "palm",
+      "label": "Palm",
+      "height_m": 10
+    },
+    {
+      "id": "blossom",
+      "label": "Flowering tree",
+      "height_m": 7.5
+    },
+    {
+      "id": "shrub",
+      "label": "Shrub or hedge",
+      "height_m": 1.8
+    }
+  ],
+  "regional_mixes": {
+    "nw": [
+      {
+        "kind": "broadleaf",
+        "weight": 4
+      },
+      {
+        "kind": "plane",
+        "weight": 3
+      },
+      {
+        "kind": "oak",
+        "weight": 1
+      },
+      {
+        "kind": "columnar",
+        "weight": 1
+      },
+      {
+        "kind": "conifer",
+        "weight": 0.5
+      },
+      {
+        "kind": "blossom",
+        "weight": 0.5
+      }
+    ],
+    "uk": [
+      {
+        "kind": "oak",
+        "weight": 3
+      },
+      {
+        "kind": "plane",
+        "weight": 3
+      },
+      {
+        "kind": "broadleaf",
+        "weight": 3
+      },
+      {
+        "kind": "conifer",
+        "weight": 0.5
+      },
+      {
+        "kind": "blossom",
+        "weight": 0.4
+      }
+    ],
+    "ws": [
+      {
+        "kind": "plane",
+        "weight": 5
+      },
+      {
+        "kind": "broadleaf",
+        "weight": 2
+      },
+      {
+        "kind": "columnar",
+        "weight": 1
+      },
+      {
+        "kind": "conifer",
+        "weight": 0.5
+      },
+      {
+        "kind": "blossom",
+        "weight": 0.4
+      }
+    ],
+    "md": [
+      {
+        "kind": "umbrella",
+        "weight": 3
+      },
+      {
+        "kind": "columnar",
+        "weight": 3
+      },
+      {
+        "kind": "broadleaf",
+        "weight": 3
+      },
+      {
+        "kind": "palm",
+        "weight": 1
+      },
+      {
+        "kind": "shrub",
+        "weight": 2
+      },
+      {
+        "kind": "blossom",
+        "weight": 1
+      }
+    ],
+    "ce": [
+      {
+        "kind": "broadleaf",
+        "weight": 4
+      },
+      {
+        "kind": "oak",
+        "weight": 2
+      },
+      {
+        "kind": "conifer",
+        "weight": 1.5
+      },
+      {
+        "kind": "columnar",
+        "weight": 1
+      },
+      {
+        "kind": "blossom",
+        "weight": 0.4
+      }
+    ],
+    "sa": [
+      {
+        "kind": "oak",
+        "weight": 3
+      },
+      {
+        "kind": "palm",
+        "weight": 3
+      },
+      {
+        "kind": "umbrella",
+        "weight": 2
+      },
+      {
+        "kind": "blossom",
+        "weight": 1.5
+      },
+      {
+        "kind": "broadleaf",
+        "weight": 1
+      }
+    ],
+    "se": [
+      {
+        "kind": "palm",
+        "weight": 3
+      },
+      {
+        "kind": "broadleaf",
+        "weight": 3
+      },
+      {
+        "kind": "umbrella",
+        "weight": 2
+      },
+      {
+        "kind": "blossom",
+        "weight": 1.5
+      },
+      {
+        "kind": "shrub",
+        "weight": 1
+      }
+    ],
+    "ea": [
+      {
+        "kind": "broadleaf",
+        "weight": 4
+      },
+      {
+        "kind": "blossom",
+        "weight": 2
+      },
+      {
+        "kind": "conifer",
+        "weight": 1.5
+      },
+      {
+        "kind": "columnar",
+        "weight": 1
+      },
+      {
+        "kind": "plane",
+        "weight": 1
+      }
+    ],
+    "me": [
+      {
+        "kind": "palm",
+        "weight": 4
+      },
+      {
+        "kind": "broadleaf",
+        "weight": 2
+      },
+      {
+        "kind": "umbrella",
+        "weight": 1
+      },
+      {
+        "kind": "shrub",
+        "weight": 1.5
+      },
+      {
+        "kind": "columnar",
+        "weight": 1
+      }
+    ],
+    "sb": [
+      {
+        "kind": "umbrella",
+        "weight": 3
+      },
+      {
+        "kind": "broadleaf",
+        "weight": 3
+      },
+      {
+        "kind": "palm",
+        "weight": 1.5
+      },
+      {
+        "kind": "blossom",
+        "weight": 1.5
+      },
+      {
+        "kind": "shrub",
+        "weight": 1
+      }
+    ],
+    "la": [
+      {
+        "kind": "broadleaf",
+        "weight": 3
+      },
+      {
+        "kind": "palm",
+        "weight": 2
+      },
+      {
+        "kind": "blossom",
+        "weight": 2
+      },
+      {
+        "kind": "umbrella",
+        "weight": 1
+      },
+      {
+        "kind": "oak",
+        "weight": 1
+      }
+    ],
+    "na": [
+      {
+        "kind": "oak",
+        "weight": 3
+      },
+      {
+        "kind": "broadleaf",
+        "weight": 3
+      },
+      {
+        "kind": "conifer",
+        "weight": 2
+      },
+      {
+        "kind": "plane",
+        "weight": 1
+      },
+      {
+        "kind": "columnar",
+        "weight": 0.5
+      }
+    ]
+  }
+}

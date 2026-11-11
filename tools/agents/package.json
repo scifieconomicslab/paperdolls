@@ -1,0 +1,21 @@
+{
+  "name": "@paperdolls/agents",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The model library: a NetLogo-shaped TypeScript library that converted NetLogo models are written on. defineModel gives the page a Model: describe() and start(). Ported from github.com/scifieconomicslab/paperdolls @ f9a1a59 (CC BY 4.0).",
+  "exports": {
+    ".": "./library/index.ts",
+    "./world": "./library/world.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "determinism:ts": "node scripts/determinism-runs.mjs",
+    "determinism:netlogo": "node scripts/determinism-netlogo.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "6.0.3"
+  }
+}

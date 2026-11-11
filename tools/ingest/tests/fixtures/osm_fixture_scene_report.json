@@ -1,0 +1,320 @@
+{
+ "input": {
+  "file": "samples/osm_fixture_extract.json",
+  "format": "overpass-json",
+  "features": {
+   "line": 18,
+   "polygon": 145,
+   "point": 8
+  }
+ },
+ "clip": {
+  "boundary_relation": 99001,
+  "boundary_name": "Fixtureville",
+  "bbox": null
+ },
+ "frame": {
+  "origin": {
+   "lat": 50.8819,
+   "lon": 4.330145
+  },
+  "rotation_deg": -37.28,
+  "how": "chosen from building edges (highest estimated asset share)",
+  "candidates": [
+   {
+    "source": "none",
+    "rotation_deg": 0.0,
+    "strength": 0.0,
+    "asset_share": 0.0
+   },
+   {
+    "source": "building edges",
+    "rotation_deg": -37.28,
+    "strength": 0.957,
+    "asset_share": 0.963
+   },
+   {
+    "source": "road segments",
+    "rotation_deg": -37.0,
+    "strength": 0.962,
+    "asset_share": 0.963
+   },
+   {
+    "source": "buildings and roads",
+    "rotation_deg": -37.18,
+    "strength": 0.959,
+    "asset_share": 0.963
+   }
+  ],
+  "north_on_screen_deg": 85.5
+ },
+ "counts": {
+  "buildings": 134,
+  "roads": 11,
+  "landuse": 5,
+  "trees": 48,
+  "trees_mapped": 8,
+  "trees_in_rows": 9,
+  "trees_scattered": 31,
+  "tram_roads": 1,
+  "tram_tracks": 1
+ },
+ "estimated_asset_share": {
+  "rotated": 0.97,
+  "unrotated": 0.0
+ },
+ "extent_m": [
+  511,
+  332
+ ],
+ "skipped": {
+  "building=roof": 1,
+  "building=construction": 1,
+  "buildings outside the clip": 1,
+  "highway=footway (not drivable)": 1,
+  "service road: driveway, parking aisle or private": 1,
+  "road in a tunnel or below ground": 1,
+  "building smaller than 8 m2": 1,
+  "landuse smaller than 20 m2": 1
+ },
+ "assumptions": [
+  [
+   "road class",
+   "highway=residential -> local",
+   6
+  ],
+  [
+   "road class",
+   "highway=secondary -> avenue",
+   1
+  ],
+  [
+   "road class",
+   "highway=tertiary -> avenue",
+   1
+  ],
+  [
+   "road class",
+   "highway=cycleway -> cycle",
+   1
+  ],
+  [
+   "road class",
+   "highway=pedestrian -> pedestrian",
+   1
+  ],
+  [
+   "road width",
+   "lanes tag at 3.1 m per lane: avenue width set from the tag instead of the class default",
+   1
+  ],
+  [
+   "road width",
+   "width tag: avenue width set from the tag instead of the class default",
+   1
+  ],
+  [
+   "tram",
+   "1 road(s) run along a tram line: street-running tram flagged",
+   1
+  ],
+  [
+   "tram",
+   "1 tram line(s) with no road alongside: drawn as their own track",
+   1
+  ],
+  [
+   "archetype",
+   "building=terrace -> terrace",
+   54
+  ],
+  [
+   "archetype",
+   "building=house -> villa",
+   49
+  ],
+  [
+   "archetype",
+   "building=apartments -> block",
+   10
+  ],
+  [
+   "archetype",
+   "building=retail -> shophouse",
+   9
+  ],
+  [
+   "archetype",
+   "building=yes -> auto (the region decides)",
+   9
+  ],
+  [
+   "archetype",
+   "building=warehouse -> shed",
+   1
+  ],
+  [
+   "archetype",
+   "building=yes with 14 storeys -> tower",
+   1
+  ],
+  [
+   "archetype",
+   "building=church -> auto (the region decides)",
+   1
+  ],
+  [
+   "residential",
+   "residential: building=terrace: a dwelling type",
+   54
+  ],
+  [
+   "residential",
+   "residential: building=house: a dwelling type",
+   49
+  ],
+  [
+   "residential",
+   "residential: building=apartments: a dwelling type",
+   10
+  ],
+  [
+   "residential",
+   "probable: building=yes with no use tag, 30 m2 or more: probably a dwelling (a guess)",
+   10
+  ],
+  [
+   "residential",
+   "other: building=retail: not a dwelling type",
+   9
+  ],
+  [
+   "residential",
+   "other: building=warehouse: not a dwelling type",
+   1
+  ],
+  [
+   "residential",
+   "other: building=church: not a dwelling type",
+   1
+  ],
+  [
+   "storeys",
+   "building=house with no levels or height: assumed 2",
+   45
+  ],
+  [
+   "storeys",
+   "building=retail with no levels or height: assumed 2",
+   9
+  ],
+  [
+   "storeys",
+   "from height tag at 3.1 m per storey",
+   9
+  ],
+  [
+   "storeys",
+   "building=warehouse with no levels or height: assumed 1",
+   1
+  ],
+  [
+   "storeys",
+   "building=church with no levels or height: assumed 1",
+   1
+  ],
+  [
+   "courtyards",
+   "buildings with inner rings (courtyards): drawn as solid footprints",
+   1
+  ],
+  [
+   "neighbours",
+   "buildings within 1 m of each other (edge to edge) are neighbours: 95 buildings have at least one",
+   95
+  ],
+  [
+   "landuse",
+   "park from leisure=park",
+   1
+  ],
+  [
+   "landuse",
+   "water from natural=water",
+   1
+  ],
+  [
+   "landuse",
+   "square from place=square",
+   1
+  ],
+  [
+   "landuse",
+   "park from natural=wood",
+   1
+  ],
+  [
+   "landuse",
+   "garden from leisure=garden",
+   1
+  ],
+  [
+   "tree kind",
+   "no species: the region's species mix decides",
+   4
+  ],
+  [
+   "tree kind",
+   "plane from species or leaf type",
+   1
+  ],
+  [
+   "tree kind",
+   "palm from species or leaf type",
+   1
+  ],
+  [
+   "tree kind",
+   "umbrella from species or leaf type",
+   1
+  ],
+  [
+   "tree kind",
+   "oak from species or leaf type",
+   1
+  ],
+  [
+   "tree kind",
+   "conifer from species or leaf type",
+   1
+  ],
+  [
+   "scatter",
+   "trees scattered into parks and woods (one per 70 to 400 m2 by type, at most 300 per area, 4000 in all): 31 trees",
+   31
+  ],
+  [
+   "scatter",
+   "park or wood already has mapped trees: nothing scattered",
+   1
+  ]
+ ],
+ "warnings": [],
+ "levels_sources": {
+  "tag": 69,
+  "type-default": 56,
+  "height": 9
+ },
+ "levels_assumed": 56,
+ "residential": {
+  "residential": 113,
+  "other": 11,
+  "probable": 10
+ },
+ "neighbours": {
+  "threshold_m": 1.0,
+  "buildings_with_neighbours": 95,
+  "links": 77,
+  "max_per_building": 3
+ }
+}

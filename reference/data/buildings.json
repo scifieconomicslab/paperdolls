@@ -1,0 +1,319 @@
+{
+  "note": "Six visual archetypes, a facade grammar and twelve regional mixes. The economic class vocabulary is reference/building-archetypes.md; the renderer maps economic class to visual archetype, never the reverse.",
+  "fit": {
+    "maxDevDeg": 12,
+    "minRectangularity": 0.82,
+    "minSide": 3
+  },
+  "archetypes": [
+    {
+      "id": "terrace",
+      "label": "Terraced house",
+      "bay_m": 2.4,
+      "storey_m": 3,
+      "ground_m": 3.2,
+      "min_bays": 2,
+      "max_bays": 3,
+      "style": "house",
+      "sides": "blank",
+      "window_ratio": 0.5,
+      "roof": "pitch"
+    },
+    {
+      "id": "shophouse",
+      "label": "Shophouse",
+      "bay_m": 3.2,
+      "storey_m": 3.2,
+      "ground_m": 4,
+      "min_bays": 2,
+      "max_bays": 4,
+      "style": "shop",
+      "sides": "blank",
+      "window_ratio": 0.5,
+      "roof": "flat"
+    },
+    {
+      "id": "block",
+      "label": "Apartment block",
+      "bay_m": 3.4,
+      "storey_m": 3,
+      "ground_m": 3.6,
+      "min_bays": 3,
+      "max_bays": 9,
+      "style": "block",
+      "sides": "few",
+      "window_ratio": 0.5,
+      "roof": "flat"
+    },
+    {
+      "id": "villa",
+      "label": "Detached house",
+      "bay_m": 3,
+      "storey_m": 2.9,
+      "ground_m": 3,
+      "min_bays": 2,
+      "max_bays": 4,
+      "style": "house",
+      "sides": "windows",
+      "window_ratio": 0.4,
+      "roof": "hip"
+    },
+    {
+      "id": "tower",
+      "label": "Tower",
+      "bay_m": 4,
+      "storey_m": 3.3,
+      "ground_m": 4.5,
+      "min_bays": 2,
+      "max_bays": 8,
+      "style": "tower",
+      "sides": "ribbon",
+      "window_ratio": 0.8,
+      "roof": "flat"
+    },
+    {
+      "id": "shed",
+      "label": "Shed / warehouse",
+      "bay_m": 5,
+      "storey_m": 6,
+      "ground_m": 6.5,
+      "min_bays": 2,
+      "max_bays": 8,
+      "style": "shed",
+      "sides": "blank",
+      "window_ratio": 0,
+      "roof": "pitchlow"
+    }
+  ],
+  "overlays": [
+    "band",
+    "scaffold",
+    "solar",
+    "marker",
+    "insulation",
+    "community",
+    "segments"
+  ],
+  "regional_mixes": {
+    "nw": {
+      "mult": {
+        "terrace": 1.6,
+        "villa": 0.6,
+        "shophouse": 0.8
+      },
+      "roof": {
+        "pitch": 0.9,
+        "flat": 0.1
+      },
+      "shutters": 0,
+      "awning": 0.1,
+      "ac": 0,
+      "chimney": 0.5,
+      "balcony": 0.15,
+      "winK": 1
+    },
+    "uk": {
+      "mult": {
+        "terrace": 1.8,
+        "villa": 1,
+        "shophouse": 0.7
+      },
+      "roof": {
+        "pitch": 0.95,
+        "flat": 0.05
+      },
+      "shutters": 0,
+      "awning": 0.1,
+      "ac": 0,
+      "chimney": 0.8,
+      "balcony": 0.05,
+      "winK": 1
+    },
+    "ws": {
+      "mult": {
+        "block": 1.3,
+        "shophouse": 1,
+        "terrace": 1
+      },
+      "roof": {
+        "flat": 0.35,
+        "pitch": 0.55,
+        "hip": 0.1
+      },
+      "shutters": 0.45,
+      "awning": 0.3,
+      "ac": 0.05,
+      "chimney": 0.3,
+      "balcony": 0.5,
+      "winK": 1.1
+    },
+    "md": {
+      "mult": {
+        "block": 1.4,
+        "shophouse": 1,
+        "terrace": 1,
+        "villa": 0.8
+      },
+      "roof": {
+        "flat": 0.5,
+        "pitch": 0.5
+      },
+      "shutters": 0.6,
+      "awning": 0.4,
+      "ac": 0.25,
+      "chimney": 0.1,
+      "balcony": 0.4,
+      "winK": 0.85
+    },
+    "ce": {
+      "mult": {
+        "block": 1.6,
+        "terrace": 1,
+        "shophouse": 0.8,
+        "villa": 0.6
+      },
+      "roof": {
+        "pitch": 0.5,
+        "hip": 0.2,
+        "flat": 0.3
+      },
+      "shutters": 0.05,
+      "awning": 0.15,
+      "ac": 0.02,
+      "chimney": 0.3,
+      "balcony": 0.3,
+      "winK": 1
+    },
+    "sa": {
+      "mult": {
+        "shophouse": 1.6,
+        "terrace": 1,
+        "block": 1,
+        "villa": 0.8
+      },
+      "roof": {
+        "flat": 0.7,
+        "pitch": 0.3
+      },
+      "shutters": 0.05,
+      "awning": 0.5,
+      "ac": 0.3,
+      "chimney": 0,
+      "balcony": 0.35,
+      "winK": 0.8
+    },
+    "se": {
+      "mult": {
+        "shophouse": 2,
+        "terrace": 1,
+        "block": 1,
+        "villa": 0.5
+      },
+      "roof": {
+        "flat": 0.6,
+        "pitch": 0.4
+      },
+      "shutters": 0.05,
+      "awning": 0.6,
+      "ac": 0.5,
+      "chimney": 0,
+      "balcony": 0.3,
+      "winK": 0.8
+    },
+    "ea": {
+      "mult": {
+        "block": 1.8,
+        "tower": 1.5,
+        "shophouse": 0.8,
+        "terrace": 0.4,
+        "villa": 0.3
+      },
+      "roof": {
+        "flat": 0.85,
+        "pitch": 0.15
+      },
+      "shutters": 0,
+      "awning": 0.15,
+      "ac": 0.5,
+      "chimney": 0,
+      "balcony": 0.5,
+      "winK": 0.9
+    },
+    "me": {
+      "mult": {
+        "block": 1.4,
+        "villa": 1,
+        "shophouse": 0.8,
+        "terrace": 0.5
+      },
+      "roof": {
+        "flat": 0.9,
+        "pitch": 0.1
+      },
+      "shutters": 0.1,
+      "awning": 0.2,
+      "ac": 0.6,
+      "chimney": 0,
+      "balcony": 0.2,
+      "winK": 0.6
+    },
+    "sb": {
+      "mult": {
+        "shophouse": 1.2,
+        "villa": 1.2,
+        "terrace": 0.6,
+        "block": 0.8,
+        "shed": 0.8
+      },
+      "roof": {
+        "pitch": 0.6,
+        "flat": 0.4
+      },
+      "shutters": 0.05,
+      "awning": 0.4,
+      "ac": 0.1,
+      "chimney": 0,
+      "balcony": 0.15,
+      "winK": 0.75
+    },
+    "la": {
+      "mult": {
+        "block": 1.4,
+        "terrace": 1,
+        "villa": 1,
+        "shophouse": 1
+      },
+      "roof": {
+        "flat": 0.6,
+        "pitch": 0.4
+      },
+      "shutters": 0.1,
+      "awning": 0.3,
+      "ac": 0.2,
+      "chimney": 0,
+      "balcony": 0.4,
+      "winK": 0.9
+    },
+    "na": {
+      "mult": {
+        "villa": 1.8,
+        "terrace": 0.5,
+        "block": 1,
+        "shophouse": 0.8,
+        "tower": 1,
+        "shed": 0.8
+      },
+      "roof": {
+        "pitch": 0.6,
+        "hip": 0.1,
+        "flat": 0.3
+      },
+      "shutters": 0.1,
+      "awning": 0.15,
+      "ac": 0.3,
+      "chimney": 0.6,
+      "balcony": 0.2,
+      "winK": 1
+    }
+  }
+}

@@ -1,0 +1,596 @@
+{
+  "note": "Decoration by default. Fleet shares and playback speeds are proposals: look them up with a source and a date, never from memory.",
+  "speeds": {
+    "person": 1.4,
+    "bicycle": 4.5,
+    "cargo_bike": 4,
+    "moped": 7,
+    "motorbike": 8.5,
+    "three_wheeler": 7,
+    "utility_three_wheeler": 7,
+    "city_car": 8.3,
+    "hatchback": 8.3,
+    "sedan": 8.3,
+    "suv": 8.3,
+    "pickup": 8.3,
+    "van": 8.3,
+    "van_coop": 8.3,
+    "kei_van": 8.3,
+    "minibus": 7,
+    "bus": 7,
+    "double_decker": 7,
+    "tram": 11,
+    "lorry": 7.5
+  },
+  "classes": [
+    {
+      "id": "bicycle",
+      "label": "Bicycle",
+      "network": "cycle"
+    },
+    {
+      "id": "cargo_bike",
+      "label": "Cargo bike",
+      "network": "cycle"
+    },
+    {
+      "id": "moped",
+      "label": "Moped / scooter",
+      "network": "road"
+    },
+    {
+      "id": "motorbike",
+      "label": "Motorbike",
+      "network": "road"
+    },
+    {
+      "id": "three_wheeler",
+      "label": "Three-wheeler taxi (tuk-tuk)",
+      "network": "road"
+    },
+    {
+      "id": "utility_three_wheeler",
+      "label": "Three-wheeler utility",
+      "network": "road"
+    },
+    {
+      "id": "city_car",
+      "label": "City car",
+      "network": "road"
+    },
+    {
+      "id": "hatchback",
+      "label": "Hatchback",
+      "network": "road"
+    },
+    {
+      "id": "sedan",
+      "label": "Saloon",
+      "network": "road"
+    },
+    {
+      "id": "suv",
+      "label": "SUV",
+      "network": "road"
+    },
+    {
+      "id": "pickup",
+      "label": "Pickup",
+      "network": "road"
+    },
+    {
+      "id": "van",
+      "label": "Delivery van",
+      "network": "road"
+    },
+    {
+      "id": "van_coop",
+      "label": "Co-op van",
+      "network": "road"
+    },
+    {
+      "id": "kei_van",
+      "label": "Small box van",
+      "network": "road"
+    },
+    {
+      "id": "minibus",
+      "label": "Minibus (shared taxi)",
+      "network": "road"
+    },
+    {
+      "id": "bus",
+      "label": "Bus",
+      "network": "road"
+    },
+    {
+      "id": "double_decker",
+      "label": "Double-decker bus",
+      "network": "road"
+    },
+    {
+      "id": "tram",
+      "label": "Tram",
+      "network": "rail"
+    },
+    {
+      "id": "lorry",
+      "label": "Lorry",
+      "network": "road"
+    }
+  ],
+  "regions": [
+    {
+      "id": "nw",
+      "drive": "right",
+      "climate": {
+        "cold": 0.6,
+        "sun": 0.2,
+        "rain": 0.6
+      },
+      "fleet": [
+        {
+          "class": "bicycle",
+          "share": 20
+        },
+        {
+          "class": "cargo_bike",
+          "share": 8
+        },
+        {
+          "class": "city_car",
+          "share": 22
+        },
+        {
+          "class": "hatchback",
+          "share": 18
+        },
+        {
+          "class": "van",
+          "share": 7
+        },
+        {
+          "class": "bus",
+          "share": 4
+        },
+        {
+          "class": "tram",
+          "share": 3
+        },
+        {
+          "class": "moped",
+          "share": 3
+        }
+      ]
+    },
+    {
+      "id": "uk",
+      "drive": "left",
+      "climate": {
+        "cold": 0.5,
+        "sun": 0.15,
+        "rain": 0.8
+      },
+      "fleet": [
+        {
+          "class": "city_car",
+          "share": 22
+        },
+        {
+          "class": "hatchback",
+          "share": 24
+        },
+        {
+          "class": "sedan",
+          "share": 8
+        },
+        {
+          "class": "van",
+          "share": 10
+        },
+        {
+          "class": "double_decker",
+          "share": 6
+        },
+        {
+          "class": "bicycle",
+          "share": 8
+        },
+        {
+          "class": "suv",
+          "share": 6
+        }
+      ]
+    },
+    {
+      "id": "ws",
+      "drive": "right",
+      "climate": {
+        "cold": 0.4,
+        "sun": 0.4,
+        "rain": 0.3
+      },
+      "fleet": [
+        {
+          "class": "moped",
+          "share": 18
+        },
+        {
+          "class": "city_car",
+          "share": 24
+        },
+        {
+          "class": "hatchback",
+          "share": 18
+        },
+        {
+          "class": "bus",
+          "share": 5
+        },
+        {
+          "class": "tram",
+          "share": 3
+        },
+        {
+          "class": "bicycle",
+          "share": 8
+        },
+        {
+          "class": "van",
+          "share": 6
+        }
+      ]
+    },
+    {
+      "id": "md",
+      "drive": "right",
+      "climate": {
+        "cold": 0.1,
+        "sun": 0.8,
+        "rain": 0.15
+      },
+      "fleet": [
+        {
+          "class": "moped",
+          "share": 24
+        },
+        {
+          "class": "utility_three_wheeler",
+          "share": 8
+        },
+        {
+          "class": "city_car",
+          "share": 26
+        },
+        {
+          "class": "hatchback",
+          "share": 12
+        },
+        {
+          "class": "bus",
+          "share": 4
+        },
+        {
+          "class": "bicycle",
+          "share": 3
+        },
+        {
+          "class": "van",
+          "share": 6
+        }
+      ]
+    },
+    {
+      "id": "ce",
+      "drive": "right",
+      "climate": {
+        "cold": 0.7,
+        "sun": 0.25,
+        "rain": 0.35
+      },
+      "fleet": [
+        {
+          "class": "city_car",
+          "share": 24
+        },
+        {
+          "class": "hatchback",
+          "share": 22
+        },
+        {
+          "class": "sedan",
+          "share": 10
+        },
+        {
+          "class": "tram",
+          "share": 6
+        },
+        {
+          "class": "bus",
+          "share": 5
+        },
+        {
+          "class": "bicycle",
+          "share": 5
+        },
+        {
+          "class": "van",
+          "share": 7
+        }
+      ]
+    },
+    {
+      "id": "sa",
+      "drive": "left",
+      "climate": {
+        "cold": 0,
+        "sun": 0.85,
+        "rain": 0.5
+      },
+      "fleet": [
+        {
+          "class": "three_wheeler",
+          "share": 22
+        },
+        {
+          "class": "motorbike",
+          "share": 24
+        },
+        {
+          "class": "city_car",
+          "share": 14
+        },
+        {
+          "class": "minibus",
+          "share": 8
+        },
+        {
+          "class": "bus",
+          "share": 6
+        },
+        {
+          "class": "bicycle",
+          "share": 8
+        },
+        {
+          "class": "van",
+          "share": 6
+        }
+      ]
+    },
+    {
+      "id": "se",
+      "drive": "ask",
+      "climate": {
+        "cold": 0,
+        "sun": 0.85,
+        "rain": 0.6
+      },
+      "fleet": [
+        {
+          "class": "motorbike",
+          "share": 34
+        },
+        {
+          "class": "three_wheeler",
+          "share": 10
+        },
+        {
+          "class": "pickup",
+          "share": 8
+        },
+        {
+          "class": "minibus",
+          "share": 8
+        },
+        {
+          "class": "city_car",
+          "share": 12
+        },
+        {
+          "class": "bicycle",
+          "share": 4
+        },
+        {
+          "class": "bus",
+          "share": 4
+        }
+      ]
+    },
+    {
+      "id": "ea",
+      "drive": "ask",
+      "climate": {
+        "cold": 0.5,
+        "sun": 0.3,
+        "rain": 0.5
+      },
+      "fleet": [
+        {
+          "class": "kei_van",
+          "share": 12
+        },
+        {
+          "class": "city_car",
+          "share": 22
+        },
+        {
+          "class": "hatchback",
+          "share": 12
+        },
+        {
+          "class": "bicycle",
+          "share": 16
+        },
+        {
+          "class": "moped",
+          "share": 10
+        },
+        {
+          "class": "bus",
+          "share": 5
+        },
+        {
+          "class": "van",
+          "share": 6
+        }
+      ]
+    },
+    {
+      "id": "me",
+      "drive": "right",
+      "climate": {
+        "cold": 0.05,
+        "sun": 0.95,
+        "rain": 0.05
+      },
+      "fleet": [
+        {
+          "class": "sedan",
+          "share": 26
+        },
+        {
+          "class": "city_car",
+          "share": 14
+        },
+        {
+          "class": "pickup",
+          "share": 14
+        },
+        {
+          "class": "minibus",
+          "share": 12
+        },
+        {
+          "class": "bus",
+          "share": 6
+        },
+        {
+          "class": "suv",
+          "share": 8
+        },
+        {
+          "class": "van",
+          "share": 6
+        }
+      ]
+    },
+    {
+      "id": "sb",
+      "drive": "ask",
+      "climate": {
+        "cold": 0,
+        "sun": 0.75,
+        "rain": 0.45
+      },
+      "fleet": [
+        {
+          "class": "minibus",
+          "share": 24
+        },
+        {
+          "class": "motorbike",
+          "share": 20
+        },
+        {
+          "class": "pickup",
+          "share": 8
+        },
+        {
+          "class": "lorry",
+          "share": 6
+        },
+        {
+          "class": "three_wheeler",
+          "share": 8
+        },
+        {
+          "class": "bus",
+          "share": 5
+        },
+        {
+          "class": "city_car",
+          "share": 10
+        }
+      ]
+    },
+    {
+      "id": "la",
+      "drive": "right",
+      "climate": {
+        "cold": 0.15,
+        "sun": 0.6,
+        "rain": 0.4
+      },
+      "fleet": [
+        {
+          "class": "minibus",
+          "share": 12
+        },
+        {
+          "class": "city_car",
+          "share": 24
+        },
+        {
+          "class": "hatchback",
+          "share": 14
+        },
+        {
+          "class": "motorbike",
+          "share": 14
+        },
+        {
+          "class": "pickup",
+          "share": 8
+        },
+        {
+          "class": "bus",
+          "share": 8
+        },
+        {
+          "class": "bicycle",
+          "share": 4
+        }
+      ]
+    },
+    {
+      "id": "na",
+      "drive": "right",
+      "climate": {
+        "cold": 0.5,
+        "sun": 0.4,
+        "rain": 0.35
+      },
+      "fleet": [
+        {
+          "class": "pickup",
+          "share": 18
+        },
+        {
+          "class": "suv",
+          "share": 20
+        },
+        {
+          "class": "sedan",
+          "share": 20
+        },
+        {
+          "class": "van",
+          "share": 8
+        },
+        {
+          "class": "bus",
+          "share": 3
+        },
+        {
+          "class": "bicycle",
+          "share": 4
+        },
+        {
+          "class": "city_car",
+          "share": 6
+        }
+      ]
+    }
+  ]
+}

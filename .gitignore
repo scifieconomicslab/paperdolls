@@ -1,0 +1,25 @@
+# Dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+
+# Per-world output (created by pipeline runs)
+worlds/*/map-data/verify/
+worlds/*/visual*/
+worlds/*/snapshots/
+cache/
+*.log
+.DS_Store
+
+# NetLogo is vendored locally, never committed (GPL-2.0, large)
+tools/NetLogo/
+tools/agents/parity/results/
+!tools/agents/parity/results/README.md

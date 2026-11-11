@@ -1,0 +1,114 @@
+{
+  "note": "Paper dolls: one neutral paper tone, no skin tones, no identity encoding. Mix weights and outfit flags are proposals.",
+  "rules": {
+    "tone": "one neutral paper tone for head and limbs",
+    "identity": "never encoded; garment is the only personal colour",
+    "animation": "no walk cycle; movement is positional translation",
+    "network": "pavement",
+    "decorative": "yes, unless the model tracks the person"
+  },
+  "outfit_flags": [
+    "coat",
+    "scarf",
+    "umbrella",
+    "hat",
+    "bag"
+  ],
+  "kinds": [
+    {
+      "id": "man",
+      "label": "Man",
+      "network": "pavement",
+      "members": [
+        "man"
+      ],
+      "mix": 22,
+      "ride_only": false
+    },
+    {
+      "id": "woman",
+      "label": "Woman",
+      "network": "pavement",
+      "members": [
+        "woman"
+      ],
+      "mix": 22,
+      "ride_only": false
+    },
+    {
+      "id": "boy",
+      "label": "Boy",
+      "network": "pavement",
+      "members": [
+        "boy"
+      ],
+      "mix": 5,
+      "ride_only": false
+    },
+    {
+      "id": "girl",
+      "label": "Girl",
+      "network": "pavement",
+      "members": [
+        "girl"
+      ],
+      "mix": 5,
+      "ride_only": false
+    },
+    {
+      "id": "couple",
+      "label": "Couple",
+      "network": "pavement",
+      "members": [
+        "man",
+        "woman"
+      ],
+      "mix": 10,
+      "ride_only": false
+    },
+    {
+      "id": "parent_child",
+      "label": "Parent and child",
+      "network": "pavement",
+      "members": [
+        "girl",
+        "woman"
+      ],
+      "mix": 8,
+      "ride_only": false
+    },
+    {
+      "id": "family",
+      "label": "Family of four",
+      "network": "pavement",
+      "members": [
+        "girl",
+        "man",
+        "woman",
+        "boy"
+      ],
+      "mix": 3,
+      "ride_only": false
+    },
+    {
+      "id": "wheelchair",
+      "label": "Wheelchair user",
+      "network": "pavement",
+      "members": [
+        "man"
+      ],
+      "mix": 2,
+      "ride_only": false
+    },
+    {
+      "id": "cyclist",
+      "label": "Rider",
+      "network": "cycle",
+      "members": [
+        "man"
+      ],
+      "mix": null,
+      "ride_only": true
+    }
+  ]
+}

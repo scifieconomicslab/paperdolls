@@ -1,0 +1,25 @@
+{
+  "name": "@paperdolls/conformance-page",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "vite build", "typecheck": "tsc -p ." },
+  "dependencies": {
+    "@mantine/core": "9.7.3",
+    "@mantine/hooks": "9.7.3",
+    "@tabler/icons-react": "3.34.1",
+    "react": "19.2.9",
+    "react-dom": "19.2.9",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "@types/three": "0.180.0",
+    "esbuild": "0.27.0",
+    "typescript": "6.0.3",
+    "vite": "8.3.4",
+    "vite-plugin-singlefile": "2.3.4"
+  }
+}

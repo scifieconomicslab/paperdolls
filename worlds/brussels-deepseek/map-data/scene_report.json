@@ -1,0 +1,982 @@
+{
+ "input": {
+  "file": "../worlds/brussels-deepseek/map-data/extract.json",
+  "format": "overpass-json",
+  "features": {
+   "line": 4399,
+   "polygon": 11351,
+   "point": 4521
+  }
+ },
+ "clip": {
+  "boundary_relation": 58258,
+  "boundary_name": "Jette",
+  "bbox": null
+ },
+ "frame": {
+  "origin": {
+   "lat": 50.879332,
+   "lon": 4.317142
+  },
+  "rotation_deg": 0.0,
+  "how": "chosen from none (highest estimated asset share)",
+  "candidates": [
+   {
+    "source": "none",
+    "rotation_deg": 0.0,
+    "strength": 0.0,
+    "asset_share": 0.264
+   },
+   {
+    "source": "building edges",
+    "rotation_deg": -6.59,
+    "strength": 0.165,
+    "asset_share": 0.236
+   },
+   {
+    "source": "road segments",
+    "rotation_deg": -5.19,
+    "strength": 0.22,
+    "asset_share": 0.241
+   },
+   {
+    "source": "buildings and roads",
+    "rotation_deg": -6.02,
+    "strength": 0.183,
+    "asset_share": 0.236
+   }
+  ],
+  "north_on_screen_deg": 60.0
+ },
+ "counts": {
+  "buildings": 9216,
+  "structures": 9216,
+  "roads": 1320,
+  "landuse": 1091,
+  "trees": 8705,
+  "trees_mapped": 4521,
+  "trees_in_rows": 87,
+  "trees_scattered": 4097,
+  "tram_roads": 117,
+  "tram_tracks": 21
+ },
+ "estimated_asset_share": {
+  "rotated": 0.288,
+  "unrotated": 0.264
+ },
+ "extent_m": [
+  3257,
+  3445
+ ],
+ "skipped": {
+  "building=roof": 37,
+  "buildings outside the clip": 38,
+  "service road: driveway, parking aisle or private": 324,
+  "highway=footway (not drivable)": 2202,
+  "highway=path (not drivable)": 158,
+  "highway=track (not drivable)": 20,
+  "highway=steps (not drivable)": 107,
+  "road in a tunnel or below ground": 85,
+  "highway=traffic_island (unknown)": 2,
+  "highway=platform (not drivable)": 30,
+  "highway=busway (unknown)": 2,
+  "road shorter than 1 m": 1,
+  "highway=no (unknown)": 3,
+  "highway=construction (not drivable)": 2,
+  "building smaller than 8 m2": 841,
+  "landuse smaller than 20 m2": 89
+ },
+ "assumptions": [
+  [
+   "road width",
+   "lanes tag at 3.1 m per lane: avenue width set from the tag instead of the class default",
+   92
+  ],
+  [
+   "road width",
+   "lanes tag at 3.1 m per lane: local width set from the tag instead of the class default",
+   41
+  ],
+  [
+   "road width",
+   "width tag: local width set from the tag instead of the class default",
+   18
+  ],
+  [
+   "road class",
+   "highway=residential -> local",
+   470
+  ],
+  [
+   "road class",
+   "highway=service -> local",
+   237
+  ],
+  [
+   "road class",
+   "highway=tertiary -> avenue",
+   218
+  ],
+  [
+   "road class",
+   "highway=cycleway -> cycle",
+   130
+  ],
+  [
+   "road class",
+   "highway=living_street -> local",
+   100
+  ],
+  [
+   "road class",
+   "highway=primary -> avenue",
+   50
+  ],
+  [
+   "road class",
+   "highway=pedestrian -> pedestrian",
+   40
+  ],
+  [
+   "road class",
+   "highway=secondary -> avenue",
+   37
+  ],
+  [
+   "road class",
+   "highway=unclassified -> local",
+   17
+  ],
+  [
+   "road class",
+   "highway=primary_link -> local",
+   1
+  ],
+  [
+   "tram",
+   "117 road(s) run along a tram line: street-running tram flagged",
+   117
+  ],
+  [
+   "tram",
+   "21 tram line(s) with no road alongside: drawn as their own track",
+   21
+  ],
+  [
+   "storeys",
+   "building=yes with no levels or height: assumed 2",
+   8545
+  ],
+  [
+   "storeys",
+   "building=apartments with no levels or height: assumed 4",
+   173
+  ],
+  [
+   "storeys",
+   "building=house with no levels or height: assumed 2",
+   157
+  ],
+  [
+   "storeys",
+   "building=garages with no levels or height: assumed 1",
+   82
+  ],
+  [
+   "storeys",
+   "building=garage with no levels or height: assumed 1",
+   27
+  ],
+  [
+   "storeys",
+   "building=hospital with no levels or height: assumed 4",
+   18
+  ],
+  [
+   "storeys",
+   "building=school with no levels or height: assumed 3",
+   15
+  ],
+  [
+   "storeys",
+   "building=shed with no levels or height: assumed 1",
+   12
+  ],
+  [
+   "storeys",
+   "building=university with no levels or height: assumed 4",
+   11
+  ],
+  [
+   "storeys",
+   "building=residential with no levels or height: assumed 3",
+   10
+  ],
+  [
+   "storeys",
+   "building=retail with no levels or height: assumed 2",
+   8
+  ],
+  [
+   "storeys",
+   "building=greenhouse with no levels or height: assumed 1",
+   6
+  ],
+  [
+   "storeys",
+   "building=service with no levels or height: assumed 1",
+   5
+  ],
+  [
+   "storeys",
+   "building=church with no levels or height: assumed 1",
+   4
+  ],
+  [
+   "storeys",
+   "building=detached with no levels or height: assumed 2",
+   4
+  ],
+  [
+   "storeys",
+   "building=commercial with no levels or height: assumed 3",
+   2
+  ],
+  [
+   "storeys",
+   "building=warehouse with no levels or height: assumed 1",
+   2
+  ],
+  [
+   "storeys",
+   "building=industrial with no levels or height: assumed 1",
+   2
+  ],
+  [
+   "storeys",
+   "building=terrace with no levels or height: assumed 3",
+   2
+  ],
+  [
+   "storeys",
+   "building=bridge with no levels or height: assumed 2",
+   2
+  ],
+  [
+   "storeys",
+   "building=college with no levels or height: assumed 2",
+   2
+  ],
+  [
+   "storeys",
+   "building=construction with no levels or height: assumed 2",
+   2
+  ],
+  [
+   "storeys",
+   "building=parking with no levels or height: assumed 3",
+   2
+  ],
+  [
+   "storeys",
+   "building=civic with no levels or height: assumed 3",
+   1
+  ],
+  [
+   "storeys",
+   "building=train_station with no levels or height: assumed 1",
+   1
+  ],
+  [
+   "storeys",
+   "building=chapel with no levels or height: assumed 1",
+   1
+  ],
+  [
+   "storeys",
+   "building=office with no levels or height: assumed 4",
+   1
+  ],
+  [
+   "storeys",
+   "building=clubhouse with no levels or height: assumed 2",
+   1
+  ],
+  [
+   "storeys",
+   "building=brewery with no levels or height: assumed 2",
+   1
+  ],
+  [
+   "storeys",
+   "building=museum with no levels or height: assumed 2",
+   1
+  ],
+  [
+   "storeys",
+   "building=dormitory with no levels or height: assumed 4",
+   1
+  ],
+  [
+   "storeys",
+   "building=farm_auxiliary with no levels or height: assumed 1",
+   1
+  ],
+  [
+   "storeys",
+   "building=sports_centre with no levels or height: assumed 2",
+   1
+  ],
+  [
+   "archetype",
+   "building=yes -> auto (the region decides)",
+   8561
+  ],
+  [
+   "archetype",
+   "building=apartments -> block",
+   241
+  ],
+  [
+   "archetype",
+   "building=house -> villa",
+   170
+  ],
+  [
+   "archetype",
+   "building=garages -> shed",
+   82
+  ],
+  [
+   "archetype",
+   "building=garage -> shed",
+   27
+  ],
+  [
+   "archetype",
+   "building=hospital -> auto (the region decides)",
+   18
+  ],
+  [
+   "archetype",
+   "building=school -> auto (the region decides)",
+   17
+  ],
+  [
+   "archetype",
+   "building=shed -> shed",
+   12
+  ],
+  [
+   "archetype",
+   "building=university -> auto (the region decides)",
+   11
+  ],
+  [
+   "archetype",
+   "building=residential -> auto (the region decides)",
+   10
+  ],
+  [
+   "archetype",
+   "building=retail -> shophouse",
+   9
+  ],
+  [
+   "archetype",
+   "building=greenhouse -> shed",
+   6
+  ],
+  [
+   "archetype",
+   "building=detached -> villa",
+   6
+  ],
+  [
+   "archetype",
+   "building=service -> shed",
+   5
+  ],
+  [
+   "archetype",
+   "building=yes -> shophouse",
+   4
+  ],
+  [
+   "archetype",
+   "building=church -> auto (the region decides)",
+   4
+  ],
+  [
+   "archetype",
+   "building=office -> block",
+   3
+  ],
+  [
+   "archetype",
+   "building=warehouse -> shed",
+   2
+  ],
+  [
+   "archetype",
+   "building=industrial -> shed",
+   2
+  ],
+  [
+   "archetype",
+   "building=terrace -> terrace",
+   2
+  ],
+  [
+   "archetype",
+   "building=bridge -> auto (the region decides)",
+   2
+  ],
+  [
+   "archetype",
+   "building=college -> auto (the region decides)",
+   2
+  ],
+  [
+   "archetype",
+   "building=construction -> auto (the region decides)",
+   2
+  ],
+  [
+   "archetype",
+   "building=parking -> auto (the region decides)",
+   2
+  ],
+  [
+   "archetype",
+   "building=apartments with 11 storeys -> tower",
+   1
+  ],
+  [
+   "archetype",
+   "building=apartments with 12 storeys -> tower",
+   1
+  ],
+  [
+   "archetype",
+   "building=apartments with 13 storeys -> tower",
+   1
+  ],
+  [
+   "archetype",
+   "building=civic -> auto (the region decides)",
+   1
+  ],
+  [
+   "archetype",
+   "building=train_station -> auto (the region decides)",
+   1
+  ],
+  [
+   "archetype",
+   "building=commercial -> shophouse",
+   1
+  ],
+  [
+   "archetype",
+   "building=public -> auto (the region decides)",
+   1
+  ],
+  [
+   "archetype",
+   "building=chapel -> auto (the region decides)",
+   1
+  ],
+  [
+   "archetype",
+   "building=clubhouse -> auto (the region decides)",
+   1
+  ],
+  [
+   "archetype",
+   "building=brewery -> auto (the region decides)",
+   1
+  ],
+  [
+   "archetype",
+   "building=museum -> auto (the region decides)",
+   1
+  ],
+  [
+   "archetype",
+   "building=dormitory -> block",
+   1
+  ],
+  [
+   "archetype",
+   "building=commercial -> auto (the region decides)",
+   1
+  ],
+  [
+   "archetype",
+   "building=transportation -> auto (the region decides)",
+   1
+  ],
+  [
+   "archetype",
+   "building=farm_auxiliary -> shed",
+   1
+  ],
+  [
+   "archetype",
+   "building=sports_centre -> auto (the region decides)",
+   1
+  ],
+  [
+   "economic class",
+   "fallback: no use tag or specific type; assigned from the local mix of tagged buildings",
+   8545
+  ],
+  [
+   "residential",
+   "probable: building=yes with no use tag, 30 m2 or more: probably a dwelling (a guess)",
+   7672
+  ],
+  [
+   "residential",
+   "other: building=yes under 30 m2 and no use tag: an outbuilding",
+   867
+  ],
+  [
+   "residential",
+   "residential: building=apartments: a dwelling type",
+   244
+  ],
+  [
+   "residential",
+   "residential: building=house: a dwelling type",
+   170
+  ],
+  [
+   "residential",
+   "other: building=garages: not a dwelling type",
+   82
+  ],
+  [
+   "residential",
+   "other: building=garage: not a dwelling type",
+   27
+  ],
+  [
+   "residential",
+   "other: building=yes with a use tag (amenity=*)",
+   20
+  ],
+  [
+   "residential",
+   "other: building=hospital: not a dwelling type",
+   18
+  ],
+  [
+   "residential",
+   "other: building=school: not a dwelling type",
+   17
+  ],
+  [
+   "residential",
+   "other: building=shed: not a dwelling type",
+   12
+  ],
+  [
+   "residential",
+   "other: building=university: not a dwelling type",
+   11
+  ],
+  [
+   "residential",
+   "residential: building=residential: a dwelling type",
+   10
+  ],
+  [
+   "residential",
+   "other: building=retail: not a dwelling type",
+   9
+  ],
+  [
+   "residential",
+   "other: building=greenhouse: not a dwelling type",
+   6
+  ],
+  [
+   "residential",
+   "residential: building=detached: a dwelling type",
+   6
+  ],
+  [
+   "residential",
+   "other: building=service: not a dwelling type",
+   5
+  ],
+  [
+   "residential",
+   "other: building=yes with a use tag (shop=*)",
+   4
+  ],
+  [
+   "residential",
+   "other: building=church: not a dwelling type",
+   4
+  ],
+  [
+   "residential",
+   "other: building=office: not a dwelling type",
+   3
+  ],
+  [
+   "residential",
+   "other: building=commercial: not a dwelling type",
+   2
+  ],
+  [
+   "residential",
+   "other: building=warehouse: not a dwelling type",
+   2
+  ],
+  [
+   "residential",
+   "other: building=industrial: not a dwelling type",
+   2
+  ],
+  [
+   "residential",
+   "residential: building=terrace: a dwelling type",
+   2
+  ],
+  [
+   "residential",
+   "other: building=bridge: not a dwelling type",
+   2
+  ],
+  [
+   "residential",
+   "other: building=college: not a dwelling type",
+   2
+  ],
+  [
+   "residential",
+   "other: building=construction: a named type that is not a dwelling",
+   2
+  ],
+  [
+   "residential",
+   "other: building=parking: not a dwelling type",
+   2
+  ],
+  [
+   "residential",
+   "other: building=civic: not a dwelling type",
+   1
+  ],
+  [
+   "residential",
+   "other: building=train_station: not a dwelling type",
+   1
+  ],
+  [
+   "residential",
+   "other: building=yes with a use tag (leisure=*)",
+   1
+  ],
+  [
+   "residential",
+   "other: building=public: not a dwelling type",
+   1
+  ],
+  [
+   "residential",
+   "other: building=yes with a use tag (craft=*)",
+   1
+  ],
+  [
+   "residential",
+   "other: building=chapel: not a dwelling type",
+   1
+  ],
+  [
+   "residential",
+   "other: building=clubhouse: a named type that is not a dwelling",
+   1
+  ],
+  [
+   "residential",
+   "other: building=brewery: a named type that is not a dwelling",
+   1
+  ],
+  [
+   "residential",
+   "other: building=museum: a named type that is not a dwelling",
+   1
+  ],
+  [
+   "residential",
+   "residential: building=dormitory: a dwelling type",
+   1
+  ],
+  [
+   "residential",
+   "other: building=transportation: not a dwelling type",
+   1
+  ],
+  [
+   "residential",
+   "other: building=farm_auxiliary: not a dwelling type",
+   1
+  ],
+  [
+   "residential",
+   "other: building=sports_centre with a use tag (leisure=*)",
+   1
+  ],
+  [
+   "courtyards",
+   "buildings with inner rings (courtyards): drawn as solid footprints",
+   27
+  ],
+  [
+   "courtyards",
+   "landuse polygons with inner rings: holes ignored",
+   7
+  ],
+  [
+   "neighbours",
+   "buildings within 1 m of each other (edge to edge) are neighbours: 8481 buildings have at least one",
+   8481
+  ],
+  [
+   "landuse",
+   "garden from leisure=garden",
+   523
+  ],
+  [
+   "landuse",
+   "park from landuse=grass",
+   353
+  ],
+  [
+   "landuse",
+   "park from leisure=pitch",
+   42
+  ],
+  [
+   "landuse",
+   "park from landuse=village_green",
+   29
+  ],
+  [
+   "landuse",
+   "park from leisure=playground",
+   23
+  ],
+  [
+   "landuse",
+   "park from leisure=park",
+   19
+  ],
+  [
+   "landuse",
+   "water from natural=water",
+   15
+  ],
+  [
+   "landuse",
+   "garden from landuse=allotments",
+   14
+  ],
+  [
+   "landuse",
+   "park from landuse=forest",
+   12
+  ],
+  [
+   "landuse",
+   "park from natural=wood",
+   9
+  ],
+  [
+   "landuse",
+   "park from leisure=dog_park",
+   8
+  ],
+  [
+   "landuse",
+   "square from ",
+   7
+  ],
+  [
+   "landuse",
+   "park from natural=scrub",
+   7
+  ],
+  [
+   "landuse",
+   "park from landuse=flowerbed",
+   7
+  ],
+  [
+   "landuse",
+   "square from place=square",
+   5
+  ],
+  [
+   "landuse",
+   "park from landuse=orchard",
+   4
+  ],
+  [
+   "landuse",
+   "park from landuse=meadow",
+   3
+  ],
+  [
+   "landuse",
+   "park from natural=grassland",
+   2
+  ],
+  [
+   "landuse",
+   "park from landuse=shrubs, natural=scrub",
+   2
+  ],
+  [
+   "landuse",
+   "park from landuse=cemetery",
+   1
+  ],
+  [
+   "landuse",
+   "park from landuse=forest, natural=wood",
+   1
+  ],
+  [
+   "landuse",
+   "water from leisure=fishing, natural=water",
+   1
+  ],
+  [
+   "landuse",
+   "park from natural=wetland",
+   1
+  ],
+  [
+   "landuse",
+   "park from landuse=grass, natural=grassland",
+   1
+  ],
+  [
+   "landuse",
+   "park from landuse=railway, natural=grassland",
+   1
+  ],
+  [
+   "landuse",
+   "square from natural=sand",
+   1
+  ],
+  [
+   "tree kind",
+   "no species: the region's species mix decides",
+   3910
+  ],
+  [
+   "tree kind",
+   "plane from species or leaf type",
+   274
+  ],
+  [
+   "tree kind",
+   "oak from species or leaf type",
+   263
+  ],
+  [
+   "tree kind",
+   "conifer from species or leaf type",
+   55
+  ],
+  [
+   "tree kind",
+   "blossom from species or leaf type",
+   29
+  ],
+  [
+   "tree kind",
+   "columnar from species or leaf type",
+   2
+  ],
+  [
+   "tree rows",
+   "natural=tree_row with no spacing tag: a tree every 9 m",
+   12
+  ],
+  [
+   "scatter",
+   "trees scattered into parks and woods (one per 70 to 400 m2 by type, at most 300 per area, 4000 in all): 4097 trees",
+   4097
+  ],
+  [
+   "scatter",
+   "park or wood already has mapped trees: nothing scattered",
+   21
+  ]
+ ],
+ "warnings": [
+  "93% of buildings have no resolvable use tag or specific type; their economic class is a seeded guess from the local mix of tagged buildings. Confirm the 'economic class' assumptions in the report before binding a model to it."
+ ],
+ "levels_sources": {
+  "global-default": 8555,
+  "tag": 113,
+  "type-default": 548
+ },
+ "levels_assumed": 9103,
+ "residential": {
+  "probable": 7672,
+  "other": 1111,
+  "residential": 433
+ },
+ "economic_classes": {
+  "civic": 117,
+  "school": 242,
+  "kindergarten": 24,
+  "apartments": 3334,
+  "house": 2380,
+  "university": 176,
+  "outbuilding": 1284,
+  "retail": 120,
+  "other": 194,
+  "residential": 152,
+  "fire_station": 14,
+  "garage": 402,
+  "greenhouse": 69,
+  "hospital": 228,
+  "supermarket": 70,
+  "industrial": 31,
+  "detached": 76,
+  "government": 14,
+  "farm_auxiliary": 14,
+  "construction": 23,
+  "service": 117,
+  "warehouse": 29,
+  "office": 41,
+  "manufacture": 20,
+  "terrace": 28,
+  "hut": 17
+ },
+ "economic_class_sources": {
+  "fallback": 8545,
+  "use-tag": 27,
+  "tag": 644
+ },
+ "economic_class_fallback_share": 0.927,
+ "landuse_enrichment": null,
+ "elevation": null,
+ "neighbours": {
+  "threshold_m": 1.0,
+  "buildings_with_neighbours": 8481,
+  "links": 9209,
+  "max_per_building": 12
+ }
+}

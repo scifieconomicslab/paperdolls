@@ -1,0 +1,144 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "model-binding.json",
+  "title": "paperdolls model-binding.json",
+  "description": "The Gate 5 binding: look, palette, dashboard outputs, agent-to-structure bindings, world-as-dashboard treatments, the confirmed causal graph and the scenario list. Vocabulary is open where the model may need new readings.",
+  "type": "object",
+  "required": ["family", "region", "look", "bindings", "dashboard"],
+  "additionalProperties": true,
+  "properties": {
+    "family": { "type": "string", "description": "world family id; open. Suggested: real, historical, fantasy, scifi" },
+    "region": { "type": "string", "description": "palette family / genre id; open" },
+    "look": {
+      "type": "string",
+      "enum": ["house", "colorfigures", "formal", "voxel"],
+      "description": "the rendering look. All rendering is three.js. `house` is the scene-craft house style directed by the world's art bible; the other three are legacy."
+    },
+    "palette_variant": {
+      "type": "string",
+      "description": "for the voxel look: warm or formal."
+    },
+    "model_licence": { "type": "string" },
+    "dashboard": {
+      "type": "object",
+      "required": ["outputs"],
+      "additionalProperties": true,
+      "properties": {
+        "outputs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "names of declared outputs to show at the bottom of the page"
+        }
+      }
+    },
+    "bindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["entity"],
+        "additionalProperties": true,
+        "properties": {
+          "entity": { "type": "string", "description": "the anchored entity kind from the model" },
+          "layer": { "type": "string", "description": "the scene layer it binds to; open" },
+          "match": { "type": "object", "description": "how entities bind to scene features" },
+          "top_color": {
+            "type": "object",
+            "required": ["field"],
+            "additionalProperties": true,
+            "properties": {
+              "field": { "type": "string", "description": "the declared field driving the structure-top colour" },
+              "domain": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "default": [0, 100] },
+              "reverse": { "type": "boolean", "default": false },
+              "ramp": {
+                "type": "object",
+                "description": "the named OKLCH ramp from the art bible (palette-method §3). Red↔green ramps are banned (G3).",
+                "required": ["name", "stops"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "kind": { "type": "string", "enum": ["sequential", "diverging", "categorical"] },
+                  "stops": { "type": "array", "minItems": 2, "items": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "[L, C, h]" } },
+                  "midpoint": { "type": "number" }
+                }
+              },
+              "label": { "type": "string" },
+              "unit": { "type": "string" }
+            }
+          },
+          "wall_color": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "field": { "type": "string" },
+              "scale": { "type": "object" },
+              "label": { "type": "string" },
+              "unit": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "architecture": {
+      "type": "array",
+      "description": "the world as dashboard: declared fields drawn in the world's fabric. Each entry is one reading: field, treatment, optional preset, scale, label.",
+      "items": {
+        "type": "object",
+        "required": ["entity", "field", "treatment", "label"],
+        "additionalProperties": true,
+        "properties": {
+          "entity": { "type": "string" },
+          "field": { "type": "string", "description": "a declared field of the model — never an invented one" },
+          "treatment": {
+            "type": "string",
+            "description": "open. Generic: mark, overlay, replacement, growth, state, extent. Presets: band, scaffold, wrap, panels, flag, tint, outline, halo, segments."
+          },
+          "preset": { "type": "string", "description": "the family's resolved visual for a generic treatment" },
+          "scale": { "type": "object", "description": "categorical, sequential or threshold — the same scale machinery as the tops" },
+          "colour": { "type": "string" },
+          "label": { "type": "string", "description": "the legend label; names the reading, not the treatment" }
+        }
+      }
+    },
+    "causal_graph": {
+      "type": "object",
+      "description": "the user-confirmed causal graph. If absent or unconfirmed, the page omits the impact view.",
+      "required": ["confirmed", "nodes", "edges"],
+      "additionalProperties": true,
+      "properties": {
+        "confirmed": { "type": "boolean" },
+        "source": { "type": "string" },
+        "nodes": { "type": "array", "items": { "type": "string" } },
+        "edges": {
+          "type": "array",
+          "items": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 2 }
+        },
+        "note": { "type": "string" }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "interventions"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "interventions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name"],
+              "additionalProperties": true,
+              "properties": {
+                "name": { "type": "string" },
+                "t": { "type": "number" },
+                "args": { "type": "object" },
+                "value": { "type": ["string", "number", "boolean"] }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

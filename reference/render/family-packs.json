@@ -1,0 +1,85 @@
+{
+  "note": "World-family packs. The real family is authored. The roman, high-pastoral and cyberpunk genres carry authored palette proposals; every other genre is a menu entry with no palette yet. Fleet and tree tables are proposals; an empty fleet means no vehicles until the family is authored.",
+  "real": {
+    "status": "authored",
+    "palette_families": ["nw", "uk", "ws", "md", "ce", "sa", "se", "ea", "me", "sb", "la", "na"],
+    "structure_kinds": ["building", "wall", "ruin", "habitat", "infrastructure", "other"],
+    "building_archetypes": ["terrace", "shophouse", "block", "villa", "tower", "shed"],
+    "fleet_regions": ["nw", "uk", "ws", "md", "ce", "sa", "se", "ea", "me", "sb", "la", "na"],
+    "people_mix": "catalogue",
+    "tree_regions": ["nw", "uk", "ws", "md", "ce", "sa", "se", "ea", "me", "sb", "la", "na"],
+    "treatments": ["band", "scaffold", "wrap", "panels", "flag", "tint", "outline", "overlay", "segments"]
+  },
+  "historical": {
+    "defaults": {
+      "status": "not-authored",
+      "palette": null,
+      "structure_kinds": ["building", "wall", "ruin"],
+      "fleet": [],
+      "fleet_status": "not authored",
+      "people_mix": "catalogue",
+      "tree_mix": null,
+      "treatments": ["mark", "overlay", "replacement", "growth", "state", "extent"]
+    },
+    "genres": {
+      "roman": {
+        "status": "authored palette proposal",
+        "palette": "roman",
+        "structure_kinds": ["building", "wall", "ruin", "infrastructure"],
+        "fleet": [],
+        "fleet_status": "not authored; the catalogue has no cart or litter class yet",
+        "people_mix": "catalogue",
+        "tree_mix": "md",
+        "treatments": ["mark", "overlay", "replacement", "growth", "state", "extent"]
+      }
+    }
+  },
+  "fantasy": {
+    "defaults": {
+      "status": "not-authored",
+      "palette": null,
+      "structure_kinds": ["building", "wall", "ruin", "habitat"],
+      "fleet": [],
+      "fleet_status": "not authored",
+      "people_mix": "catalogue",
+      "tree_mix": null,
+      "treatments": ["mark", "overlay", "replacement", "growth", "state", "extent"]
+    },
+    "genres": {
+      "high-pastoral": {
+        "status": "authored palette proposal",
+        "palette": "high-pastoral",
+        "structure_kinds": ["building", "wall", "ruin", "habitat"],
+        "fleet": [],
+        "fleet_status": "not authored; the catalogue has no cart or horse class yet",
+        "people_mix": "catalogue",
+        "tree_mix": "nw",
+        "treatments": ["mark", "overlay", "replacement", "growth", "state", "extent"]
+      }
+    }
+  },
+  "scifi": {
+    "defaults": {
+      "status": "not-authored",
+      "palette": null,
+      "structure_kinds": ["building", "habitat", "infrastructure"],
+      "fleet": [],
+      "fleet_status": "not authored",
+      "people_mix": "catalogue",
+      "tree_mix": null,
+      "treatments": ["mark", "overlay", "replacement", "growth", "state", "extent"]
+    },
+    "genres": {
+      "cyberpunk": {
+        "status": "authored palette proposal",
+        "palette": "cyberpunk",
+        "structure_kinds": ["building", "habitat", "infrastructure"],
+        "fleet": [],
+        "fleet_status": "not authored; the catalogue has no hover car or drone class yet",
+        "people_mix": "catalogue",
+        "tree_mix": "nw",
+        "treatments": ["mark", "overlay", "replacement", "growth", "state", "extent"]
+      }
+    }
+  }
+}

@@ -1,0 +1,1 @@
+{ "extends": "../../../tools/agents/tsconfig.json", "include": ["model.ts", "parity/**/*.ts"], "compilerOptions": { "rootDir": "../../..", "typeRoots": ["../../../tools/agents/node_modules/@types"] } }

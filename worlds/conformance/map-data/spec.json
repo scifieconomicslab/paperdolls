@@ -1,0 +1,16 @@
+{
+  "name": "Ashford (constructed)",
+  "extent_m": [
+    640,
+    480
+  ],
+  "seed": 42,
+  "street_pitch_m": 44,
+  "avenue_every": 4,
+  "park_blocks": 2,
+  "pond": true,
+  "square": true,
+  "family": "real",
+  "palette": "nw",
+  "structures": []
+}

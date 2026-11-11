@@ -1,0 +1,42 @@
+{
+  "family": "real",
+  "region": "nw",
+  "look": "house",
+  "palette_look": "brick",
+  "model_licence": "CC BY 4.0, conformance fixture (Sci-Fi Economics Lab)",
+  "dashboard": { "outputs": ["mean depth", "approved share"] },
+  "bindings": [
+    {
+      "entity": "structures",
+      "layer": "buildings",
+      "match": {},
+      "top_color": {
+        "field": "depth",
+        "domain": [0, 1],
+        "reverse": false,
+        "label": "Retrofit depth",
+        "unit": "share"
+      }
+    }
+  ],
+  "architecture": [
+    {
+      "entity": "structures",
+      "field": "approved",
+      "treatment": "mark",
+      "preset": "flag",
+      "scale": { "type": "categorical", "palette": { "true": "#6f96c8" } },
+      "label": "Approved — queued"
+    }
+  ],
+  "causal_graph": {
+    "confirmed": true,
+    "source": "llm-proposed + user-confirmed",
+    "nodes": ["subsidy", "depth", "approved_share"],
+    "edges": [["subsidy", "depth"], ["depth", "approved_share"]]
+  },
+  "scenarios": [
+    { "id": "baseline", "label": "Baseline", "interventions": [] },
+    { "id": "subsidy", "label": "Subsidy", "interventions": [{ "name": "grant-round", "args": { "boost": 0.2 } }] }
+  ]
+}
